@@ -6,7 +6,7 @@ macOS 菜单栏代理客户端（mihomo / Clash Meta）。
 
 ## 下载
 
-最新版：**[BashX v0.1.39](https://github.com/linux503/BashX/releases/download/v0.1.39/BashX-0.1.39.dmg)**
+最新版：**[BashX v0.1.42](https://github.com/linux503/BashX/releases/download/v0.1.42/BashX-0.1.42.dmg)**
 
 所有版本：[Releases](https://github.com/linux503/BashX/releases)
 
@@ -25,7 +25,8 @@ macOS 菜单栏代理客户端（mihomo / Clash Meta）。
 2. 开启系统代理或 TUN 模式
 3. 配置目录：`~/Library/Application Support/BashX/`
 
-## v0.1.39 更新
+## v0.1.42 更新
 
-- 订阅拉取加速：首包即返回，直连/代理竞速，缩短超时
-- 面板顶部上下行速率改为 K/M 自适应显示（不再长期卡在 0.0 M/s）
+- Telegram 专用策略组 `TELEGRAM`：按 api.telegram.org 测速，避免 AUTO 乱跳节点导致发消息转圈
+- 智能规则 v13：TG 域名 / DC 网段 / 进程 / GEOIP·GEOSITE 统一走 TELEGRAM
+- 进程匹配 `strict`，连接 keep-alive 更积极
