@@ -6,7 +6,7 @@ macOS 菜单栏代理客户端（mihomo / Clash Meta）。
 
 ## 下载
 
-最新版：**[BashX v0.1.32](https://github.com/linux503/BashX/releases/download/v0.1.32/BashX-0.1.32.dmg)**
+最新版：**[BashX v0.1.39](https://github.com/linux503/BashX/releases/download/v0.1.39/BashX-0.1.39.dmg)**
 
 所有版本：[Releases](https://github.com/linux503/BashX/releases)
 
@@ -17,10 +17,15 @@ macOS 菜单栏代理客户端（mihomo / Clash Meta）。
 
 ## 要求
 
-- macOS 14+
+- macOS 13+ (Ventura)
 
 ## 使用
 
 1. 菜单栏打开面板 → 添加订阅 → 更新 → 测速
 2. 开启系统代理或 TUN 模式
 3. 配置目录：`~/Library/Application Support/BashX/`
+
+## v0.1.39 更新
+
+- 订阅拉取加速：首包即返回，直连/代理竞速，缩短超时
+- 面板顶部上下行速率改为 K/M 自适应显示（不再长期卡在 0.0 M/s）
