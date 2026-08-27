@@ -28,8 +28,8 @@ targets:
         PRODUCT_NAME: BashXTunHelper
         SKIP_INSTALL: true
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
-        MARKETING_VERSION: "0.1.55"
-        CURRENT_PROJECT_VERSION: "55"
+        MARKETING_VERSION: "0.1.56"
+        CURRENT_PROJECT_VERSION: "56"
         MACOSX_DEPLOYMENT_TARGET: "13.0"
         ENABLE_HARDENED_RUNTIME: true
         ARCHS: "$(ARCHS_STANDARD)"
@@ -64,8 +64,8 @@ targets:
         GENERATE_INFOPLIST_FILE: false
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         PRODUCT_NAME: BashX
-        MARKETING_VERSION: "0.1.55"
-        CURRENT_PROJECT_VERSION: "55"
+        MARKETING_VERSION: "0.1.56"
+        CURRENT_PROJECT_VERSION: "56"
         ENABLE_HARDENED_RUNTIME: true
         ARCHS: "$(ARCHS_STANDARD)"
         ONLY_ACTIVE_ARCH: NO
@@ -80,8 +80,8 @@ targets:
       properties:
         CFBundleName: BashX
         CFBundleDisplayName: BashX
-        CFBundleShortVersionString: "0.1.55"
-        CFBundleVersion: "55"
+        CFBundleShortVersionString: "0.1.56"
+        CFBundleVersion: "56"
         LSMinimumSystemVersion: "13.0"
         LSUIElement: true
         NSAppTransportSecurity:
@@ -117,7 +117,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: BashXiOS/BashXiOS.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: BashX
-        MARKETING_VERSION: "0.1.55"
+        MARKETING_VERSION: "0.1.56"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: false
@@ -175,7 +175,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: BashXControls/BashXControls.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: BashXControls
-        MARKETING_VERSION: "0.1.55"
+        MARKETING_VERSION: "0.1.56"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: true
@@ -210,7 +210,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: PacketTunnel/PacketTunnel.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: PacketTunnel
-        MARKETING_VERSION: "0.1.55"
+        MARKETING_VERSION: "0.1.56"
         CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: true
