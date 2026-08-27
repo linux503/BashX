@@ -6,7 +6,7 @@ macOS 菜单栏代理客户端（mihomo / Clash Meta）。
 
 ## 下载
 
-最新版：**[BashX v0.1.31](https://github.com/linux503/BashX/releases/download/v0.1.31/BashX-0.1.31.dmg)**
+最新版：**[BashX v0.1.32](https://github.com/linux503/BashX/releases/download/v0.1.32/BashX-0.1.32.dmg)**
 
 所有版本：[Releases](https://github.com/linux503/BashX/releases)
 
