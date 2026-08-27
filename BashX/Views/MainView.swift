@@ -264,9 +264,9 @@ struct MainView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-            selectedNodeCard
-
             proxyModeSection
+
+            selectedNodeCard
 
             sidebarSubscriptionsSection
 
@@ -374,6 +374,8 @@ struct MainView: View {
                 )
             }
 
+            externalProxySidebarSection
+
             Spacer(minLength: 4)
 
             HStack {
@@ -448,6 +450,44 @@ struct MainView: View {
         }
         .buttonStyle(.plain)
         .help(mode.subtitle)
+    }
+
+    private var externalProxySidebarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SidebarSectionHeader(title: "外置代理")
+            Text(state.externalProxyAddress)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .foregroundStyle(state.coreRunning ? .primary : BashXTheme.secondaryLabel(for: appearance))
+            HStack(spacing: 4) {
+                proxyCopyChip("地址") { state.copyExternalProxy(kind: .hostPort) }
+                proxyCopyChip("HTTP") { state.copyExternalProxy(kind: .http) }
+                proxyCopyChip("SOCKS") { state.copyExternalProxy(kind: .socks) }
+            }
+            toggleRow(
+                icon: "antenna.radiowaves.left.and.right",
+                title: "允许局域网",
+                subtitle: state.settings.allowLan ? state.externalProxyAddress : "仅本机 127.0.0.1",
+                isOn: Binding(
+                    get: { state.settings.allowLan },
+                    set: { v in Task { await state.setAllowLan(v) } }
+                )
+            )
+        }
+    }
+
+    private func proxyCopyChip(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.caption2.weight(.medium))
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+            )
+            .foregroundStyle(BashXTheme.accent(for: appearance))
     }
 
     private func selectNodeFromPanel(_ name: String) {
