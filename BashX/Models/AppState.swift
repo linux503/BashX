@@ -122,10 +122,11 @@ final class AppState: ObservableObject {
         return summaryCache
     }
 
-    /// Menu-bar quick list: always fastest 10 (panel shows all nodes).
+    /// Menu-bar quick list: fastest N by delay (N = menuNodeLimit).
     var menuNodes: [ProxyNode] {
+        let limit = min(500, max(5, settings.menuNodeLimit))
         let sorted = nodes.sorted(by: delaySort)
-        return Array(sorted.prefix(10))
+        return Array(sorted.prefix(limit))
     }
 
     private func invalidateNodeCaches() {
@@ -263,6 +264,7 @@ final class AppState: ObservableObject {
 
     init() {
         settings = SettingsStore.load()
+        L10n.apply(settings.uiLanguage)
         ensureAPISecret()
         AppActivation.preferDockIcon = settings.showDockIcon
         migrateBusyPortsIfNeeded()
@@ -287,12 +289,11 @@ final class AppState: ObservableObject {
             settings.clashBinaryPath = CoreInstaller.bundledPath.path
             schedulePersist()
         }
-        // Parse subscription off the critical path so menu bar appears immediately.
+        // Parse all enabled subscription caches (never seed from a single last-subscription file).
         Task {
-            if let data = try? Data(contentsOf: Paths.lastSubscriptionURL),
-               let parsed = try? ClashConfigParser.parse(data) {
-                nodes = applyDelayCache(to: parsed.nodes)
-                invalidateNodeCaches()
+            _ = rebuildEnabledNodesFromCache()
+            if nodes.isEmpty {
+                reloadNodesFromDiskIfNeeded()
             }
             await bootstrapRuntime()
             restartAutoSpeedLoop()
@@ -312,7 +313,11 @@ final class AppState: ObservableObject {
         userStoppedCore = false
         runtimeTunInConfig = false
 
-        reloadNodesFromDiskIfNeeded()
+        // Always rebuild from every enabled subscription cache before writing config / starting core.
+        // (Avoids "only ~15 nodes" from lastSubscriptionURL overwriting the merged pool.)
+        if !rebuildEnabledNodesFromCache() {
+            reloadNodesFromDiskIfNeeded()
+        }
         refreshLaunchAtLogin()
         sanitizeRulesForCore()
         migrateBusyPortsIfNeeded()
@@ -361,6 +366,12 @@ final class AppState: ObservableObject {
         // Heavy merge / reload off the critical launch path.
         Task { [weak self] in
             guard let self else { return }
+            if !GeoDataBootstrap.isReady() {
+                self.statusText = "正在下载地理规则库…"
+                try? await GeoDataBootstrap.ensurePresent { [weak self] msg in
+                    Task { @MainActor in self?.statusText = msg }
+                }
+            }
             if !self.settings.subscriptions.filter(\.enabled).isEmpty {
                 await self.applyEnabledSubscriptions(fetch: false)
             }
@@ -403,8 +414,11 @@ final class AppState: ObservableObject {
             settings.menuNodeLimit = 5
             changed = true
         }
-        if settings.testTimeoutMs > 3000 {
-            settings.testTimeoutMs = 2500
+        if settings.testTimeoutMs < 3000 {
+            settings.testTimeoutMs = 5000
+            changed = true
+        } else if settings.testTimeoutMs > 8000 {
+            settings.testTimeoutMs = 8000
             changed = true
         }
         if settings.testURL.hasPrefix("http://www.gstatic.com") {
@@ -442,6 +456,15 @@ final class AppState: ObservableObject {
             coreHealthAliveStreak += 1
             coreHealthMissStreak = 0
             applyCoreRunning(true)
+            if settings.systemProxyEnabled, !settings.userDisabledSystemProxy {
+                let port = settings.mixedPort
+                let proxyOK = await Task.detached(priority: .utility) {
+                    SystemProxy.isEnabled(port: port)
+                }.value
+                if !proxyOK || !systemProxyOn {
+                    await applyDefaultSystemProxyIfEnabled()
+                }
+            }
             return
         }
 
@@ -479,15 +502,12 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// BashX open => system proxy + Telegram routing stay up unless user explicitly disabled proxy.
+    /// BashX open => keep system proxy preference unless user explicitly disabled it.
+    /// Never rewrite proxyMode — 规则/全局/直连 must stick to user choice.
     private func migrateTelegramReliabilitySettings() {
         var changed = false
         if !settings.userDisabledSystemProxy, !settings.systemProxyEnabled {
             settings.systemProxyEnabled = true
-            changed = true
-        }
-        if settings.proxyMode == .direct {
-            settings.proxyMode = .rule
             changed = true
         }
         if changed { _ = SettingsStore.save(settings) }
@@ -504,14 +524,9 @@ final class AppState: ObservableObject {
     }
 
     private func telegramGuardTick() async {
+        // Respect explicit 直连 / user-disabled system proxy — do not hijack mode.
         guard !userStoppedCore, !settings.userDisabledSystemProxy else { return }
-
-        if settings.proxyMode == .direct {
-            settings.proxyMode = .rule
-            schedulePersist()
-            writeConfig()
-            await applyConfig(reloadIfRunning: true)
-        }
+        guard settings.proxyMode != .direct else { return }
 
         if !settings.systemProxyEnabled {
             settings.systemProxyEnabled = true
@@ -618,10 +633,10 @@ final class AppState: ObservableObject {
         bumpChromeRevision()
         if on {
             await syncSelectedOutbound()
-            try? await ClashCore.patchConfig(
+            _ = await ClashCore.applyMode(
                 controller: settings.externalController,
                 secret: settings.secret,
-                body: ["mode": settings.proxyMode.rawValue]
+                mode: settings.proxyMode
             )
         }
     }
@@ -645,7 +660,9 @@ final class AppState: ObservableObject {
             return
         }
 
-        reloadNodesFromDiskIfNeeded()
+        if !rebuildEnabledNodesFromCache() {
+            reloadNodesFromDiskIfNeeded()
+        }
         writeConfig()
 
         let healthy = await CoreHealth.apiAlive(controller: settings.externalController, secret: settings.secret)
@@ -692,6 +709,17 @@ final class AppState: ObservableObject {
             secret: settings.secret,
             group: "PROXY",
             name: target
+        )
+        try? await ClashCore.selectProxy(
+            controller: settings.externalController,
+            secret: settings.secret,
+            group: "GLOBAL",
+            name: target
+        )
+        _ = await ClashCore.applyMode(
+            controller: settings.externalController,
+            secret: settings.secret,
+            mode: settings.proxyMode
         )
         if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
             await ensureUsableProxy(forceProbe: false, verifyGoogle: true)
@@ -891,6 +919,30 @@ final class AppState: ObservableObject {
         statusText = enabled
             ? "已启用 \(onCount) 个订阅 · \(nodes.count) 个节点"
             : "已停用：\(name) · \(nodes.count) 个节点"
+    }
+
+    /// Enable every subscription and merge all caches into the node pool.
+    func enableAllSubscriptions() async {
+        guard !settings.subscriptions.isEmpty else { return }
+        var changed = false
+        let subs = settings.subscriptions.map { sub -> Subscription in
+            guard !sub.enabled else { return sub }
+            changed = true
+            var copy = sub
+            copy.enabled = true
+            return copy
+        }
+        if changed {
+            replaceSubscriptions(subs)
+            schedulePersist()
+        }
+        statusText = "正在合并全部订阅…"
+        bumpPanelRefresh()
+        _ = rebuildEnabledNodesFromCache()
+        await applyEnabledSubscriptions(fetch: false)
+        bumpPanelRefresh()
+        let onCount = settings.subscriptions.filter(\.enabled).count
+        statusText = "已启用 \(onCount) 个订阅 · \(nodes.count) 个节点"
     }
 
     /// Switch to a single subscription (disable others).
@@ -1201,13 +1253,26 @@ final class AppState: ObservableObject {
     }
 
     func runSpeedTest() async {
+        await runSpeedTest(nodes: nil, label: nil)
+    }
+
+    /// Speed-test all nodes, or only the given subset (e.g. one region group).
+    func runSpeedTest(nodes targetNodes: [ProxyNode]?, label: String?) async {
         guard !isTesting else { return }
-        guard !nodes.isEmpty else {
+        let snapshot = targetNodes ?? nodes
+        guard !snapshot.isEmpty else {
             statusText = "没有可测速的节点"
+            return
+        }
+        let scope = label.map { "（\($0)）" } ?? ""
+        let testables = snapshot.filter { ClashConfigParser.isSpeedTestable($0) }
+        guard !testables.isEmpty else {
+            statusText = "没有可测速的节点（已跳过流量/到期占位节点）"
             return
         }
         isTesting = true
         testedCount = 0
+        bumpNodeListRevision()
         var pendingDelays: [String: (Int, Date)] = [:]
         var lastNodesFlush = Date.distantPast
         defer {
@@ -1217,16 +1282,20 @@ final class AppState: ObservableObject {
             bumpNodeListRevision()
         }
 
-        statusText = "测速中…"
-        if !coreRunning {
+        statusText = "测速中\(scope)…"
+        if !isCoreVisiblyAlive {
             _ = await ensureCoreRunning()
         }
-        let snapshot = nodes
-        let controller = coreRunning ? settings.externalController : nil
+        let useAPI = isCoreVisiblyAlive || CoreHealth.mixedPortAlive(port: settings.mixedPort)
+        let controller = useAPI ? settings.externalController : nil
+        let perNodeTimeout = useAPI ? max(settings.testTimeoutMs, 5000) : max(settings.testTimeoutMs, 3000)
+        let workers = settings.turboMode
+            ? min(max(settings.concurrency, 1), 6)
+            : min(max(settings.concurrency, 1), 4)
         let results = await tester.testAll(
-            nodes: snapshot,
-            timeoutMs: min(settings.testTimeoutMs, 2500),
-            concurrency: min(max(settings.concurrency, 1), 8),
+            nodes: testables,
+            timeoutMs: perNodeTimeout,
+            concurrency: workers,
             controller: controller,
             secret: settings.secret,
             testURL: settings.testURL
@@ -1235,7 +1304,7 @@ final class AppState: ObservableObject {
             pendingDelays[name] = (delay, Date())
             self.testedCount += 1
             let now = Date()
-            let done = self.testedCount == snapshot.count
+            let done = self.testedCount == testables.count
             if done || now.timeIntervalSince(lastNodesFlush) > 0.5 {
                 lastNodesFlush = now
                 for (nodeName, pair) in pendingDelays {
@@ -1250,7 +1319,7 @@ final class AppState: ObservableObject {
             }
             if done || now.timeIntervalSince(self.speedUITick) > 0.35 {
                 self.speedUITick = now
-                self.statusText = "测速 \(self.testedCount)/\(snapshot.count)"
+                self.statusText = "测速\(scope) \(self.testedCount)/\(testables.count)"
             }
         }
 
@@ -1261,7 +1330,7 @@ final class AppState: ObservableObject {
         let ok = results.filter { $0.delayMs > 0 }.count
         persistDelayCache(from: nodes)
         persist()
-        statusText = "测速完成：\(ok)/\(results.count) 可用" + (controller == nil ? "（TCP）" : "（代理）")
+        statusText = "测速完成\(scope)：\(ok)/\(results.count) 可用" + (controller == nil ? "（TCP）" : "（代理）")
 
         if settings.autoSelectFastest {
             await selectFastestNodeIfAvailable()
@@ -1275,7 +1344,8 @@ final class AppState: ObservableObject {
         if enabled {
             sortByDelay = true
         }
-        persist()
+        bumpChromeRevision()
+        schedulePersist()
         restartAutoSpeedLoop()
         statusText = enabled
             ? "自动测速已开启（约每 \(max(3, settings.autoSpeedTestIntervalMinutes)) 分钟）"
@@ -1287,7 +1357,8 @@ final class AppState: ObservableObject {
 
     func setAutoSelectFastest(_ enabled: Bool) {
         settings.autoSelectFastest = enabled
-        persist()
+        bumpChromeRevision()
+        schedulePersist()
         if enabled {
             Task { await selectFastestNodeIfAvailable() }
         }
@@ -1365,6 +1436,20 @@ final class AppState: ObservableObject {
         persist()
         ThemeRefresh.apply(state: self)
         statusText = "主题：\(appearance.title)（已生效）"
+    }
+
+    func setUiLanguage(_ language: AppLanguage) {
+        settings.uiLanguage = language
+        L10n.apply(language)
+        persist()
+        bumpChromeRevision()
+        ThemeRefresh.apply(state: self)
+        objectWillChange.send()
+        switch language {
+        case .zh: statusText = L10n.t("lang.changed.zh", language)
+        case .en: statusText = L10n.t("lang.changed.en", language)
+        case .system: statusText = L10n.t("lang.changed.system", language)
+        }
     }
 
     func setAutoSpeedTestIntervalMinutes(_ minutes: Int) {
@@ -1584,8 +1669,8 @@ final class AppState: ObservableObject {
 
         let results = await tester.testAll(
             nodes: Array(pool.prefix(16)),
-            timeoutMs: min(settings.testTimeoutMs, 2200),
-            concurrency: 6,
+            timeoutMs: max(settings.testTimeoutMs, 5000),
+            concurrency: 4,
             controller: settings.externalController,
             secret: settings.secret,
             testURL: settings.testURL
@@ -1679,6 +1764,12 @@ final class AppState: ObservableObject {
         if coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) {
             applyCoreRunning(true)
             await syncSelectedOutbound()
+            if settings.closeConnectionsOnSwitch {
+                await ClashCore.closeAllConnections(
+                    controller: settings.externalController,
+                    secret: settings.secret
+                )
+            }
             statusText = "已切换：\(name)"
             scheduleOutboundIPRefresh()
         } else {
@@ -1735,7 +1826,7 @@ final class AppState: ObservableObject {
             statusText = "规则已保存（\(settings.rules.count) 条，已清理 \(removed) 条无效）"
         } else {
             statusText = "规则已保存并生效（\(settings.rules.count) 条"
-                + (settings.videoAdBlockEnabled ? " · 含广告过滤 \(VideoAdBlock.ruleCount)" : "")
+                + (settings.videoAdBlockEnabled ? " · 含去广告 \(VideoAdBlock.ruleCount)" : "")
                 + "）"
         }
     }
@@ -1812,45 +1903,141 @@ final class AppState: ObservableObject {
         await task.value
     }
 
+    /// Rule → Global → Direct (ClashX-style hotkey target).
+    func cycleProxyMode() async {
+        let order: [ProxyMode] = [.rule, .global, .direct]
+        guard let idx = order.firstIndex(of: settings.proxyMode) else {
+            await setProxyMode(.rule)
+            return
+        }
+        await setProxyMode(order[(idx + 1) % order.count])
+    }
+
+    func setMenuNodeLimit(_ limit: Int) {
+        settings.menuNodeLimit = min(500, max(5, limit))
+        schedulePersist()
+        bumpChromeRevision()
+    }
+
+    /// Open mihomo web dashboard (local /ui or metacubexd).
+    func openDashboard() {
+        guard let url = dashboardURL else {
+            statusText = "无法打开 Dashboard：external-controller 无效"
+            return
+        }
+        NSWorkspace.shared.open(url)
+        statusText = "已打开 Dashboard"
+    }
+
+    var dashboardURL: URL? {
+        let host = settings.externalController.split(separator: ":").first.map(String.init) ?? "127.0.0.1"
+        let port = settings.externalController.split(separator: ":").last.flatMap { Int($0) } ?? 19090
+        let loopback = (host == "*" || host.isEmpty) ? "127.0.0.1" : host
+        if coreRunning, loopback == "127.0.0.1" || loopback == "localhost" {
+            var local = URLComponents()
+            local.scheme = "http"
+            local.host = loopback
+            local.port = port
+            local.path = "/ui"
+            if !settings.secret.isEmpty {
+                local.queryItems = [URLQueryItem(name: "secret", value: settings.secret)]
+            }
+            if let url = local.url { return url }
+        }
+        var remote = URLComponents(string: "https://metacubex.github.io/metacubexd/")!
+        var query = [
+            URLQueryItem(name: "hostname", value: loopback),
+            URLQueryItem(name: "port", value: "\(port)"),
+        ]
+        let secret = settings.secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !secret.isEmpty {
+            query.append(URLQueryItem(name: "secret", value: secret))
+        }
+        remote.queryItems = query
+        return remote.url
+    }
+
     func setProxyMode(_ mode: ProxyMode) async {
-        guard settings.proxyMode != mode else { return }
+        guard settings.proxyMode != mode else {
+            // Re-assert mode on core if UI already shows it but kernel drifted.
+            if coreRunning {
+                _ = await ClashCore.applyMode(
+                    controller: settings.externalController,
+                    secret: settings.secret,
+                    mode: mode
+                )
+            }
+            return
+        }
 
         var adBlockNote = ""
         if settings.videoAdBlockEnabled, mode != .rule {
             settings.videoAdBlockEnabled = false
-            adBlockNote = "（视频广告过滤已关闭）"
-            writeConfig()
-            if coreRunning {
-                await applyConfig(reloadIfRunning: true)
-            }
+            adBlockNote = "（去广告已关闭）"
         }
 
+        // Optimistic UI first — persist/yaml must not block the chip highlight.
         settings.proxyMode = mode
-        schedulePersist()
         bumpChromeRevision()
         statusText = "切换为\(mode.title)模式…"
         await Task.yield()
-        if coreRunning {
-            do {
-                try await ClashCore.patchConfig(
-                    controller: settings.externalController,
-                    secret: settings.secret,
-                    body: ["mode": mode.rawValue]
-                )
-            } catch {
+
+        schedulePersist()
+        scheduleWriteConfig()
+
+        if coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) {
+            applyCoreRunning(true)
+            var ok = await ClashCore.applyMode(
+                controller: settings.externalController,
+                secret: settings.secret,
+                mode: mode
+            )
+            if !ok {
+                // Hot-patch failed — full reload with yaml that already has the new mode.
                 writeConfig()
                 await applyConfig(reloadIfRunning: true)
+                ok = await ClashCore.applyMode(
+                    controller: settings.externalController,
+                    secret: settings.secret,
+                    mode: mode
+                )
             }
-            await syncSelectedOutbound()
+
+            // rule/global need PROXY+GLOBAL selectors; direct ignores selectors.
+            if mode != .direct {
+                await syncSelectedOutbound()
+            }
+            if settings.closeConnectionsOnSwitch {
+                await ClashCore.closeAllConnections(
+                    controller: settings.externalController,
+                    secret: settings.secret
+                )
+            }
+
+            let verified = await ClashCore.fetchMode(
+                controller: settings.externalController,
+                secret: settings.secret
+            )
+            if let verified, verified != mode.rawValue {
+                statusText = "模式切换未生效（内核=\(verified)），请重试或重启内核"
+                bumpChromeRevision()
+                return
+            }
+            statusText = ok
+                ? "已切换为\(mode.title)模式\(adBlockNote)"
+                : "已写入\(mode.title)模式，请确认流量是否符合预期\(adBlockNote)"
+        } else {
+            statusText = "已设为\(mode.title)模式（内核未运行，启动后生效）\(adBlockNote)"
         }
-        statusText = "已切换为\(mode.title)模式\(adBlockNote)"
         bumpChromeRevision()
     }
 
-    /// Keep PROXY + GLOBAL selectors on the same outbound.
+    /// Keep PROXY + GLOBAL + TELEGRAM/GOOGLE on the same outbound when possible.
+    /// Telegram traffic uses the TELEGRAM url-test group — syncing stops the common
+    /// “PROXY looks fine but Telegram keeps spinning on another dead hub” case.
     func syncSelectedOutbound() async {
         let target = activeProxyTarget()
-        for group in ["PROXY", "GLOBAL"] {
+        for group in ["PROXY", "GLOBAL", "TELEGRAM", "GOOGLE"] {
             try? await ClashCore.selectProxy(
                 controller: settings.externalController,
                 secret: settings.secret,
@@ -1969,13 +2156,78 @@ final class AppState: ObservableObject {
         settings.tunEnabled && runtimeTunInConfig
     }
 
-    /// Rules written to mihomo — always merges video-ad blocklist when enabled.
+    /// Rules written to mihomo — prepend (Merge) + base + optional video-ad REJECT.
     func effectiveRuntimeRules() -> [String] {
-        let merged = VideoAdBlock.merge(
-            into: settings.rules,
-            enabled: settings.videoAdBlockEnabled
+        RuntimeRules.effective(
+            base: settings.rules,
+            prepend: settings.rulesPrepend,
+            videoAdBlockEnabled: settings.videoAdBlockEnabled
         )
-        return GeoSiteRules.sanitize(merged)
+    }
+
+    func saveRulesPrependFromEditor(_ text: String) async {
+        let parsed = ClashRuleSyntax.parseLines(text)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("MATCH,") }
+        let sanitized = GeoSiteRules.sanitize(parsed)
+        settings.rulesPrepend = sanitized
+        persist()
+        await applyConfig(reloadIfRunning: true)
+        statusText = sanitized.isEmpty
+            ? "自定义前置规则已清空"
+            : "自定义前置规则已保存（\(sanitized.count) 条，更新订阅/智能规则不会覆盖）"
+    }
+
+    func setCloseConnectionsOnSwitch(_ enabled: Bool) {
+        settings.closeConnectionsOnSwitch = enabled
+        schedulePersist()
+        bumpChromeRevision()
+        statusText = enabled ? "切节点时关闭旧连接" : "切节点时保留旧连接"
+    }
+
+    /// Select a member inside a named proxy-group (GOOGLE / TELEGRAM / AUTO / PROXY).
+    func selectGroupProxy(group: String, name: String) async {
+        guard coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) else {
+            statusText = "内核未运行，无法切换 \(group)"
+            return
+        }
+        applyCoreRunning(true)
+        statusText = "切换 \(group) → \(name)"
+        try? await ClashCore.selectProxy(
+            controller: settings.externalController,
+            secret: settings.secret,
+            group: group,
+            name: name
+        )
+        if settings.closeConnectionsOnSwitch {
+            await ClashCore.closeAllConnections(
+                controller: settings.externalController,
+                secret: settings.secret
+            )
+        }
+        if group == "PROXY" || group == "GLOBAL" {
+            settings.selectedNodeName = name
+            schedulePersist()
+            bumpChromeRevision()
+            scheduleOutboundIPRefresh()
+        } else {
+            bumpChromeRevision()
+        }
+        statusText = "\(group) 已选：\(name)"
+    }
+
+    func fetchMenuProxyGroups() async -> [ClashCore.ProxyGroupInfo] {
+        guard coreRunning else { return [] }
+        var out: [ClashCore.ProxyGroupInfo] = []
+        for name in ["GOOGLE", "TELEGRAM", "AUTO"] {
+            if let info = await ClashCore.fetchProxyGroup(
+                controller: settings.externalController,
+                secret: settings.secret,
+                group: name
+            ), !info.all.isEmpty {
+                out.append(info)
+            }
+        }
+        return out
     }
 
     func setVideoAdBlock(_ enabled: Bool) async {
@@ -1985,16 +2237,16 @@ final class AppState: ObservableObject {
             settings.proxyMode = .rule
         }
         bumpChromeRevision()
-        statusText = enabled ? "正在开启视频广告过滤…" : "正在关闭视频广告过滤…"
+        statusText = enabled ? "正在开启去广告…" : "正在关闭去广告…"
         await Task.yield()
         schedulePersist()
-        writeConfig()
+        scheduleWriteConfig()
         await applyConfig(reloadIfRunning: true)
         bumpChromeRevision()
         if enabled {
-            statusText = "视频广告过滤已开启（\(VideoAdBlock.ruleCount) 条）· 规则模式"
+            statusText = "去广告已开启（\(VideoAdBlock.ruleCount) 条）· 规则模式"
         } else {
-            statusText = "视频广告过滤已关闭"
+            statusText = "去广告已关闭"
         }
     }
 
@@ -2130,10 +2382,10 @@ final class AppState: ObservableObject {
                 group: "GLOBAL",
                 name: target
             )
-            try? await ClashCore.patchConfig(
+            _ = await ClashCore.applyMode(
                 controller: settings.externalController,
                 secret: settings.secret,
-                body: ["mode": settings.proxyMode.rawValue]
+                mode: settings.proxyMode
             )
         } catch {
             statusText = "热重载失败，正在重启内核…"
@@ -2304,10 +2556,9 @@ final class AppState: ObservableObject {
             }
             settings.clashBinaryPath = binary
             persist()
-            if nodes.isEmpty, let data = try? Data(contentsOf: Paths.lastSubscriptionURL),
-               let parsed = try? ClashConfigParser.parse(data) {
-                nodes = parsed.nodes
-                invalidateNodeCaches()
+            if nodes.isEmpty {
+                _ = rebuildEnabledNodesFromCache()
+                if nodes.isEmpty { reloadNodesFromDiskIfNeeded() }
             }
 
             var attempt = 0
@@ -2407,11 +2658,22 @@ final class AppState: ObservableObject {
                         group: "PROXY",
                         name: target
                     )
+                    try? await ClashCore.selectProxy(
+                        controller: settings.externalController,
+                        secret: settings.secret,
+                        group: "GLOBAL",
+                        name: target
+                    )
+                    _ = await ClashCore.applyMode(
+                        controller: settings.externalController,
+                        secret: settings.secret,
+                        mode: settings.proxyMode
+                    )
                     statusText = effectiveTunInConfig()
-                        ? "内核运行中（TUN）"
+                        ? "内核运行中（TUN）· \(settings.proxyMode.title)"
                         : (settings.tunEnabled
                             ? "内核运行中 · \(settings.mixedPort)（TUN 待开启）"
-                            : "内核运行中 · \(settings.mixedPort)")
+                            : "内核运行中 · \(settings.mixedPort) · \(settings.proxyMode.title)")
                     if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
                         await ensureUsableProxy(forceProbe: true, verifyGoogle: true)
                     }

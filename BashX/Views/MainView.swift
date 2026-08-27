@@ -12,15 +12,24 @@ struct MainView: View {
     @State private var renameTarget: Subscription?
     @State private var renameDraft = ""
     @State private var switchingNodeName: String?
-    @State private var sidebarSubsExpanded = false
+    @State private var websiteProbeExpanded = true
+    /// Instant chip highlight before chromeRevision lands.
+    @State private var pendingProxyMode: ProxyMode?
 
-    private enum DetailTab: String, CaseIterable, Identifiable {
-        case nodes = "节点"
-        case subscriptions = "订阅"
-        case monitor = "监控"
-        case rules = "规则"
-        var id: String { rawValue }
+    private enum DetailTab: CaseIterable, Identifiable {
+        case nodes, subscriptions, monitor, rules
+        var id: String { String(describing: self) }
+        func title(lang: AppLanguage) -> String {
+            switch self {
+            case .nodes: return L10n.t("mac.panel.nodes", lang)
+            case .subscriptions: return L10n.t("mac.panel.subscriptions", lang)
+            case .monitor: return L10n.t("mac.panel.monitor", lang)
+            case .rules: return L10n.t("mac.panel.rules", lang)
+            }
+        }
     }
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
 
     var body: some View {
         BashXThemed(appearance: state.settings.appearance) {
@@ -35,7 +44,7 @@ struct MainView: View {
                         PanelSidebarHost(state: state) {
                             sidebar
                         }
-                        .frame(width: 268)
+                        .frame(width: 240)
                         Rectangle()
                             .fill(BashXTheme.hairline(for: appearance))
                             .frame(width: 1)
@@ -43,7 +52,7 @@ struct MainView: View {
                     }
                 }
             }
-            .background(.clear)
+            .background(BashXTheme.canvas(for: appearance))
         }
         .onAppear {
             consumePanelIntent()
@@ -69,36 +78,32 @@ struct MainView: View {
         .task {
             _ = await state.ensureCoreRunning()
         }
-        .onAppear { syncMonitorExtras() }
+        .onAppear {
+            monitor.chartSamplesEnabled = true
+            syncMonitorExtras()
+        }
         .onDisappear {
             monitor.chartSamplesEnabled = false
             monitor.stopConnectionsAndLogs()
         }
         .onReceive(state.$coreRunning.receive(on: RunLoop.main)) { _ in syncMonitorExtras() }
+        .onReceive(state.$chromeRevision.receive(on: RunLoop.main)) { _ in syncMonitorExtras() }
         .onReceive(state.$searchText.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
         .onReceive(state.$sortByDelay.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
         .onReceive(state.$selectedCategoryKey.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
         .onValueChange(detailTab) { tab in
-            monitor.chartSamplesEnabled = (tab == .monitor)
             if tab == .rules {
                 state.ensureRulesTextLoaded()
             }
-            if tab == .monitor, state.coreRunning {
-                monitor.startConnectionsAndLogs()
-            } else {
-                monitor.stopConnectionsAndLogs()
-            }
+            syncMonitorExtras()
         }
     }
 
-    /// Panel only toggles connections/logs; traffic SSE is owned by BashXApp.
+    /// Panel toggles connections/logs; traffic SSE is owned by BashXApp.
     private func syncMonitorExtras() {
-        monitor.configure(
-            controller: state.settings.externalController,
-            secret: state.settings.secret
-        )
+        let coreUp = state.isCoreVisiblyAlive || state.coreRunning
         monitor.chartSamplesEnabled = (detailTab == .monitor)
-        if state.coreRunning, detailTab == .monitor {
+        if coreUp, detailTab == .monitor {
             monitor.startConnectionsAndLogs()
         } else {
             monitor.stopConnectionsAndLogs()
@@ -133,16 +138,16 @@ struct MainView: View {
                 Button {
                     showLogoPicker.toggle()
                 } label: {
-                    LogoIconView(style: state.settings.logoStyle, size: 30, colored: true, panel: true)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    LogoIconView(style: state.settings.logoStyle, size: 42, colored: true, panel: true)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .strokeBorder(BashXTheme.accent(for: appearance).opacity(0.35), lineWidth: 1)
                         )
-                        .shadow(color: BashXTheme.accentGlow(for: appearance), radius: 6, y: 2)
+                        .shadow(color: BashXTheme.accentGlow(for: appearance), radius: 8, y: 2)
                 }
                 .buttonStyle(.plain)
-                .frame(width: 30, height: 30)
+                .frame(width: 42, height: 42)
                 .accessibilityLabel("切换 Logo 风格")
                 .popover(isPresented: $showLogoPicker, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -210,12 +215,6 @@ struct MainView: View {
             }
             .frame(maxWidth: 280)
 
-            if state.isCoreVisiblyAlive || state.coreRunning {
-                PanelTopBarRates(rates: rates) {
-                    detailTab = .monitor
-                }
-            }
-
             PanelStatusLine(state: state)
 
             Button {
@@ -238,20 +237,14 @@ struct MainView: View {
             .keyboardShortcut(",", modifiers: .command)
             .help("设置 (⌘,)")
         }
-        .frame(height: 52)
+        .frame(height: 56)
         .padding(.horizontal, 16)
         .background {
             Rectangle()
-                .fill(.ultraThinMaterial)
+                .fill(BashXTheme.card(for: appearance))
                 .overlay(alignment: .bottom) {
                     Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [BashXTheme.accent(for: appearance).opacity(0.12), BashXTheme.hairline(for: appearance)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .fill(BashXTheme.hairline(for: appearance))
                         .frame(height: 1)
                 }
         }
@@ -263,76 +256,39 @@ struct MainView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-            proxyModeSection
-
-            selectedNodeCard
-
-            sidebarSubscriptionsSection
-
-            SidebarSectionHeader(title: "快捷操作")
-            VStack(spacing: 6) {
-                HStack(spacing: 6) {
-                    ActionChip(
-                        title: state.isBusy ? "更新中" : "更新订阅",
-                        systemImage: "arrow.clockwise",
-                        enabled: !state.isBusy && !state.settings.subscriptions.isEmpty,
-                        emphasized: state.isBusy
-                    ) {
-                        Task { await state.updateAllSubscriptions() }
-                    }
-                    ActionChip(
-                        title: state.isTesting ? "测速中" : "测速",
-                        systemImage: "gauge.with.dots.needle.67percent",
-                        enabled: !state.isTesting && !state.nodes.isEmpty,
-                        emphasized: state.isTesting
-                    ) {
-                        Task { await state.runSpeedTest() }
-                    }
+                PanelSidebarTraffic(
+                    panel: rates.panel,
+                    coreRunning: state.isCoreVisiblyAlive || state.coreRunning
+                ) {
+                    detailTab = .monitor
                 }
-                HStack(spacing: 6) {
-                    ActionChip(
-                        title: state.settings.autoSpeedTestEnabled ? "自动测速" : "自动测速",
-                        systemImage: "timer",
-                        enabled: !state.nodes.isEmpty,
-                        emphasized: state.settings.autoSpeedTestEnabled
-                    ) {
-                        state.setAutoSpeedTestEnabled(!state.settings.autoSpeedTestEnabled)
-                    }
-                    ActionChip(
-                        title: state.settings.autoSelectFastest ? "跟最快" : "跟最快",
-                        systemImage: "bolt",
-                        enabled: !state.nodes.isEmpty,
-                        emphasized: state.settings.autoSelectFastest
-                    ) {
-                        state.setAutoSelectFastest(!state.settings.autoSelectFastest)
-                    }
-                }
-                HStack(spacing: 6) {
-                    if !(state.isCoreVisiblyAlive || state.coreRunning) {
-                        if state.coreConnecting {
-                            ActionChip(
-                                title: "内核连接中…",
-                                systemImage: "arrow.triangle.2.circlepath",
-                                enabled: false,
-                                emphasized: false
-                            ) {}
-                        } else {
-                            ActionChip(
-                                title: "启动内核",
-                                systemImage: "play.fill",
-                                emphasized: true
-                            ) {
-                                Task { await state.ensureCoreRunning() }
-                            }
-                        }
-                    }
-                }
+
+                proxyModeSection
+                sidebarSubsSummary
+                sidebarSettingsCard
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+        }
+        .frame(width: 240)
+        .background(BashXTheme.sidebarTint(for: appearance))
+    }
+
+    private var sidebarSettingsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "link.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+                Text("连接")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
             }
 
-            SidebarSectionHeader(title: "开关")
-            VStack(spacing: 2) {
-                toggleRow(
+            VStack(spacing: 6) {
+                sidebarToggleTile(
                     icon: "network",
+                    tint: BashXTheme.accent(for: appearance),
                     title: "系统代理",
                     subtitle: "127.0.0.1:\(state.settings.mixedPort)",
                     isOn: Binding(
@@ -340,8 +296,9 @@ struct MainView: View {
                         set: { v in Task { await state.setSystemProxy(v) } }
                     )
                 )
-                toggleRow(
+                sidebarToggleTile(
                     icon: "point.3.connected.trianglepath.dotted",
+                    tint: Color(red: 0.36, green: 0.72, blue: 0.88),
                     title: "TUN",
                     subtitle: "可与系统代理同时开",
                     isOn: Binding(
@@ -349,10 +306,45 @@ struct MainView: View {
                         set: { v in Task { await state.setTUN(v) } }
                     )
                 )
-                toggleRow(
-                    icon: "play.slash",
-                    title: "视频广告过滤",
-                    subtitle: "规则模式生效",
+            }
+
+            Rectangle()
+                .fill(BashXTheme.hairline(for: appearance))
+                .frame(height: 1)
+                .padding(.vertical, 2)
+
+            Text("智能")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+
+            VStack(spacing: 6) {
+                sidebarToggleTile(
+                    icon: "gauge.with.dots.needle.67percent",
+                    tint: Color(red: 0.95, green: 0.62, blue: 0.22),
+                    title: "自动测速",
+                    subtitle: "更新订阅后自动测速",
+                    isOn: Binding(
+                        get: { state.settings.autoSpeedTestEnabled },
+                        set: { state.setAutoSpeedTestEnabled($0) }
+                    ),
+                    disabled: state.nodes.isEmpty
+                )
+                sidebarToggleTile(
+                    icon: "bolt.fill",
+                    tint: Color(red: 0.98, green: 0.72, blue: 0.20),
+                    title: "跟最快节点",
+                    subtitle: "自动切换到延迟最低",
+                    isOn: Binding(
+                        get: { state.settings.autoSelectFastest },
+                        set: { state.setAutoSelectFastest($0) }
+                    ),
+                    disabled: state.nodes.isEmpty
+                )
+                sidebarToggleTile(
+                    icon: "play.slash.fill",
+                    tint: Color(red: 0.92, green: 0.42, blue: 0.48),
+                    title: "去广告",
+                    subtitle: "视频/电商跳转 · 规则模式",
                     isOn: Binding(
                         get: { state.settings.videoAdBlockEnabled },
                         set: { v in Task { await state.setVideoAdBlock(v) } }
@@ -360,80 +352,210 @@ struct MainView: View {
                 )
             }
 
-            Spacer(minLength: 4)
-
-            HStack {
-                Button("配置目录") { state.openConfigFolder() }
-                    .font(.caption2)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Spacer()
-                Text("v\(AppVersion.display)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .help("BashX \(AppVersion.display)")
+            if !(state.isCoreVisiblyAlive || state.coreRunning), !state.coreConnecting {
+                Button {
+                    Task { await state.ensureCoreRunning() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("启动内核")
+                            .font(.caption.weight(.semibold))
+                        Spacer(minLength: 0)
+                        Text("开始代理")
+                            .font(.caption2)
+                            .opacity(0.85)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        BashXTheme.accent(for: appearance),
+                                        BashXTheme.accent(for: appearance).opacity(0.82),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
             }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
         }
-        .frame(width: 268)
-        .background(BashXTheme.sidebarTint(for: appearance))
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                )
+        }
+    }
+
+    private func sidebarToggleTile(
+        icon: String,
+        tint: Color,
+        title: String,
+        subtitle: String,
+        isOn: Binding<Bool>,
+        disabled: Bool = false
+    ) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(tint.opacity(appearance == .dark ? 0.22 : 0.14))
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(disabled ? BashXTheme.tertiaryLabel(for: appearance) : .primary)
+                Text(subtitle)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .disabled(disabled)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isOn.wrappedValue
+                      ? tint.opacity(appearance == .dark ? 0.10 : 0.06)
+                      : BashXTheme.secondaryFill(for: appearance).opacity(0.55))
+        }
+        .opacity(disabled ? 0.55 : 1)
+        .transaction { $0.animation = nil }
+    }
+
+    private func sidebarActionRow(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        disabled: Bool = false,
+        emphasized: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(disabled ? BashXTheme.tertiaryLabel(for: appearance) : .primary)
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(
+                        disabled
+                            ? BashXTheme.tertiaryLabel(for: appearance)
+                            : (emphasized ? BashXTheme.accent(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
+                    )
+                    .frame(width: 28, alignment: .trailing)
+            }
+            .frame(minHeight: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .padding(.vertical, 1)
+        .padding(.horizontal, 2)
+        .transaction { $0.animation = nil }
     }
 
     private var proxyModeSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SidebarSectionHeader(title: "代理模式")
-            HStack(spacing: 5) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+                Text("代理模式")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 6) {
                 ForEach(ProxyMode.allCases) { mode in
-                    proxyModeButton(mode)
+                    proxyModeChip(mode)
                 }
             }
-            if state.settings.videoAdBlockEnabled, state.settings.proxyMode == .rule {
-                Text("开启视频过滤时仅规则模式生效；切全局/直连会自动关闭过滤")
-                    .font(.system(size: 9, design: .rounded))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(2)
-            }
+        }
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                )
         }
     }
 
-    private func proxyModeButton(_ mode: ProxyMode) -> some View {
-        let selected = state.settings.proxyMode == mode
+    private func proxyModeChip(_ mode: ProxyMode) -> some View {
+        let current = pendingProxyMode ?? state.settings.proxyMode
+        let selected = current == mode
         let color = BashXTheme.proxyModeColor(mode, appearance: appearance)
         return Button {
-            Task { await state.setProxyMode(mode) }
+            guard current != mode else { return }
+            pendingProxyMode = mode
+            Task {
+                await state.setProxyMode(mode)
+                if pendingProxyMode == mode {
+                    pendingProxyMode = nil
+                }
+            }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .fill(selected ? color.opacity(0.2) : Color.primary.opacity(0.06))
+                        .fill(selected ? color.opacity(0.22) : BashXTheme.secondaryFill(for: appearance))
                         .frame(width: 28, height: 28)
                     Image(systemName: mode.systemImage)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(selected ? color : .secondary)
+                        .foregroundStyle(selected ? color : BashXTheme.secondaryLabel(for: appearance))
                 }
                 Text(mode.title)
-                    .font(.system(size: 10, weight: selected ? .bold : .medium, design: .rounded))
-                    .foregroundStyle(selected ? color : .secondary)
+                    .font(.system(size: 12, weight: selected ? .bold : .semibold, design: .rounded))
+                    .foregroundStyle(selected ? color : .primary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .padding(.vertical, 10)
             .background {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(selected ? color.opacity(0.1) : Color.primary.opacity(0.035))
+                    .fill(selected ? color.opacity(appearance == .dark ? 0.16 : 0.10) : BashXTheme.secondaryFill(for: appearance).opacity(0.55))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(
-                                selected ? color.opacity(0.5) : BashXTheme.separator(for: appearance),
-                                lineWidth: selected ? 1.5 : 0.5
+                                selected ? color.opacity(0.55) : Color.clear,
+                                lineWidth: selected ? 1.2 : 0
                             )
                     )
             }
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PanelPressButtonStyle())
         .help(mode.subtitle)
+        .animation(.easeOut(duration: 0.12), value: selected)
     }
 
     private func selectNodeFromPanel(_ name: String) {
@@ -472,17 +594,6 @@ struct MainView: View {
                 .minimumScaleFactor(0.85)
 
             PanelOutboundIP(state: state)
-
-            HStack(spacing: 10) {
-                MetricTile(label: "节点", value: "\(state.nodes.count)")
-                Button { detailTab = .subscriptions } label: {
-                    MetricTile(label: "订阅", value: "\(state.settings.subscriptions.count)")
-                }
-                .buttonStyle(.plain)
-                MetricTile(label: "端口", value: "\(state.settings.mixedPort)")
-                    .onTapGesture { SettingsOpener.open(state: state) }
-                    .help("打开设置 · 外置代理")
-            }
         }
         .padding(12)
         .background {
@@ -527,83 +638,87 @@ struct MainView: View {
         }
     }
 
-    private var sidebarSubscriptionsSection: some View {
+    private var sidebarSubsSummary: some View {
         let subs = state.settings.subscriptions
         let enabledCount = subs.filter(\.enabled).count
         let totalCount = subs.count
-        let visibleSubs = sidebarVisibleSubscriptions(subs)
 
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Label("订阅", systemImage: "tray.full.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text("\(enabledCount)/\(totalCount)")
-                    .font(.caption2.weight(.bold).monospaced())
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule(style: .continuous).fill(BashXTheme.accentSoft(for: appearance)))
-                Spacer()
-                Button("管理") { detailTab = .subscriptions }
-                    .font(.caption2.weight(.medium))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-            }
+            Label("订阅", systemImage: "tray.full")
+                .font(.caption.weight(.semibold))
 
-            Button {
-                openAddSubscription()
-            } label: {
-                Label("添加订阅", systemImage: "plus.circle.fill")
-                    .font(.caption2.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .tint(BashXTheme.accent(for: appearance))
-            .contentShape(Rectangle())
-
-            if subs.isEmpty {
-                Text("还没有订阅，添加后点击「更新订阅」拉取节点")
+            if totalCount == 0 {
+                Text("还没有订阅")
                     .font(.caption2)
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 2)
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
             } else {
-                VStack(spacing: 4) {
-                    ForEach(visibleSubs) { sub in
-                        sidebarSubscriptionRow(subscriptionId: sub.id)
-                    }
+                HStack(spacing: 8) {
+                    subSummaryMetric(
+                        value: "\(enabledCount)/\(totalCount)",
+                        label: enabledCount == totalCount ? "已全部启用" : "已启用"
+                    )
+                    subSummaryMetric(
+                        value: "\(state.nodes.count)",
+                        label: "合并节点",
+                        accent: true
+                    )
                 }
+                if enabledCount < totalCount {
+                    Text("还有 \(totalCount - enabledCount) 个未启用")
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                }
+            }
 
-                if totalCount > 1 {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            sidebarSubsExpanded.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(sidebarSubsExpanded ? "收起" : "还有 \(totalCount - 1) 个订阅")
-                                .font(.caption2.weight(.medium))
-                            Image(systemName: sidebarSubsExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 9, weight: .bold))
-                        }
-                        .foregroundStyle(BashXTheme.accent(for: appearance))
+            HStack(spacing: 6) {
+                Button {
+                    detailTab = .subscriptions
+                } label: {
+                    Text("管理")
+                        .font(.caption.weight(.semibold))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 2)
-                    }
-                    .buttonStyle(.plain)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
 
-                if enabledCount > 0 {
-                    Text("已选 \(enabledCount) 个 · 合并 \(state.nodes.count) 节点")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                } else {
-                    Text("点圆钮启用订阅（可多选）")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                Button {
+                    openAddSubscription()
+                } label: {
+                    Label("添加", systemImage: "plus")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(BashXTheme.accent(for: appearance))
+
+                Button {
+                    Task { await state.updateAllSubscriptions() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(state.isBusy || subs.isEmpty)
+                .help("更新全部订阅")
+            }
+
+            if totalCount > 1, enabledCount < totalCount {
+                Button {
+                    Task { await state.enableAllSubscriptions() }
+                } label: {
+                    Text("启用全部并合并")
+                        .font(.caption2.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BashXTheme.accent(for: appearance))
+                .disabled(state.isBusy)
+            } else if subs.isEmpty {
+                Text("添加订阅后点 ↻ 拉取节点")
+                    .font(.caption2)
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
             }
         }
         .padding(10)
@@ -612,105 +727,29 @@ struct MainView: View {
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [BashXTheme.accent(for: appearance).opacity(0.35), BashXTheme.accent(for: appearance).opacity(0.08)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
                 )
-                .shadow(color: BashXTheme.accent(for: appearance).opacity(0.06), radius: 4, y: 1)
         }
     }
 
-    private func sidebarVisibleSubscriptions(_ subs: [Subscription]) -> [Subscription] {
-        guard !sidebarSubsExpanded, subs.count > 1 else { return subs }
-        if let primary = subs.first(where: \.enabled) {
-            return [primary]
+    private func subSummaryMetric(value: String, label: String, accent: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(accent ? BashXTheme.accent(for: appearance) : .primary)
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
         }
-        return Array(subs.prefix(1))
-    }
-
-    private func sidebarSubscriptionRow(subscriptionId: UUID) -> some View {
-        let sub = state.settings.subscriptions.first(where: { $0.id == subscriptionId })
-            ?? Subscription(name: "—", url: "")
-        let solo = sub.enabled && state.settings.subscriptions.filter(\.enabled).count == 1
-        return HStack(spacing: 6) {
-            Button {
-                Task { await state.setSubscriptionEnabled(subscriptionId, enabled: !sub.enabled) }
-            } label: {
-                SubscriptionEnableControl(
-                    enabled: sub.enabled,
-                    monogram: sidebarSubMonogram(sub.name),
-                    size: 20,
-                    emphasized: solo
-                )
-            }
-            .buttonStyle(PanelPressButtonStyle())
-            .help(sub.enabled ? "停用此订阅" : "启用并合并节点（可多选）")
-
-            Button {
-                detailTab = .subscriptions
-            } label: {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(sub.name)
-                            .font(.system(size: 11, weight: solo ? .semibold : .medium, design: .rounded))
-                            .lineLimit(1)
-                            .foregroundStyle(sub.enabled ? .primary : .secondary)
-                        if sub.enabled {
-                            Text(solo ? "当前" : "已启用")
-                                .font(.system(size: 8, weight: .bold, design: .rounded))
-                                .foregroundStyle(BashXTheme.accent(for: appearance))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Capsule(style: .continuous).fill(BashXTheme.accentSoft(for: appearance)))
-                        }
-                    }
-                    Text(sidebarSubDetail(sub))
-                        .font(.caption2)
-                        .foregroundStyle(sidebarDetailColor(sub))
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(sub.enabled ? BashXTheme.accentSoft(for: appearance).opacity(solo ? 0.85 : 0.45) : Color.primary.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(
-                            solo ? BashXTheme.accent(for: appearance).opacity(0.35) : BashXTheme.separator(for: appearance),
-                            lineWidth: solo ? 1 : 0.5
-                        )
-                )
-        }
-        .contextMenu {
-            if let sub = state.settings.subscriptions.first(where: { $0.id == subscriptionId }) {
-                Button("重命名") {
-                    renameDraft = sub.name
-                    renameTarget = sub
-                }
-                Button("更新此订阅") {
-                    Task { await state.updateSubscription(subscriptionId) }
-                }
-                .disabled(state.isBusy)
-                Button(sub.enabled ? "停用" : "启用") {
-                    Task { await state.setSubscriptionEnabled(subscriptionId, enabled: !sub.enabled) }
-                }
-                Button("仅用此订阅") {
-                    Task { await state.switchToSubscription(subscriptionId) }
-                }
-                Button("删除", role: .destructive) {
-                    state.removeSubscription(subscriptionId)
-                }
-            }
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(accent
+                      ? BashXTheme.accentSoft(for: appearance)
+                      : BashXTheme.secondaryFill(for: appearance))
         }
     }
 
@@ -732,28 +771,6 @@ struct MainView: View {
         .transaction { $0.animation = nil }
     }
 
-    private func sidebarSubMonogram(_ name: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first else { return "#" }
-        return String(first).uppercased()
-    }
-
-    private func sidebarSubDetail(_ sub: Subscription) -> String {
-        if !sub.enabled { return "已停用 · 点左侧启用" }
-        if let info = sub.userInfo {
-            return "剩 \(info.remainingText)/\(info.totalText) · \(info.expireRelativeText)"
-        }
-        return sub.updatedAt.map { "更新于 \($0.formatted(.relative(presentation: .named)))" } ?? "未更新"
-    }
-
-    private func sidebarDetailColor(_ sub: Subscription) -> Color {
-        guard sub.enabled, let info = sub.userInfo else { return .secondary }
-        if info.isExpired { return BashXTheme.bad }
-        if let ratio = info.usedRatio, ratio >= 0.9 { return BashXTheme.bad }
-        if let ratio = info.usedRatio, ratio >= 0.7 { return BashXTheme.warn }
-        return .secondary
-    }
-
     // MARK: - Detail
 
     private var detail: some View {
@@ -770,8 +787,10 @@ struct MainView: View {
                 case .monitor:
                     MonitorPane(
                         monitor: monitor,
+                        panel: rates.panel,
                         segment: $monitorSegment,
-                        coreRunning: state.coreRunning,
+                        coreAlive: state.isCoreVisiblyAlive || state.coreRunning,
+                        lang: lang,
                         onCloseAll: {
                             Task { await monitor.closeAllConnections() }
                         }
@@ -783,6 +802,7 @@ struct MainView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(BashXTheme.canvas(for: appearance))
     }
 
     private var detailHeader: some View {
@@ -790,7 +810,7 @@ struct MainView: View {
             HStack(spacing: 10) {
                 Picker("", selection: $detailTab) {
                     ForEach(DetailTab.allCases) { tab in
-                        Text(tab.rawValue).tag(tab)
+                        Text(tab.title(lang: lang)).tag(tab)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -808,47 +828,25 @@ struct MainView: View {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                                     .font(.system(size: 11, weight: .semibold))
-                                TextField("搜索节点 / 类型 / 地区", text: searchTextBinding)
+                                TextField("搜索节点", text: searchTextBinding)
                                     .textFieldStyle(.plain)
                                     .font(.system(size: 12, design: .rounded))
                             }
                         }
-                        .frame(minWidth: 140, maxWidth: 220)
+                        .frame(maxWidth: .infinity)
 
-                        Picker("", selection: Binding(
-                            get: { state.settings.nodeDisplayMode },
-                            set: { state.setNodeDisplayMode($0) }
-                        )) {
-                            ForEach(NodeDisplayMode.allCases) { mode in
-                                Text(mode.title).tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 96)
-                        .help("卡片 / 列表展示")
-
-                        Picker("", selection: sortByDelayBinding) {
-                            Text("延迟").tag(true)
-                            Text("名称").tag(false)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 96)
-                        .help("组内排序方式")
+                        nodesOptionsMenu
 
                         Text("\(state.filteredNodes.count)/\(state.nodes.count)")
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .monospacedDigit()
                             .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 5)
                             .background(
                                 Capsule(style: .continuous)
-                                    .fill(Color.primary.opacity(0.05))
+                                    .fill(BashXTheme.accentSoft(for: appearance))
                             )
-
-                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -865,6 +863,41 @@ struct MainView: View {
 
     private var nodesPaneContent: some View {
         VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        websiteProbeExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: websiteProbeExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                            .frame(width: 14)
+                        Image(systemName: "globe")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(BashXTheme.accent(for: appearance))
+                        Text(L10n.t("probe.title", state.settings.uiLanguage))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+
+                if websiteProbeExpanded {
+                    WebsiteProbeStripMac(state: state, compact: true, showTitle: false)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .background(BashXTheme.card(for: appearance).opacity(0.55))
+
             categoryBar
             Rectangle()
                 .fill(BashXTheme.hairline(for: appearance))
@@ -905,52 +938,17 @@ struct MainView: View {
     }
 
     private var categoryBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("地区分类", systemImage: "globe.asia.australia.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Spacer()
-                if let key = state.selectedCategoryKey,
-                   let item = state.categorySummary.first(where: { $0.key == key }) {
-                    Text("已选 \(item.title)")
-                        .font(.caption2)
-                        .foregroundStyle(BashXTheme.accent(for: appearance))
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                categoryChip(key: nil, title: "全部", flag: "🌐", count: state.nodes.count)
+                ForEach(state.categorySummary, id: \.key) { item in
+                    categoryChip(key: item.key, title: item.title, flag: item.flag, count: item.count)
                 }
             }
             .padding(.horizontal, 14)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    categoryChip(
-                        key: nil,
-                        title: "全部",
-                        flag: "🌐",
-                        count: state.nodes.count
-                    )
-                    ForEach(state.categorySummary, id: \.key) { item in
-                        categoryChip(
-                            key: item.key,
-                            title: item.title,
-                            flag: item.flag,
-                            count: item.count
-                        )
-                    }
-                }
-                .padding(.horizontal, 14)
-            }
         }
-        .padding(.vertical, 10)
-        .background {
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [BashXTheme.accentSoft(for: appearance).opacity(0.35), Color.primary.opacity(0.02)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        }
+        .padding(.vertical, 8)
+        .background(BashXTheme.sidebarTint(for: appearance).opacity(0.65))
     }
 
     private func categoryChip(key: String?, title: String, flag: String, count: Int) -> some View {
@@ -958,22 +956,19 @@ struct MainView: View {
         return Button {
             state.selectedCategoryKey = key
         } label: {
-            HStack(spacing: 5) {
-                Text(flag).font(.system(size: 13))
+            HStack(spacing: 4) {
+                Text(flag).font(.system(size: 12))
                 Text(title)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .font(.system(size: 11, weight: selected ? .semibold : .medium, design: .rounded))
                 Text("\(count)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(selected ? BashXTheme.accent(for: appearance) : .secondary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Capsule(style: .continuous).fill(Color.primary.opacity(selected ? 0.06 : 0.04)))
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(selected ? BashXTheme.accent(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
             }
-            .padding(.horizontal, 11)
-            .frame(height: 32)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
             .background {
                 Capsule(style: .continuous)
-                    .fill(selected ? BashXTheme.accentSoft(for: appearance).opacity(0.9) : BashXTheme.card(for: appearance).opacity(0.8))
+                    .fill(selected ? BashXTheme.accentSoft(for: appearance) : BashXTheme.card(for: appearance))
             }
             .overlay(
                 Capsule(style: .continuous)
@@ -988,22 +983,25 @@ struct MainView: View {
     private var subscriptionsPane: some View {
         PanelSubscriptionsHost(state: state) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
                     subscriptionsHeader
 
                     if state.settings.subscriptions.isEmpty {
                         subscriptionsEmptyState
                     } else {
-                        ForEach(state.settings.subscriptions) { sub in
-                            SubscriptionManageCard(
-                                subscriptionId: sub.id,
-                                index: state.settings.subscriptions.firstIndex(where: { $0.id == sub.id }) ?? 0
-                            )
-                            .environmentObject(state)
+                        LazyVStack(spacing: 10) {
+                            ForEach(state.settings.subscriptions) { sub in
+                                SubscriptionManageCard(
+                                    subscriptionId: sub.id,
+                                    index: state.settings.subscriptions.firstIndex(where: { $0.id == sub.id }) ?? 0
+                                )
+                                .environmentObject(state)
+                            }
                         }
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
             }
             .transaction { $0.animation = nil }
         }
@@ -1014,7 +1012,7 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("订阅")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                Text("\(state.settings.subscriptions.filter(\.enabled).count)/\(state.settings.subscriptions.count) 启用 · 点左侧圆钮可多选合并")
+                Text("\(state.settings.subscriptions.filter(\.enabled).count)/\(state.settings.subscriptions.count) 启用 · 勾选左侧可多选合并")
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
@@ -1128,6 +1126,50 @@ struct MainView: View {
             }
         )
     }
+
+    private var nodesOptionsMenu: some View {
+        Menu {
+            Button {
+                state.setNodeDisplayMode(.list)
+            } label: {
+                Label("列表视图", systemImage: state.settings.nodeDisplayMode == .list ? "checkmark" : "list.bullet")
+            }
+            Button {
+                state.setNodeDisplayMode(.card)
+            } label: {
+                Label("卡片视图", systemImage: state.settings.nodeDisplayMode == .card ? "checkmark" : "square.grid.2x2")
+            }
+            Divider()
+            Button {
+                sortByDelayBinding.wrappedValue = true
+            } label: {
+                Label("按延迟排序", systemImage: state.sortByDelay ? "checkmark" : "timer")
+            }
+            Button {
+                sortByDelayBinding.wrappedValue = false
+            } label: {
+                Label("按名称排序", systemImage: state.sortByDelay ? "textformat" : "checkmark")
+            }
+            Divider()
+            Button {
+                Task { await state.runSpeedTest() }
+            } label: {
+                Label(state.isTesting ? "测速中…" : "节点测速", systemImage: "gauge.with.dots.needle.67percent")
+            }
+            .disabled(state.isTesting || state.nodes.isEmpty)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                .frame(width: 28, height: 28)
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(BashXTheme.secondaryFill(for: appearance))
+                }
+        }
+        .menuStyle(.borderlessButton)
+        .help("视图与排序")
+    }
 }
 
 /// Isolated rules editor — observes AppState so text appears immediately (MainView itself is not Observable).
@@ -1135,7 +1177,15 @@ private struct RulesEditorPane: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.bashxAppearance) private var appearance
 
+    private enum Layer: String, CaseIterable, Identifiable {
+        case prepend = "自定义前置"
+        case base = "基础规则"
+        var id: String { rawValue }
+    }
+
+    @State private var layer: Layer = .prepend
     @State private var draft = ""
+    @State private var prependDraft = ""
     @State private var ready = false
     @State private var dirty = false
     @State private var issues: [String] = []
@@ -1162,18 +1212,32 @@ private struct RulesEditorPane: View {
                 }
             }
 
+            Picker("", selection: $layer) {
+                ForEach(Layer.allCases) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: layer) { _ in
+                reloadActiveDraft()
+            }
+
             if state.settings.proxyMode != .rule {
                 Text("当前是\(state.settings.proxyMode.title)模式，分流规则不会生效。请在侧栏切回「规则」。")
                     .font(.caption2)
                     .foregroundStyle(BashXTheme.warn(for: appearance))
+            } else if layer == .prepend {
+                Text("Clash Verge Merge：自定义规则写在智能规则之上；更新订阅 /「应用智能规则」不会覆盖本页。勿写 MATCH。")
+                    .font(.caption2)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             } else if state.settings.videoAdBlockEnabled {
-                Text("已开启视频广告过滤：运行时会自动前置约 \(VideoAdBlock.ruleCount) 条 REJECT（编辑区不显示）。")
+                Text("已开启去广告：运行时会自动前置约 \(VideoAdBlock.ruleCount) 条 REJECT（含视频站与电商跳转，编辑区不显示）。")
                     .font(.caption2)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
             ZStack {
-                TextEditor(text: $draft)
+                TextEditor(text: activeDraftBinding)
                     .font(.system(size: 11, design: .monospaced))
                     .scrollContentBackground(.hidden)
                     .padding(8)
@@ -1197,10 +1261,6 @@ private struct RulesEditorPane: View {
                         lineWidth: 0.8
                     )
             )
-            .onChange(of: draft) { _ in
-                state.rulesText = draft
-                scheduleValidate()
-            }
 
             if !issues.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1218,23 +1278,28 @@ private struct RulesEditorPane: View {
             }
 
             HStack(spacing: 8) {
-                Button("应用智能规则 v\(ChinaSmartRules.version)") {
-                    Task {
-                        await state.applyChinaSmartRules()
-                        reloadFromState()
+                if layer == .base {
+                    Button("应用智能规则 v\(ChinaSmartRules.version)") {
+                        Task {
+                            await state.applyChinaSmartRules()
+                            reloadFromState()
+                        }
                     }
+                    .controlSize(.small)
+                    .help("仅覆盖「基础规则」；自定义前置规则保留")
+                } else {
+                    Button("清空前置") {
+                        prependDraft = ""
+                        scheduleValidate()
+                    }
+                    .controlSize(.small)
+                    .disabled(prependDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .controlSize(.small)
-                .help("用内置 BashX 智能规则覆盖当前编辑内容并立即生效")
 
                 Spacer()
 
                 Button("保存并生效") {
-                    Task {
-                        state.rulesText = draft
-                        await state.saveRulesFromEditor()
-                        reloadFromState()
-                    }
+                    Task { await saveActive() }
                 }
                 .controlSize(.small)
                 .keyboardShortcut(.defaultAction)
@@ -1244,11 +1309,25 @@ private struct RulesEditorPane: View {
         .padding(16)
         .onAppear { reloadFromState() }
         .onReceive(state.$rulesText.receive(on: RunLoop.main)) { text in
-            if !dirty, text != draft, !text.isEmpty {
-                draft = text
-                refreshMeta(for: text)
-            }
+            guard layer == .base, !dirty, text != draft, !text.isEmpty else { return }
+            draft = text
+            refreshMeta(for: text)
         }
+    }
+
+    private var activeDraftBinding: Binding<String> {
+        Binding(
+            get: { layer == .prepend ? prependDraft : draft },
+            set: { newValue in
+                if layer == .prepend {
+                    prependDraft = newValue
+                } else {
+                    draft = newValue
+                    state.rulesText = newValue
+                }
+                scheduleValidate()
+            }
+        )
     }
 
     private func reloadFromState() {
@@ -1260,8 +1339,26 @@ private struct RulesEditorPane: View {
             state.rulesText = text
         }
         draft = text
+        prependDraft = state.settings.rulesPrepend.joined(separator: "\n")
         ready = true
+        reloadActiveDraft()
+    }
+
+    private func reloadActiveDraft() {
+        let text = layer == .prepend ? prependDraft : draft
         refreshMeta(for: text)
+    }
+
+    private func saveActive() async {
+        if layer == .prepend {
+            await state.saveRulesPrependFromEditor(prependDraft)
+            prependDraft = state.settings.rulesPrepend.joined(separator: "\n")
+        } else {
+            state.rulesText = draft
+            await state.saveRulesFromEditor()
+            draft = state.rulesText
+        }
+        reloadActiveDraft()
     }
 
     private func scheduleValidate() {
@@ -1269,21 +1366,30 @@ private struct RulesEditorPane: View {
         validateTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled else { return }
-            refreshMeta(for: draft)
+            let text = layer == .prepend ? prependDraft : draft
+            refreshMeta(for: text)
         }
     }
 
     private func refreshMeta(for text: String) {
         let parsed = ClashRuleSyntax.parseLines(text)
-        dirty = parsed != state.settings.rules
-        issues = ClashRuleSyntax.validate(text)
-        let edited = parsed.count
-        let extra = state.settings.videoAdBlockEnabled ? VideoAdBlock.ruleCount : 0
-        let runtime = edited + extra
-        var parts = ["编辑 \(edited) 条", "生效约 \(runtime) 条"]
-        if state.settings.rulesVersion > 0 {
-            parts.insert("智能规则基准 v\(state.settings.rulesVersion)", at: 0)
+        if layer == .prepend {
+            dirty = parsed != state.settings.rulesPrepend
+        } else {
+            dirty = parsed != state.settings.rules
         }
+        issues = ClashRuleSyntax.validate(text)
+        let prependCount = state.settings.rulesPrepend.count
+        let baseCount = layer == .base ? parsed.count : state.settings.rules.count
+        let extra = state.settings.videoAdBlockEnabled ? VideoAdBlock.ruleCount : 0
+        let runtime = (layer == .prepend ? parsed.count : prependCount) + baseCount + extra
+        var parts: [String] = []
+        if state.settings.rulesVersion > 0 {
+            parts.append("智能规则基准 v\(state.settings.rulesVersion)")
+        }
+        parts.append("前置 \(layer == .prepend ? parsed.count : prependCount) 条")
+        parts.append("基础 \(baseCount) 条")
+        parts.append("生效约 \(runtime) 条")
         statusLine = parts.joined(separator: " · ")
     }
 }
@@ -1316,17 +1422,213 @@ private struct PanelStatusLine: View {
     }
 }
 
-/// Only the rate chips re-render when traffic ticks (~1Hz).
-private struct PanelTopBarRates: View {
-    @ObservedObject var rates: MenuBarRateStore
+/// Sidebar traffic — isolated so only this block redraws on ~1Hz ticks.
+private struct PanelSidebarTraffic: View {
+    @ObservedObject var panel: PanelRateStore
+    @Environment(\.bashxAppearance) private var appearance
+    let coreRunning: Bool
     var onOpenMonitor: () -> Void
 
+    private var live: Bool { panel.isLive && coreRunning }
+    private var downTint: Color { BashXTheme.accent(for: appearance) }
+    private var upTint: Color { Color(red: 0.98, green: 0.58, blue: 0.28) }
+
     var body: some View {
-        TopBarRateBadge(panel: rates.panel)
-            .fixedSize(horizontal: true, vertical: false)
-            .onTapGesture(perform: onOpenMonitor)
-            .help("打开流量监控")
-            .transaction { $0.animation = nil }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(downTint.opacity(appearance == .dark ? 0.28 : 0.16))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(downTint)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("实时流量")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    Text(live ? "点击查看监控" : "等待内核连接")
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(live ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
+                        .frame(width: 6, height: 6)
+                    Text(live ? "LIVE" : "OFF")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(live ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background {
+                    Capsule(style: .continuous)
+                        .fill(live
+                              ? BashXTheme.good(for: appearance).opacity(0.14)
+                              : BashXTheme.secondaryFill(for: appearance))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+
+            SidebarTrafficChart(
+                samples: panel.samples,
+                downTint: downTint,
+                upTint: upTint,
+                appearance: appearance,
+                live: live
+            )
+            .frame(height: 88)
+            .padding(.horizontal, 10)
+
+            HStack(spacing: 10) {
+                Text("↓ \(panel.downMbps)/s · \(ByteFormat.size(panel.downTotal))")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(downTint)
+                    .lineLimit(1)
+                Text("↑ \(panel.upMbps)/s · \(ByteFormat.size(panel.upTotal))")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(upTint)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
+        }
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    downTint.opacity(live ? 0.35 : 0.12),
+                                    upTint.opacity(live ? 0.18 : 0.06),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: downTint.opacity(live ? 0.10 : 0.04), radius: 8, y: 2)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: onOpenMonitor)
+        .help("点击查看流量监控")
+        .transaction { $0.animation = nil }
+    }
+}
+
+/// Compact dual-series area chart for the sidebar.
+private struct SidebarTrafficChart: View {
+    let samples: [TrafficSample]
+    let downTint: Color
+    let upTint: Color
+    let appearance: AppAppearance
+    let live: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let downs = samples.map(\.down)
+            let ups = samples.map(\.up)
+            let maxV = max(downs.max() ?? 0, ups.max() ?? 0, 1024)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                downTint.opacity(appearance == .dark ? 0.16 : 0.10),
+                                upTint.opacity(appearance == .dark ? 0.08 : 0.04),
+                                BashXTheme.secondaryFill(for: appearance).opacity(0.25),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(appearance == .dark ? 0.10 : 0.05), lineWidth: 0.5)
+                    )
+
+                // Soft grid
+                VStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Spacer()
+                        Rectangle()
+                            .fill(Color.primary.opacity(appearance == .dark ? 0.06 : 0.04))
+                            .frame(height: 0.5)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                if live, samples.count > 1 {
+                    chartPath(values: downs, maxV: maxV, size: geo.size, closed: true)
+                        .fill(
+                            LinearGradient(
+                                colors: [downTint.opacity(0.42), downTint.opacity(0.02)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    chartPath(values: downs, maxV: maxV, size: geo.size, closed: false)
+                        .stroke(downTint, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                        .shadow(color: downTint.opacity(0.35), radius: 3, y: 1)
+                    chartPath(values: ups, maxV: maxV, size: geo.size, closed: false)
+                        .stroke(upTint, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                        .shadow(color: upTint.opacity(0.25), radius: 2, y: 1)
+                } else {
+                    Text(live ? "采集中…" : "等待流量数据")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+    }
+
+    private func chartPath(values: [Int64], maxV: Int64, size: CGSize, closed: Bool) -> Path {
+        Path { p in
+            guard values.count > 1 else { return }
+            let padX: CGFloat = 8
+            let padY: CGFloat = 8
+            let w = size.width - padX * 2
+            let h = size.height - padY * 2
+            let step = w / CGFloat(max(values.count - 1, 1))
+
+            func point(at i: Int) -> CGPoint {
+                let x = padX + CGFloat(i) * step
+                let y = padY + h - CGFloat(Double(values[i]) / Double(maxV)) * h
+                return CGPoint(x: x, y: y)
+            }
+
+            p.move(to: point(at: 0))
+            for i in 1..<values.count {
+                let prev = point(at: i - 1)
+                let curr = point(at: i)
+                let mid = CGPoint(x: (prev.x + curr.x) / 2, y: (prev.y + curr.y) / 2)
+                p.addQuadCurve(to: mid, control: prev)
+                if i == values.count - 1 {
+                    p.addQuadCurve(to: curr, control: curr)
+                }
+            }
+
+            if closed {
+                p.addLine(to: CGPoint(x: padX + CGFloat(values.count - 1) * step, y: padY + h))
+                p.addLine(to: CGPoint(x: padX, y: padY + h))
+                p.closeSubpath()
+            }
+        }
     }
 }
 
@@ -1525,7 +1827,7 @@ private struct NodesCategoriesView: View {
                             categoryHeader(group)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 2)
-                                .background(BashXTheme.card(for: appearance).opacity(0.92))
+                                .background(BashXTheme.card(for: appearance))
                         }
                     }
                 }
@@ -1540,99 +1842,92 @@ private struct NodesCategoriesView: View {
 
     private var cardPane: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 10, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 6, pinnedViews: [.sectionHeaders]) {
                 ForEach(groups) { group in
                     Section {
                         if !collapsed.contains(group.key) {
                             LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 148, maximum: 200), spacing: 8)],
+                                columns: [GridItem(.adaptive(minimum: 200, maximum: 320), spacing: 8)],
                                 spacing: 8
                             ) {
                                 ForEach(group.nodes) { node in
                                     nodeCard(node, group: group)
                                 }
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.bottom, 2)
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 4)
                         }
                     } header: {
-                        categoryHeaderCard(group)
+                        categoryHeader(group)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 2)
+                            .background(BashXTheme.canvas(for: appearance))
                     }
                 }
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
         }
     }
 
     private func categoryHeader(_ group: NodeCategory.Group) -> some View {
         let isCollapsed = collapsed.contains(group.key)
         let best = group.nodes.lazy.compactMap(\.delayMs).filter { $0 > 0 }.min()
-        return Button {
-            toggle(group.key)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                    .frame(width: 10)
-                Text(group.flag)
-                    .font(.system(size: 12))
-                Text(group.title)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                Text("\(group.nodes.count)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(BashXTheme.secondaryFill(for: appearance)))
-                Spacer(minLength: 4)
-                if let best {
-                    Text("最快 \(best)ms")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(BashXTheme.delayColor(best, appearance: appearance))
-                }
-            }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PanelPressButtonStyle())
-    }
-
-    private func categoryHeaderCard(_ group: NodeCategory.Group) -> some View {
-        let isCollapsed = collapsed.contains(group.key)
-        let best = group.nodes.lazy.compactMap(\.delayMs).filter { $0 > 0 }.min()
-        return Button {
-            toggle(group.key)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: isCollapsed ? "chevron.right.circle.fill" : "chevron.down.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                Text(group.flag)
-                    .font(.system(size: 16))
-                VStack(alignment: .leading, spacing: 1) {
+        return HStack(spacing: 8) {
+            Button {
+                toggle(group.key)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                        .frame(width: 10)
+                    Text(group.flag)
+                        .font(.system(size: 12))
                     Text(group.title)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                    Text("\(group.nodes.count) 个节点")
-                        .font(.caption2)
-                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    Text("\(group.nodes.count)")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                    Spacer(minLength: 4)
+                    if let best {
+                        Text("\(best) ms")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(BashXTheme.delayColor(best, appearance: appearance))
+                    }
                 }
-                Spacer(minLength: 4)
-                if let best {
-                    Text("最快 \(best) ms")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(BashXTheme.delayColor(best, appearance: appearance))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule(style: .continuous).fill(BashXTheme.delayColor(best, appearance: appearance).opacity(0.12)))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PanelPressButtonStyle())
+
+            Button {
+                Task {
+                    await state.runSpeedTest(nodes: group.nodes, label: group.title)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    if state.isTesting {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    Text(state.isTesting ? "测速中" : "测速")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(BashXTheme.accent(for: appearance))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background {
+                    Capsule(style: .continuous)
+                        .fill(BashXTheme.accentSoft(for: appearance))
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Color.primary.opacity(0.03))
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(state.isTesting || group.nodes.isEmpty)
+            .help("测速「\(group.title)」分组内 \(group.nodes.count) 个节点")
         }
-        .buttonStyle(PanelPressButtonStyle())
+        .padding(.vertical, 5)
     }
 
     private func nodeCard(_ node: ProxyNode, group: NodeCategory.Group) -> some View {
@@ -1643,61 +1938,59 @@ private struct NodesCategoriesView: View {
         return Button {
             onSelect(node.name)
         } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(alignment: .center, spacing: 6) {
-                    Text(group.flag)
-                        .font(.system(size: 10))
-                        .frame(width: 20, height: 20)
-                        .background(Circle().fill(BashXTheme.accentSoft(for: appearance).opacity(highlighted ? 1 : 0.7)))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
                     Text(node.name)
-                        .font(.system(size: 11, weight: highlighted ? .semibold : .medium, design: .rounded))
+                        .font(.system(size: 12, weight: highlighted ? .semibold : .medium, design: .rounded))
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(node.name)
 
                     if switching {
-                        ProgressView()
-                            .controlSize(.small)
-                            .scaleEffect(0.65)
+                        ProgressView().controlSize(.small).scaleEffect(0.65)
                     } else if selected {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(BashXTheme.accent(for: appearance))
                     }
                 }
 
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     Text(shortType(node.type))
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(highlighted ? BashXTheme.accent(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
-                        .padding(.horizontal, 5)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
                             Capsule(style: .continuous)
                                 .fill(highlighted
-                                      ? BashXTheme.accent(for: appearance).opacity(0.15)
+                                      ? BashXTheme.accent(for: appearance).opacity(0.14)
                                       : BashXTheme.secondaryFill(for: appearance))
                         )
                     Spacer(minLength: 0)
-                    Text(delay.map { "\($0) ms" } ?? "—")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    Text(delayText(delay))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .monospacedDigit()
                         .foregroundStyle(
-                            delay.map { BashXTheme.delayColor($0, appearance: appearance) } ?? BashXTheme.secondaryLabel(for: appearance)
+                            delay.map { BashXTheme.delayColor($0, appearance: appearance) }
+                                ?? BashXTheme.tertiaryLabel(for: appearance)
                         )
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(highlighted ? BashXTheme.accentSoft(for: appearance) : BashXTheme.card(for: appearance))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(
                                 highlighted
-                                    ? BashXTheme.accent(for: appearance).opacity(0.5)
+                                    ? BashXTheme.accent(for: appearance).opacity(0.45)
                                     : BashXTheme.separator(for: appearance),
                                 lineWidth: highlighted ? 1 : 0.5
                             )
@@ -1705,7 +1998,13 @@ private struct NodesCategoriesView: View {
             }
         }
         .buttonStyle(PanelPressButtonStyle())
-        .help(highlighted ? "当前节点" : "点击切换到此节点")
+        .help(node.name)
+    }
+
+    private func delayText(_ delay: Int?) -> String {
+        guard let ms = delay else { return "—" }
+        if ms < 0 { return "超时" }
+        return "\(ms) ms"
     }
 
     private func nodeRow(_ node: ProxyNode, index: Int) -> some View {
@@ -1713,54 +2012,38 @@ private struct NodesCategoriesView: View {
         let switching = switchingNodeName == node.name
         let highlighted = selected || switching
         return HStack(spacing: 8) {
-            ZStack {
+            Group {
                 if switching {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.7)
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
                 } else if selected {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(BashXTheme.accent(for: appearance))
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                 } else {
-                    Text("\(index)")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                    Circle()
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 1)
+                        .frame(width: 8, height: 8)
                 }
             }
-            .frame(width: 18)
+            .frame(width: 16)
 
             Text(node.name)
-                .font(.system(size: 12, weight: highlighted ? .semibold : .medium, design: .rounded))
+                .font(.system(size: 12, weight: highlighted ? .semibold : .regular, design: .rounded))
                 .lineLimit(1)
-                .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(shortType(node.type))
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                .frame(width: 56, alignment: .center)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
-                )
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                .frame(width: 48, alignment: .center)
 
             delayBadge(node)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(selected ? BashXTheme.accentSoft(for: appearance).opacity(0.65) : Color.clear)
-        }
-        .overlay(alignment: .leading) {
-            if selected {
-                RoundedRectangle(cornerRadius: 2, style: .continuous)
-                    .fill(BashXTheme.accent(for: appearance))
-                    .frame(width: 3)
-                    .padding(.vertical, 4)
-            }
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(selected ? BashXTheme.accentSoft(for: appearance).opacity(0.5) : Color.clear)
         }
         .contentShape(Rectangle())
     }
@@ -1779,16 +2062,10 @@ private struct NodesCategoriesView: View {
             return "\(ms) ms"
         }()
         return Text(text)
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
             .monospacedDigit()
             .foregroundStyle(color)
-            .frame(minWidth: 64, alignment: .trailing)
-            .padding(.vertical, 3)
-            .padding(.horizontal, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(color.opacity(node.delayMs == nil ? 0.04 : 0.10))
-            )
+            .frame(width: 52, alignment: .trailing)
     }
 }
 

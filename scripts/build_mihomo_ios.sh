@@ -95,7 +95,8 @@ echo "==> gomobile bind (several minutes)..."
 mkdir -p "$ROOT/Framework"
 rm -rf "$OUT"
 
-gomobile bind -target=ios -ldflags="-checklinkname=0" -o "$OUT" .
+# with_gvisor: system-stack TCP needs kernel listener; iOS packetFlow bridge requires userspace TCP.
+gomobile bind -target=ios -tags=with_gvisor -ldflags="-checklinkname=0" -o "$OUT" .
 
 # Go 1.27 + gomobile may leave http2.(*Transport).connPool undefined — inject stub.
 patch_slice() {

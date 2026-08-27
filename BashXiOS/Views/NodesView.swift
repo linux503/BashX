@@ -5,20 +5,23 @@ struct NodesView: View {
     @EnvironmentObject private var state: IOSAppState
     @EnvironmentObject private var vpn: VPNManager
 
+    private var lang: AppLanguage { state.settings.uiLanguage }
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
+
     var body: some View {
         NavigationStack {
             Group {
                 if state.nodes.isEmpty {
                     IOSEmptyState(
                         systemImage: "point.3.connected.trianglepath.dotted",
-                        title: "暂无节点",
-                        message: "在「订阅」页添加链接并更新，节点会按地区显示在这里。"
+                        title: t("nodes.empty.title"),
+                        message: t("nodes.empty.msg")
                     )
                 } else {
                     List {
                         if state.filteredNodes.isEmpty {
                             Section {
-                                Text("没有匹配的节点")
+                                Text(t("nodes.noMatch"))
                                     .foregroundStyle(.secondary)
                                     .frame(maxWidth: .infinity, alignment: .center)
                             }
@@ -47,8 +50,9 @@ struct NodesView: View {
             .background {
                 IOSPageBackground { Color.clear }
             }
-            .searchable(text: $state.searchText, prompt: "搜索节点")
-            .navigationTitle("节点")
+            .searchable(text: $state.searchText, prompt: t("nodes.search"))
+            .navigationTitle(t("nodes.title"))
+            .id(lang.id)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -57,7 +61,7 @@ struct NodesView: View {
                         UISelectionFeedbackGenerator().selectionChanged()
                     } label: {
                         Label(
-                            state.sortByDelay ? "按延迟" : "按名称",
+                            state.sortByDelay ? t("nodes.sortDelay") : t("nodes.sortName"),
                             systemImage: state.sortByDelay ? "timer" : "textformat.abc"
                         )
                         .labelStyle(.iconOnly)
@@ -65,10 +69,10 @@ struct NodesView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("测速全部") { Task { await state.testSpeeds() } }
-                        Button("测速并选最快") { Task { await state.testSpeeds(selectFastest: true) } }
+                        Button(t("nodes.testAll")) { Task { await state.testSpeeds() } }
+                        Button(t("nodes.testFastest")) { Task { await state.testSpeeds(selectFastest: true) } }
                         if vpn.isConnected, let name = state.settings.selectedNodeName {
-                            Button("同步到 VPN") { Task { await vpn.selectNode(name) } }
+                            Button(t("nodes.syncVpn")) { Task { await vpn.selectNode(name) } }
                         }
                     } label: {
                         if state.isTesting {
@@ -86,7 +90,7 @@ struct NodesView: View {
     private var categoryChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chip("全部", key: nil, flag: nil)
+                chip(t("nodes.all"), key: nil, flag: nil)
                 ForEach(state.categorySummaries, id: \.key) { item in
                     chip("\(item.title) \(item.count)", key: item.key, flag: item.flag)
                 }
@@ -125,7 +129,7 @@ struct NodesView: View {
                         .font(.body.weight(selected ? .semibold : .regular))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    Text("\(node.type.uppercased()) · \(node.server)")
+                    Text(node.endpointSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -145,12 +149,12 @@ struct NodesView: View {
             Button {
                 UIPasteboard.general.string = node.name
             } label: {
-                Label("复制名称", systemImage: "doc.on.doc")
+                Label(t("nodes.copyName"), systemImage: "doc.on.doc")
             }
             Button {
                 state.selectNode(node.name)
             } label: {
-                Label("设为当前节点", systemImage: "checkmark.circle")
+                Label(t("nodes.setCurrent"), systemImage: "checkmark.circle")
             }
         }
     }

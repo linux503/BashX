@@ -6,6 +6,10 @@ struct SubscriptionsView: View {
     @State private var showAdd = false
     @State private var name = ""
     @State private var url = ""
+    @State private var qrShareSub: Subscription?
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
 
     var body: some View {
         NavigationStack {
@@ -13,9 +17,9 @@ struct SubscriptionsView: View {
                 if state.settings.subscriptions.isEmpty {
                     IOSEmptyState(
                         systemImage: "tray.full",
-                        title: "添加订阅",
-                        message: "粘贴 Clash 或机场订阅链接，更新后即可获取节点。",
-                        actionTitle: "添加订阅"
+                        title: t("subs.empty.title"),
+                        message: t("subs.empty.msg"),
+                        actionTitle: t("subs.add")
                     ) { showAdd = true }
                 } else {
                     List {
@@ -40,7 +44,8 @@ struct SubscriptionsView: View {
             .background {
                 IOSPageBackground { Color.clear }
             }
-            .navigationTitle("订阅")
+            .navigationTitle(t("subs.title"))
+            .id(lang.id)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -51,11 +56,28 @@ struct SubscriptionsView: View {
                     Button { showAdd = true } label: {
                         Image(systemName: "plus")
                     }
-                    .accessibilityLabel("添加订阅")
+                    .accessibilityLabel(t("subs.add"))
                 }
             }
             .sheet(isPresented: $showAdd) { addSheet }
+            .sheet(item: $qrShareSub) { sub in
+                SubscriptionQRShareSheet(name: sub.name, url: sub.url)
+            }
+            .onAppear { consumePendingAdd() }
+            .onChange(of: state.pendingShowAddSubscription) { pending in
+                if pending { consumePendingAdd() }
+            }
         }
+    }
+
+    private func consumePendingAdd() {
+        guard state.pendingShowAddSubscription else { return }
+        state.pendingShowAddSubscription = false
+        if let pending = state.pendingSubscriptionURL {
+            url = pending
+            state.pendingSubscriptionURL = nil
+        }
+        showAdd = true
     }
 
     private var summaryHeader: some View {
@@ -63,7 +85,7 @@ struct SubscriptionsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(state.settings.subscriptions.count)")
                     .font(.title2.weight(.semibold).monospacedDigit())
-                Text("订阅")
+                Text(t("subs.title"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -71,7 +93,7 @@ struct SubscriptionsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(state.nodes.count)")
                     .font(.title2.weight(.semibold).monospacedDigit())
-                Text("节点")
+                Text(t("subs.nodes"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -79,7 +101,7 @@ struct SubscriptionsView: View {
             Button {
                 Task { await state.updateAllSubscriptions() }
             } label: {
-                Label("全部更新", systemImage: "arrow.clockwise")
+                Label(t("subs.updateAll"), systemImage: "arrow.clockwise")
                     .font(.subheadline.weight(.medium))
             }
             .buttonStyle(.bordered)
@@ -92,20 +114,20 @@ struct SubscriptionsView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(sub.name.isEmpty ? "未命名订阅" : sub.name)
+                    Text(sub.name.isEmpty ? t("subs.unnamed") : sub.name)
                         .font(.headline)
                     if let updated = sub.updatedAt {
                         Text(updated.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("尚未更新")
+                        Text(t("subs.never"))
                             .font(.caption)
                             .foregroundStyle(IOSTheme.warn)
                     }
                 }
                 Spacer()
-                Toggle("启用", isOn: bindingEnabled(sub.id))
+                Toggle(t("subs.enabled"), isOn: bindingEnabled(sub.id))
                     .labelsHidden()
             }
 
@@ -132,7 +154,7 @@ struct SubscriptionsView: View {
             Button {
                 Task { await state.updateSubscription(id: sub.id) }
             } label: {
-                Text(state.isBusy ? "更新中…" : "更新此订阅")
+                Text(state.isBusy ? t("subs.updating") : t("subs.updateOne"))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -144,7 +166,15 @@ struct SubscriptionsView: View {
             Button {
                 UIPasteboard.general.string = sub.url
             } label: {
-                Label("复制链接", systemImage: "doc.on.doc")
+                Label(t("subs.copyLink"), systemImage: "doc.on.doc")
+            }
+            Button {
+                qrShareSub = sub
+            } label: {
+                Label(t("subs.qrShare"), systemImage: "qrcode")
+            }
+            ShareLink(item: sub.url) {
+                Label(t("subs.shareLink"), systemImage: "square.and.arrow.up")
             }
         }
     }
@@ -153,14 +183,14 @@ struct SubscriptionsView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("名称（可选）", text: $name)
-                    TextField("订阅 URL", text: $url, axis: .vertical)
+                    TextField(t("subs.nameOptional"), text: $name)
+                    TextField(t("subs.url"), text: $url, axis: .vertical)
                         .lineLimit(3...6)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
                 } footer: {
-                    Text("支持 Clash YAML 与 Base64 节点列表。")
+                    Text(t("subs.formHint"))
                 }
                 Section {
                     Button {
@@ -170,18 +200,18 @@ struct SubscriptionsView: View {
                             url = clip
                         }
                     } label: {
-                        Label("从剪贴板粘贴", systemImage: "doc.on.clipboard")
+                        Label(t("subs.paste"), systemImage: "doc.on.clipboard")
                     }
                 }
             }
-            .navigationTitle("添加订阅")
+            .navigationTitle(t("subs.addTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { showAdd = false }
+                    Button(t("common.cancel")) { showAdd = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("添加") {
+                    Button(t("subs.add")) {
                         state.addSubscription(name: name, url: url)
                         name = ""
                         url = ""

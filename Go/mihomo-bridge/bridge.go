@@ -21,6 +21,7 @@ import (
 	"github.com/metacubex/mihomo/hub/executor"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/tunnel/statistic"
+	"github.com/metacubex/sing/common/control"
 
 	_ "golang.org/x/mobile/bind"
 )
@@ -78,7 +79,8 @@ func SetOutboundInterface(name string) {
 func init() {
 	debug.SetGCPercent(5)
 	// Stay under Network Extension jetsam (~15–50MB depending on iOS).
-	debug.SetMemoryLimit(16 * 1024 * 1024)
+	// gVisor TCP stack needs more headroom than system-only UDP/DNS path.
+	debug.SetMemoryLimit(24 * 1024 * 1024)
 	runtime.GOMAXPROCS(2)
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
@@ -161,23 +163,15 @@ func StartWithExternalController(addr, secret string) error {
 		cfg.General.Tun.Inet6Address = nil
 		cfg.General.Tun.DNSHijack = []string{"any:53", "tcp://any:53"}
 		cfg.General.Tun.Device = ""
-		cfg.General.Tun.MTU = 1500
+		cfg.General.Tun.MTU = 1400
 		if prefix, err := netip.ParsePrefix("198.18.0.1/16"); err == nil {
 			cfg.General.Tun.Inet4Address = []netip.Prefix{prefix}
 		}
-		if tunIsSocketPair {
-			// gVisor fdbased uses readv(2 iovecs) which does NOT drain Darwin
-			// SOCK_DGRAM socketpair (bridge inErr storms, out=0). System stack
-			// uses plain Read() into one buffer — works with PI+IP datagrams.
-			cfg.General.Tun.Stack = constant.TunSystem
-			cfg.General.Tun.RecvMsgX = false
-			cfg.General.Tun.SendMsgX = false
-		} else {
-			// Real utun (BaoLianDeng): gVisor + recvmsgx.
-			cfg.General.Tun.Stack = constant.TunGvisor
-			cfg.General.Tun.RecvMsgX = true
-			cfg.General.Tun.SendMsgX = false
-		}
+		// RecvMsgX sets UTUN_OPT — invalid on socketpair/injected fd.
+		cfg.General.Tun.RecvMsgX = false
+		cfg.General.Tun.SendMsgX = false
+		// packetFlow bridge: IP packets never hit kernel tcpListener; gVisor handles TCP in userspace.
+		cfg.General.Tun.Stack = constant.TunGvisor
 		dnsListen := ""
 		if cfg.DNS != nil {
 			dnsListen = cfg.DNS.Listen
@@ -185,6 +179,10 @@ func StartWithExternalController(addr, secret string) error {
 		log.Infoln("BashX TUN fd=%d socketpair=%v stack=%s bindIF=%q recvmsgx=%v dns=%s",
 			tunFdGlobal, tunIsSocketPair, cfg.General.Tun.Stack, bindIF,
 			cfg.General.Tun.RecvMsgX, dnsListen)
+	} else {
+		cfg.General.Tun.Enable = false
+		log.Infoln("BashX proxy-only mixed-port=%d bindIF=%q (no TUN capture)",
+			cfg.General.MixedPort, bindIF)
 	}
 
 	var applyErr error
@@ -263,17 +261,27 @@ func UpdateLogLevel(level string) {
 	}
 }
 
-// TestDirectTCP checks whether the extension can dial outside the tunnel (NE exemption).
+// TestDirectTCP dials via physical NIC (IP_BOUND_IF) — same as mihomo egress under VPN.
 func TestDirectTCP(host string, port int32) string {
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	start := time.Now()
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	bindIF := outboundInterfaceName
+	if bindIF != "" {
+		finder := control.NewDefaultInterfaceFinder()
+		dialer.Control = control.BindToInterface(finder, bindIF, -1)
+	}
+	conn, err := dialer.Dial("tcp", addr)
 	elapsed := time.Since(start)
 	if err != nil {
-		return fmt.Sprintf("FAIL after %v: %v", elapsed, err)
+		tag := bindIF
+		if tag == "" {
+			tag = "(none)"
+		}
+		return fmt.Sprintf("FAIL bindIF=%s after %v: %v", tag, elapsed, err)
 	}
 	_ = conn.Close()
-	return fmt.Sprintf("OK connected %s in %v", addr, elapsed)
+	return fmt.Sprintf("OK bindIF=%s connected %s in %v", bindIF, addr, elapsed)
 }
 
 // TestDNSResolver sends a minimal A query to mihomo DNS listen address.

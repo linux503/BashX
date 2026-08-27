@@ -38,8 +38,9 @@ struct BashXVPNControl: ControlWidget {
                 action: SetBashXVPNIntent()
             ) { on in
                 Label(on ? "已连接" : "未连接", image: "bashx.mark")
+                    .symbolRenderingMode(.monochrome)
             }
-            .tint(Color(red: 0.06, green: 0.72, blue: 0.62))
+            .tint(Color(red: 0.22, green: 0.64, blue: 0.96))
         }
         .displayName("BashX VPN")
         .description("一键连接或断开 BashX")

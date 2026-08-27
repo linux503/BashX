@@ -6,6 +6,10 @@ struct SettingsViewIOS: View {
     @State private var showTunnelLog = false
     @State private var tunnelLogText = ""
 
+    private var lang: AppLanguage { state.settings.uiLanguage }
+
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
+
     private var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
@@ -16,9 +20,43 @@ struct SettingsViewIOS: View {
         NavigationStack {
             Form {
                 Section {
+                    Picker(t("lang.title"), selection: Binding(
+                        get: { state.settings.uiLanguage },
+                        set: { state.setUiLanguage($0) }
+                    )) {
+                        ForEach(AppLanguage.allCases) { item in
+                            Text(item.pickerTitle).tag(item)
+                        }
+                    }
+                } header: {
+                    Text(t("ios.sec.language"))
+                } footer: {
+                    Text(t("lang.footer"))
+                }
+
+                Section {
+                    Toggle(t("ios.disguise.toggle"), isOn: Binding(
+                        get: { state.settings.iosDisguiseEnabled },
+                        set: { state.setDisguiseEnabled($0) }
+                    ))
+                    if state.settings.iosDisguiseEnabled {
+                        Text(t("ios.disguise.hint"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            state.lockApp()
+                        } label: {
+                            Label(t("ios.disguise.lockNow"), systemImage: "lock.fill")
+                        }
+                    }
+                } header: {
+                    Text(t("ios.sec.privacy"))
+                }
+
+                Section {
                     if IOSIconManager.supportsAlternateIcons {
                         VStack(alignment: .leading, spacing: 14) {
-                            Text("专为手机主屏幕优化的 8 款图标。切换后桌面图标会立即更换；若仍是空白，请删掉 App 重装一次。")
+                            Text(t("ios.icon.hint"))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                             IOSLogoStylePicker(selection: Binding(
@@ -28,42 +66,42 @@ struct SettingsViewIOS: View {
                         }
                         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 16, trailing: 16))
                     } else {
-                        Text("当前系统不支持更换图标")
+                        Text(t("ios.icon.unsupported"))
                             .foregroundStyle(.secondary)
                     }
                 } header: {
-                    Text("App 图标")
+                    Text(t("ios.sec.icon"))
                 }
 
                 Section {
-                    LabeledContent("连接", value: vpn.statusText)
+                    LabeledContent(t("ios.conn.status"), value: vpn.statusText)
                     if vpn.isConnected {
                         TimelineView(.periodic(from: .now, by: 1)) { _ in
-                            LabeledContent("时长") {
+                            LabeledContent(t("ios.conn.duration")) {
                                 Text(IOSTheme.formatDuration(vpn.connectionDuration))
                                     .monospacedDigit()
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        LabeledContent("下行累计") {
+                        LabeledContent(t("ios.conn.down")) {
                             Text(ByteFormat.size(vpn.downloadBytes))
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
                         }
-                        LabeledContent("上行累计") {
+                        LabeledContent(t("ios.conn.up")) {
                             Text(ByteFormat.size(vpn.uploadBytes))
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    LabeledContent("节点") {
+                    LabeledContent(t("ios.conn.node")) {
                         Text(state.settings.selectedNodeName ?? "—")
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-                    LabeledContent("出站 IP") {
+                    LabeledContent(t("ios.conn.ip")) {
                         HStack(spacing: 8) {
-                            Text(state.outboundIPLoading ? "查询中…" : state.outboundIP)
+                            Text(state.outboundIPLoading ? t("common.loading") : state.outboundIP)
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                             Button {
@@ -76,42 +114,59 @@ struct SettingsViewIOS: View {
                         }
                     }
                 } header: {
-                    Text("连接")
+                    Text(t("ios.sec.connection"))
                 }
 
                 Section {
                     Button {
                         Task { await vpn.reconnect() }
                     } label: {
-                        Label("重新连接 VPN", systemImage: "arrow.triangle.2.circlepath")
+                        Label(t("ios.conn.reconnect"), systemImage: "arrow.triangle.2.circlepath")
                     }
                     .disabled(vpn.isBusyConnecting)
 
                     Button(role: .destructive) {
                         vpn.disconnect()
                     } label: {
-                        Label("断开 VPN", systemImage: "xmark.circle")
+                        Label(t("ios.conn.disconnect"), systemImage: "xmark.circle")
                     }
                     .disabled(!vpn.isConnected && !vpn.isBusyConnecting)
                 }
 
                 Section {
                     Stepper(value: $state.settings.testTimeoutMs, in: 1000...8000, step: 500) {
-                        LabeledContent("超时") {
+                        LabeledContent(t("ios.speed.timeout")) {
                             Text("\(state.settings.testTimeoutMs) ms")
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
                     }
                     Stepper(value: $state.settings.concurrency, in: 2...16) {
-                        LabeledContent("并发") {
+                        LabeledContent(t("ios.speed.concurrency")) {
                             Text("\(state.settings.concurrency)")
                                 .foregroundStyle(.secondary)
                                 .monospacedDigit()
                         }
                     }
                 } header: {
-                    Text("测速")
+                    Text(t("ios.sec.speed"))
+                }
+
+                Section {
+                    Picker(t("ios.proxy.picker"), selection: Binding(
+                        get: { state.settings.iosTunnelCapture ? "tun" : "proxy" },
+                        set: { state.setIosTunnelCapture($0 == "tun") }
+                    )) {
+                        Text(t("ios.proxy.tun")).tag("tun")
+                        Text(t("ios.proxy.http")).tag("proxy")
+                    }
+                    Text(state.settings.iosTunnelCapture ? t("ios.proxy.tun.hint") : t("ios.proxy.http.hint"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text(t("ios.sec.proxyMode"))
+                } footer: {
+                    Text(String(format: t("ios.proxy.footer"), "\(AppConstants.mixedPort)"))
                 }
 
                 Section {
@@ -120,68 +175,74 @@ struct SettingsViewIOS: View {
                         set: { state.setDnsPreference($0) }
                     )) {
                         ForEach(DnsPreference.allCases) { pref in
-                            Text(pref.title).tag(pref)
+                            Text(pref.title(lang: lang)).tag(pref)
                         }
                     }
-                    Text(state.settings.dnsPreference.subtitle)
+                    Text(state.settings.dnsPreference.subtitle(lang: lang))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } header: {
-                    Text("DNS")
+                    Text(t("ios.sec.dns"))
                 } footer: {
-                    Text("修改 DNS 后请重新连接 VPN。")
+                    Text(t("ios.dns.footer"))
                 }
 
                 Section {
-                    LabeledContent("规则版本") {
+                    LabeledContent(t("ios.routing.version")) {
                         Text("v\(state.settings.rulesVersion > 0 ? state.settings.rulesVersion : ChinaSmartRules.version)")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
-                    LabeledContent("生效条数") {
+                    LabeledContent(t("ios.routing.count")) {
                         Text("\(state.effectiveRuntimeRules().count)")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
-                    Toggle("视频广告过滤", isOn: Binding(
+                    Toggle(t("ios.routing.adblock"), isOn: Binding(
                         get: { state.settings.videoAdBlockEnabled },
                         set: { state.setVideoAdBlock($0) }
                     ))
                     Button {
                         state.applySmartRules()
                     } label: {
-                        Label("恢复智能规则 v\(ChinaSmartRules.version)", systemImage: "arrow.counterclockwise")
+                        Label(
+                            String(format: t("ios.routing.restore"), "\(ChinaSmartRules.version)"),
+                            systemImage: "arrow.counterclockwise"
+                        )
                     }
                 } header: {
-                    Text("分流")
+                    Text(t("ios.sec.routing"))
                 } footer: {
-                    Text("规则模式：国内微信/QQ 等直连，谷歌/Telegram 等走代理。全局模式全部走代理。")
+                    Text(t("ios.routing.footer"))
                 }
 
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("控制中心快捷开关", systemImage: "switch.2")
+                        Label(t("ios.controls.title"), systemImage: "switch.2")
                             .font(.body.weight(.semibold))
-                        Text("下拉控制中心 → 左上角「编辑」→ 添加「BashX VPN」，即可一键连接/断开。也可在「快捷指令」里搜索 BashX。")
+                        Text(t("ios.controls.body"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                 } header: {
-                    Text("快捷控制")
+                    Text(t("ios.sec.controls"))
                 }
 
                 Section {
                     LabeledContent("App Group") {
-                        statusBadge(Paths.usesAppGroup ? "正常" : "异常", ok: Paths.usesAppGroup)
+                        statusBadge(
+                            Paths.usesAppGroup ? t("ios.diag.config.ok") : t("ios.diag.config.missing"),
+                            ok: Paths.usesAppGroup
+                        )
                     }
                     if let err = MihomoConfigCheck.validateFile() {
-                        Text("配置：\(err)")
+                        Text("\(t("ios.diag.config"))：\(err)")
                             .font(.footnote)
                             .foregroundStyle(IOSTheme.bad)
                     }
                     if let tunnelErr = TunnelDiagnostics.lastFailureMessage() {
-                        Text("上次错误：\(tunnelErr)")
+                        Text(tunnelErr)
                             .font(.footnote)
                             .foregroundStyle(IOSTheme.bad)
                     }
@@ -189,52 +250,44 @@ struct SettingsViewIOS: View {
                         tunnelLogText = TunnelLogReader.lastLines()
                         showTunnelLog = true
                     } label: {
-                        Label("隧道日志", systemImage: "doc.text")
+                        Label(t("ios.diag.log"), systemImage: "doc.text")
                     }
                 } header: {
-                    Text("诊断")
+                    Text(t("ios.sec.diagnostics"))
                 }
 
                 Section {
-                    LabeledContent("版本", value: appVersion)
+                    LabeledContent(t("ios.about.version"), value: appVersion)
                 } header: {
-                    Text("关于")
+                    Text(t("ios.sec.about"))
                 } footer: {
-                    Text("BashX for iOS · Network Extension + Mihomo")
+                    Text(t("ios.about.footer"))
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle(t("ios.settings.nav"))
             .navigationBarTitleDisplayMode(.large)
             .tint(IOSTheme.accent)
+            .id(lang.id)
             .onChange(of: state.settings.testTimeoutMs) { _ in state.persist() }
             .onChange(of: state.settings.concurrency) { _ in state.persist() }
             .sheet(isPresented: $showTunnelLog) {
                 NavigationStack {
                     ScrollView {
-                        Text(tunnelLogText.isEmpty ? "（无日志）" : tunnelLogText)
+                        Text(tunnelLogText.isEmpty ? t("ios.diag.log.empty") : tunnelLogText)
                             .font(.system(.caption, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
                     }
                     .background(IOSTheme.groupedBackground)
-                    .navigationTitle("隧道日志")
+                    .navigationTitle(t("ios.diag.log"))
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("刷新") {
-                                tunnelLogText = TunnelLogReader.lastLines()
-                            }
-                        }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            ShareLink(item: tunnelLogText.isEmpty ? "（无日志）" : tunnelLogText)
-                        }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { showTunnelLog = false }
+                            Button(t("common.done")) { showTunnelLog = false }
                         }
                     }
                     .task {
-                        // Also pull live copy from the extension if connected.
                         if let live = await vpn.fetchTunnelLog() {
                             tunnelLogText = live
                         }

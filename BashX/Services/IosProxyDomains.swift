@@ -36,6 +36,8 @@ enum IosProxyDomains {
         "DOMAIN-SUFFIX,twitter.com,PROXY",
         "DOMAIN-SUFFIX,x.com,PROXY",
         "DOMAIN-SUFFIX,twimg.com,PROXY",
+        "DOMAIN-SUFFIX,t.co,PROXY",
+        "DOMAIN-KEYWORD,twitter,PROXY",
         "DOMAIN-SUFFIX,facebook.com,PROXY",
         "DOMAIN-SUFFIX,fbcdn.net,PROXY",
         "DOMAIN-SUFFIX,instagram.com,PROXY",

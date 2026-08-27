@@ -6,9 +6,13 @@ struct IOSConnectControl: View {
     let isEnabled: Bool
     let action: () -> Void
 
+    @EnvironmentObject private var state: IOSAppState
     @State private var pulse = false
     @State private var rotation: Double = 0
     @State private var pressScale: CGFloat = 1
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
 
     var body: some View {
         Button {
@@ -77,7 +81,7 @@ struct IOSConnectControl: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled || isBusy)
         .opacity(isEnabled ? 1 : 0.42)
-        .accessibilityLabel(isConnected ? "断开 VPN" : "连接 VPN")
+        .accessibilityLabel(isConnected ? t("connect.a11y.disconnect") : t("connect.a11y.connect"))
         .onAppear {
             pulse = isConnected
             if isBusy { startSpin() }
@@ -145,8 +149,8 @@ struct IOSConnectControl: View {
     }
 
     private var centerLabel: String {
-        if isConnected { return "已保护" }
-        if isBusy { return "连接中" }
-        return "连接"
+        if isConnected { return t("connect.protected") }
+        if isBusy { return t("connect.connecting") }
+        return t("connect.connect")
     }
 }

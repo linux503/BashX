@@ -34,10 +34,57 @@ extension ClashCore {
             request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (_, response) = try await URLSession.shared.data(for: request)
+        let config = URLSessionConfiguration.ephemeral
+        config.connectionProxyDictionary = [:]
+        config.timeoutIntervalForRequest = 5
+        let (_, response) = try await URLSession(configuration: config).data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
+    }
+
+    /// Current mihomo outbound mode: rule / global / direct.
+    static func fetchMode(controller: String, secret: String) async -> String? {
+        guard let url = URL(string: "http://\(controller)/configs") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.httpMethod = "GET"
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.connectionProxyDictionary = [:]
+        config.timeoutIntervalForRequest = 3
+        guard let (data, response) = try? await URLSession(configuration: config).data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let mode = json["mode"] as? String { return mode.lowercased() }
+        return nil
+    }
+
+    /// Apply outbound mode and verify it stuck (ClashX / Verge behavior).
+    @discardableResult
+    static func applyMode(
+        controller: String,
+        secret: String,
+        mode: ProxyMode
+    ) async -> Bool {
+        do {
+            try await patchConfig(
+                controller: controller,
+                secret: secret,
+                body: ["mode": mode.rawValue]
+            )
+        } catch {
+            return false
+        }
+        if let current = await fetchMode(controller: controller, secret: secret) {
+            return current == mode.rawValue
+        }
+        // API may omit mode on some builds — treat patch success as OK.
+        return true
     }
 
     /// Best-effort: turn TUN off via API so traffic stops even before process exits.

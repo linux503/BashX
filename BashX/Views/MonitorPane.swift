@@ -2,15 +2,28 @@ import SwiftUI
 
 struct MonitorPane: View {
     @ObservedObject var monitor: TrafficMonitor
+    @ObservedObject var panel: PanelRateStore
     @Binding var segment: MonitorSegment
-    var coreRunning: Bool
+    var coreAlive: Bool
+    var lang: AppLanguage
     var onCloseAll: () -> Void
 
     enum MonitorSegment: String, CaseIterable, Identifiable {
-        case connections = "连接"
-        case logs = "日志"
+        case connections
+        case logs
         var id: String { rawValue }
+
+        func title(_ lang: AppLanguage) -> String {
+            switch self {
+            case .connections: return L10n.t("mac.monitor.connections", lang)
+            case .logs: return L10n.t("mac.monitor.logs", lang)
+            }
+        }
     }
+
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
+
+    private var trafficLive: Bool { panel.isLive && coreAlive }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,24 +33,24 @@ struct MonitorPane: View {
             HStack {
                 Picker("", selection: $segment) {
                     ForEach(MonitorSegment.allCases) { s in
-                        Text(s.rawValue).tag(s)
+                        Text(s.title(lang)).tag(s)
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 160)
+                .frame(width: 180)
 
                 Spacer()
 
                 if segment == .connections {
-                    Text("\(monitor.connectionCount) 条")
+                    Text(t("mac.monitor.count").replacingOccurrences(of: "%@", with: "\(monitor.connectionCount)"))
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
-                    Button("清空连接") { onCloseAll() }
+                    Button(t("mac.monitor.clearConn")) { onCloseAll() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .disabled(!coreRunning || monitor.connections.isEmpty)
+                        .disabled(!coreAlive || monitor.connections.isEmpty)
                 } else {
-                    Button("清空日志") { monitor.logLines = [] }
+                    Button(t("mac.monitor.clearLogs")) { monitor.logLines = [] }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .disabled(monitor.logLines.isEmpty)
@@ -63,37 +76,37 @@ struct MonitorPane: View {
     private var trafficHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("流量")
+                Text(t("mac.monitor.traffic"))
                     .font(.subheadline.weight(.semibold))
-                Text(monitor.isLive && coreRunning ? "实时" : "离线")
+                Text(trafficLive ? t("mac.monitor.live") : t("mac.monitor.offline"))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.primary.opacity(0.06)))
                 Spacer()
-                Text("累计 ↓\(ByteFormat.size(monitor.downTotal)) ↑\(ByteFormat.size(monitor.upTotal))")
+                Text("↓\(ByteFormat.size(panel.downTotal)) ↑\(ByteFormat.size(panel.upTotal))")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 10) {
                 monitorRateChip(
-                    title: "下载",
+                    title: t("mac.monitor.down"),
                     symbol: "arrow.down.circle.fill",
-                    value: ByteFormat.fixedMegaNumber(monitor.downRate),
+                    value: panel.downMbps,
                     tint: BashXTheme.accent
                 )
                 monitorRateChip(
-                    title: "上传",
+                    title: t("mac.monitor.up"),
                     symbol: "arrow.up.circle.fill",
-                    value: ByteFormat.fixedMegaNumber(monitor.upRate),
+                    value: panel.upMbps,
                     tint: Color(red: 0.95, green: 0.55, blue: 0.18)
                 )
                 Spacer()
             }
 
-            TrafficSparkline(samples: monitor.samples)
+            TrafficSparkline(samples: panel.samples)
                 .frame(height: 128)
         }
         .padding(16)
@@ -121,15 +134,9 @@ struct MonitorPane: View {
                 Text(title)
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(value)
-                        .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                        .monospacedDigit()
-                        .frame(width: 52, alignment: .trailing)
-                    Text("M/s")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
-                }
+                Text("\(value)/s")
+                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
             }
         }
         .padding(.horizontal, 12)
@@ -152,17 +159,17 @@ struct MonitorPane: View {
 
     private var connectionsList: some View {
         Group {
-            if !coreRunning {
-                emptyState("内核未运行", "启动内核后可查看连接")
+            if !coreAlive {
+                emptyState(t("mac.monitor.coreOff"), t("mac.monitor.coreOffHint"))
             } else if monitor.connections.isEmpty {
-                emptyState("暂无活跃连接", "产生流量后会显示在这里")
+                emptyState(t("mac.monitor.noConn"), t("mac.monitor.noConnHint"))
             } else {
                 List {
                     ForEach(monitor.connections) { row in
                         connectionRow(row)
                             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                             .contextMenu {
-                                Button("关闭此连接") {
+                                Button(t("mac.monitor.closeConn")) {
                                     Task { await monitor.closeConnection(id: row.id) }
                                 }
                             }
@@ -216,10 +223,10 @@ struct MonitorPane: View {
 
     private var logsList: some View {
         Group {
-            if !coreRunning {
-                emptyState("内核未运行", "启动内核后可查看连接日志")
+            if !coreAlive {
+                emptyState(t("mac.monitor.coreOff"), t("mac.monitor.logsOffHint"))
             } else if monitor.logLines.isEmpty {
-                emptyState("等待日志…", "有请求时会实时滚动显示")
+                emptyState(t("mac.monitor.waitLogs"), t("mac.monitor.waitLogsHint"))
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -228,17 +235,15 @@ struct MonitorPane: View {
                                 Text(line)
                                     .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(.primary.opacity(0.85))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
                                     .id(idx)
                             }
                         }
-                        .padding(14)
+                        .padding(12)
                     }
-                    .onValueChange(monitor.logLines.count) { _ in
+                    .onChange(of: monitor.logLines.count) { _ in
                         if let last = monitor.logLines.indices.last {
-                            withAnimation(.easeOut(duration: 0.15)) {
-                                proxy.scrollTo(last, anchor: .bottom)
-                            }
+                            proxy.scrollTo(last, anchor: .bottom)
                         }
                     }
                 }
@@ -247,100 +252,70 @@ struct MonitorPane: View {
     }
 
     private func emptyState(_ title: String, _ subtitle: String) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: "waveform.path.ecg")
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(BashXTheme.accent.opacity(0.7))
+        VStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(.subheadline.weight(.semibold))
             Text(subtitle)
-                .font(.system(size: 12, design: .rounded))
+                .font(.caption)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 }
 
-struct TrafficSparkline: View {
+// MARK: - Sparkline
+
+private struct TrafficSparkline: View {
     let samples: [TrafficSample]
 
     var body: some View {
         GeometryReader { geo in
-            let downs = samples.map(\.down)
-            let ups = samples.map(\.up)
-            let maxV = max(downs.max() ?? 0, ups.max() ?? 0, 1)
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                BashXTheme.accent.opacity(0.08),
-                                Color.primary.opacity(0.02),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(BashXTheme.accent.opacity(0.18), lineWidth: 0.5)
-                    )
-
-                // Grid lines
-                VStack(spacing: 0) {
-                    ForEach(0..<4, id: \.self) { _ in
-                        Spacer()
-                        Rectangle().fill(Color.primary.opacity(0.04)).frame(height: 0.5)
+            let w = geo.size.width
+            let h = geo.size.height
+            if samples.count < 2 {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .overlay {
+                        Text("—")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
-                    Spacer()
+            } else {
+                let maxVal = max(
+                    samples.map { Double($0.down + $0.up) }.max() ?? 1,
+                    1024
+                )
+                ZStack(alignment: .bottom) {
+                    sparkPath(samples: samples, w: w, h: h, maxVal: maxVal, keyPath: \.down)
+                        .stroke(BashXTheme.accent, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                    sparkPath(samples: samples, w: w, h: h, maxVal: maxVal, keyPath: \.up)
+                        .stroke(Color.orange.opacity(0.85), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
                 }
-                .padding(.vertical, 8)
-
-                path(values: downs, maxV: maxV, size: geo.size)
-                    .fill(
-                        LinearGradient(
-                            colors: [BashXTheme.accent.opacity(0.35), BashXTheme.accent.opacity(0.02)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                path(values: downs, maxV: maxV, size: geo.size, closed: false)
-                    .stroke(
-                        LinearGradient(
-                            colors: [BashXTheme.accentGlow, BashXTheme.accent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
-                    )
-                    .shadow(color: BashXTheme.accent.opacity(0.35), radius: 4, y: 1)
-
-                path(values: ups, maxV: maxV, size: geo.size, closed: false)
-                    .stroke(
-                        BashXTheme.warn.opacity(0.85),
-                        style: StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [4, 3])
-                    )
             }
         }
     }
 
-    private func path(values: [Int64], maxV: Int64, size: CGSize, closed: Bool = true) -> Path {
-        Path { p in
-            guard values.count > 1 else { return }
-            let w = size.width - 16
-            let h = size.height - 16
-            let step = w / CGFloat(max(values.count - 1, 1))
-            for (i, v) in values.enumerated() {
-                let x = 8 + CGFloat(i) * step
-                let y = 8 + h - CGFloat(Double(v) / Double(maxV)) * h
-                if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                else { p.addLine(to: CGPoint(x: x, y: y)) }
-            }
-            if closed, let last = values.indices.last {
-                p.addLine(to: CGPoint(x: 8 + CGFloat(last) * step, y: 8 + h))
-                p.addLine(to: CGPoint(x: 8, y: 8 + h))
-                p.closeSubpath()
+    private func sparkPath(
+        samples: [TrafficSample],
+        w: CGFloat,
+        h: CGFloat,
+        maxVal: Double,
+        keyPath: KeyPath<TrafficSample, Int64>
+    ) -> Path {
+        var path = Path()
+        let count = samples.count
+        for (i, sample) in samples.enumerated() {
+            let x = w * CGFloat(i) / CGFloat(max(count - 1, 1))
+            let v = Double(sample[keyPath: keyPath])
+            let y = h - CGFloat(v / maxVal) * h * 0.92
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
             }
         }
+        return path
     }
 }

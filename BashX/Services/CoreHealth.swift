@@ -55,9 +55,12 @@ enum CoreHealth {
         return await httpViaProxy(port: port, urlString: "https://www.baidu.com/", timeout: 5)
     }
 
-    /// Current PROXY selection can reach Google (used when auto-picking nodes).
+    /// Current GOOGLE group can reach Translate API (not just generate_204).
     static func googleReachable(port: Int) async -> Bool {
-        if await httpViaProxy(port: port, urlString: "https://www.google.com/generate_204", timeout: 8) {
+        if await httpViaProxy(port: port, urlString: GoogleReliability.probeURL, timeout: 10) {
+            return true
+        }
+        if await httpViaProxy(port: port, urlString: GoogleReliability.fallbackProbeURL, timeout: 8) {
             return true
         }
         return await httpViaProxy(port: port, urlString: "https://www.gstatic.com/generate_204", timeout: 6)

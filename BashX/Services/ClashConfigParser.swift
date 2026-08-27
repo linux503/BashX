@@ -61,9 +61,8 @@ enum ClashConfigParser {
             dict["type"] = node.type
             if !node.server.isEmpty { dict["server"] = node.server }
             if node.port > 0 { dict["port"] = node.port }
-            if forIOS {
-                normalizeProxyForIOS(&dict)
-            }
+            // Mac Telegram / QUIC need UDP; subscription nodes often omit `udp: true`.
+            normalizeProxyUDP(&dict)
             return dict
         }
 
@@ -88,27 +87,37 @@ enum ClashConfigParser {
             return list
         }()
 
+        // Prefer selected node first, then full pool — region-only lists often leave
+        // Telegram spinning on a dead hub while PROXY looks fine.
         let telegramProxies: [String] = {
             if names.isEmpty { return ["DIRECT"] }
-            let preferred = Self.preferredRegionNodes(from: names)
-            return preferred.isEmpty ? names : preferred
+            return Self.groupProxiesPreferringSelected(names: names, selected: selected)
         }()
 
         let googleProxies: [String] = {
             if names.isEmpty { return ["DIRECT"] }
-            let preferred = Self.preferredRegionNodes(from: names)
-            return preferred.isEmpty ? names : preferred
+            return Self.groupProxiesPreferringSelected(names: names, selected: selected)
+        }()
+
+        let iosMixedPort = forIOS && !tunEnabled ? mixedPort : (forIOS ? 0 : mixedPort)
+        let bindAddress: String = {
+            // iOS HTTP-proxy experiment: mixed-port on loopback so NEProxySettings
+            // (127.0.0.1) reaches mihomo without entering packetFlow.
+            if forIOS && !tunEnabled { return "127.0.0.1" }
+            return allowLan ? "*" : "127.0.0.1"
         }()
 
         var root: [String: Any] = [
-            "mixed-port": forIOS ? 0 : mixedPort,
+            "mixed-port": iosMixedPort,
             "allow-lan": allowLan,
-            "bind-address": allowLan ? "*" : "127.0.0.1",
+            "bind-address": bindAddress,
             "mode": mode.rawValue,
             "log-level": forIOS ? "info" : "warning",
             "external-controller": controller,
             "secret": secret,
             "ipv6": false,
+            // Same as Clash Verge / Meta — one delay per proxy instead of per hop.
+            "unified-delay": true,
             "dns": forIOS
                 ? DnsPreference.iosDnsBlock(for: dnsPreference)
                 : DnsPreference.dnsBlock(for: dnsPreference),
@@ -116,6 +125,13 @@ enum ClashConfigParser {
             "proxy-groups": [
                 [
                     "name": "PROXY",
+                    "type": "select",
+                    "proxies": proxyGroupList
+                ],
+                // Explicit GLOBAL — mihomo global mode uses this group; without it the
+                // built-in GLOBAL often stays on DIRECT and 「全局」看起来像没生效。
+                [
+                    "name": "GLOBAL",
                     "type": "select",
                     "proxies": proxyGroupList
                 ],
@@ -135,7 +151,8 @@ enum ClashConfigParser {
                     "url": GoogleReliability.probeURL,
                     "interval": 180,
                     "tolerance": 50,
-                    "lazy": false
+                    "lazy": false,
+                    "expected-status": "200/204"
                 ],
                 [
                     "name": "TELEGRAM",
@@ -216,6 +233,7 @@ enum ClashConfigParser {
             "+.push.apple.com",
             "+.google.com",
             "+.googleapis.com",
+            "+.translate.goog",
             "+.gstatic.com",
             "+.googleusercontent.com",
             "+.youtube.com",
@@ -241,8 +259,6 @@ enum ClashConfigParser {
             "+.push.apple.com",
             "+.apple.com",
             "+.icloud.com",
-            "+.qq.com",
-            "+.weixin.qq.com"
         ]
     ]
 
@@ -267,6 +283,14 @@ enum ClashConfigParser {
         return names
     }
 
+    /// Selected PROXY node first, then the rest — so TELEGRAM/GOOGLE follow user pick.
+    static func groupProxiesPreferringSelected(names: [String], selected: String?) -> [String] {
+        guard let selected, names.contains(selected) else { return names }
+        var list = names.filter { $0 != selected }
+        list.insert(selected, at: 0)
+        return list
+    }
+
     /// Route Google / YouTube traffic through GOOGLE url-test (not dead AUTO nodes).
     private static func normalizeGoogleRules(_ rules: [String]) -> [String] {
         var out = rules.map { rewriteGooglePolicy($0) }
@@ -278,6 +302,9 @@ enum ClashConfigParser {
             let inject = [
                 "DOMAIN-SUFFIX,translate.google.com,GOOGLE",
                 "DOMAIN-SUFFIX,translate.googleapis.com,GOOGLE",
+                "DOMAIN-SUFFIX,translate-pa.googleapis.com,GOOGLE",
+                "DOMAIN-SUFFIX,content-translate.googleapis.com,GOOGLE",
+                "DOMAIN-SUFFIX,translate.goog,GOOGLE",
                 "DOMAIN-SUFFIX,google.com,GOOGLE",
                 "DOMAIN-SUFFIX,google.com.hk,GOOGLE",
                 "DOMAIN-SUFFIX,googleapis.com,GOOGLE",
@@ -314,6 +341,7 @@ enum ClashConfigParser {
             }
             if type == "DOMAIN-SUFFIX" || type == "DOMAIN" || type == "DOMAIN-KEYWORD" {
                 return payload.contains("google")
+                    || payload.contains("translate.goog")
                     || payload.contains("gstatic")
                     || payload.contains("googleapis")
                     || payload.contains("googlevideo")
@@ -341,14 +369,18 @@ enum ClashConfigParser {
     private static func normalizeTelegramRules(_ rules: [String]) -> [String] {
         var out = rules.map { rewriteTelegramPolicy($0) }
         let hasDC = out.contains { $0.contains("149.154.160.0/20") && $0.contains("TELEGRAM") }
+        let hasBroad91 = out.contains { $0.contains("91.108.0.0/16") && $0.contains("TELEGRAM") }
+        if !hasBroad91, hasDC {
+            if let idx = out.firstIndex(where: { $0.contains("149.154.160.0/20") && $0.contains("TELEGRAM") }) {
+                out.insert("IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve", at: idx + 1)
+            }
+        }
         if !hasDC {
             let inject = [
                 "PROCESS-NAME,Telegram,TELEGRAM",
                 "PROCESS-NAME,org.telegram.desktop,TELEGRAM",
                 "IP-CIDR,149.154.160.0/20,TELEGRAM,no-resolve",
-                "IP-CIDR,91.108.4.0/22,TELEGRAM,no-resolve",
-                "IP-CIDR,91.108.8.0/22,TELEGRAM,no-resolve",
-                "IP-CIDR,91.108.56.0/22,TELEGRAM,no-resolve",
+                "IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve",
                 "IP-CIDR,91.105.192.0/23,TELEGRAM,no-resolve",
                 "IP-CIDR,185.76.151.0/24,TELEGRAM,no-resolve",
                 "DOMAIN-SUFFIX,telegram.org,TELEGRAM",
@@ -451,6 +483,22 @@ enum ClashConfigParser {
         return true
     }
 
+    /// Skip airport traffic / expiry banner nodes — they are not real outbound proxies.
+    static func isSpeedTestable(_ node: ProxyNode) -> Bool {
+        let type = node.type.lowercased()
+        if nonProxyTypes.contains(type) { return false }
+        if node.server.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+        if node.port <= 0 || node.port > 65535 { return false }
+        let upper = node.name.uppercased()
+        if upper == "DIRECT" || upper == "REJECT" { return false }
+        let infoNeedles = [
+            "剩余流量", "套餐到期", "距离下次", "Traffic:", "Expire:", "GB /", "GB/", "流量：", "流量:",
+            "重置剩余", "套餐剩余", "已用流量", "到期时间",
+        ]
+        if infoNeedles.contains(where: { node.name.contains($0) }) { return false }
+        return true
+    }
+
     private static func normalizeToText(_ data: Data) throws -> String {
         guard let raw = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -509,7 +557,7 @@ enum ClashConfigParser {
             }
             usedNames.insert(name)
 
-            let server = (item["server"] as? String) ?? ""
+            let server = stringValue(item["server"]) ?? ""
             let port = intValue(item["port"]) ?? 0
             var rawItem = item
             rawItem["name"] = name
@@ -523,6 +571,12 @@ enum ClashConfigParser {
         if let p = value as? Int { return p }
         if let p = value as? Int64 { return Int(p) }
         if let p = value as? String { return Int(p) }
+        return nil
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        if let s = value as? String { return s }
+        if let s = value as? NSString { return s as String }
         return nil
     }
 
@@ -542,9 +596,9 @@ enum ClashConfigParser {
         return value
     }
 
-    /// iOS Safari uses QUIC/UDP:443 heavily; vmess nodes from subscriptions often omit `udp: true`
-    /// so GOOGLE/PROXY groups report "UDP is not supported" and fall back to DIRECT + poisoned DNS.
-    private static func normalizeProxyForIOS(_ dict: inout [String: Any]) {
+    /// Telegram MTProto / Safari QUIC need UDP. Subscription nodes often omit `udp: true`,
+    /// then groups report "UDP is not supported" and fall back to DIRECT.
+    private static func normalizeProxyUDP(_ dict: inout [String: Any]) {
         let type = (dict["type"] as? String)?.lowercased() ?? ""
         let udpCapable = ["vmess", "vless", "trojan", "ss", "ssr", "hysteria", "hysteria2", "tuic"]
         guard udpCapable.contains(type) else { return }

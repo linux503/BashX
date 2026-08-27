@@ -17,6 +17,18 @@ struct SavedProxySnapshot: Codable, Equatable {
 enum SystemProxy {
     private static let snapshotURL = Paths.supportDir.appendingPathComponent("proxy-backup.json")
 
+    /// ClashX-style LAN / loopback bypass when system proxy is on.
+    private static let bypassDomains = [
+        "localhost",
+        "127.0.0.1",
+        "*.local",
+        "*.lan",
+        "192.168.0.0/16",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "169.254.0.0/16",
+    ]
+
     static func listServices() -> [String] {
         let skip = ["shadowrocket", "stash", "clash", "wireguard", "tailscale", "zerotier", "vpn", "ipsec", "utun", "tun"]
         let output = run("/usr/sbin/networksetup", ["-listallnetworkservices"]) ?? ""
@@ -49,6 +61,7 @@ enum SystemProxy {
                 _ = run("/usr/sbin/networksetup", ["-setwebproxystate", service, "on"])
                 _ = run("/usr/sbin/networksetup", ["-setsecurewebproxystate", service, "on"])
                 _ = run("/usr/sbin/networksetup", ["-setsocksfirewallproxystate", service, "on"])
+                applyBypass(for: service)
             }
         } else {
             restoreFromSnapshot(fallbackServices: services)
@@ -122,6 +135,10 @@ enum SystemProxy {
                 socksPort: socks.port
             )
         }
+    }
+
+    private static func applyBypass(for service: String) {
+        _ = run("/usr/sbin/networksetup", ["-setproxybypassdomains", service] + bypassDomains)
     }
 
     private static func apply(_ snap: SavedProxySnapshot) {

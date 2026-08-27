@@ -3,21 +3,21 @@ import SwiftUI
 // MARK: - Premium design tokens (Express / Nord / Surfshark class)
 
 enum IOSTheme {
-    // Brand — refined teal-emerald with depth (not purple / cream AI defaults)
-    static let accent = Color(red: 0.06, green: 0.72, blue: 0.62)
-    static let accentDeep = Color(red: 0.03, green: 0.48, blue: 0.44)
-    static let accentBright = Color(red: 0.28, green: 0.92, blue: 0.78)
-    static let accentSoft = Color(red: 0.06, green: 0.72, blue: 0.62).opacity(0.16)
-    static let accentMuted = Color(red: 0.06, green: 0.72, blue: 0.62).opacity(0.10)
+    // Brand — sky azure (天蓝色)
+    static let accent = Color(red: 0.22, green: 0.64, blue: 0.96)
+    static let accentDeep = Color(red: 0.10, green: 0.42, blue: 0.78)
+    static let accentBright = Color(red: 0.52, green: 0.82, blue: 1.0)
+    static let accentSoft = Color(red: 0.22, green: 0.64, blue: 0.96).opacity(0.16)
+    static let accentMuted = Color(red: 0.22, green: 0.64, blue: 0.96).opacity(0.10)
 
-    static let ink = Color(red: 0.07, green: 0.12, blue: 0.14)
-    static let mist = Color(red: 0.93, green: 0.96, blue: 0.97)
+    static let ink = Color(red: 0.08, green: 0.14, blue: 0.22)
+    static let mist = Color(red: 0.92, green: 0.96, blue: 1.0)
 
     static let accentGradient = LinearGradient(
         colors: [
-            Color(red: 0.28, green: 0.92, blue: 0.78),
-            Color(red: 0.06, green: 0.72, blue: 0.62),
-            Color(red: 0.02, green: 0.48, blue: 0.44),
+            Color(red: 0.55, green: 0.84, blue: 1.0),
+            Color(red: 0.22, green: 0.64, blue: 0.96),
+            Color(red: 0.08, green: 0.40, blue: 0.78),
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
@@ -25,9 +25,9 @@ enum IOSTheme {
 
     static let heroAtmosphere = LinearGradient(
         colors: [
-            Color(red: 0.06, green: 0.72, blue: 0.62).opacity(0.28),
-            Color(red: 0.04, green: 0.55, blue: 0.58).opacity(0.12),
-            Color(red: 0.93, green: 0.96, blue: 0.97).opacity(0.4),
+            Color(red: 0.22, green: 0.64, blue: 0.96).opacity(0.28),
+            Color(red: 0.30, green: 0.58, blue: 0.92).opacity(0.12),
+            Color(red: 0.92, green: 0.96, blue: 1.0).opacity(0.4),
             Color(.systemGroupedBackground),
         ],
         startPoint: .top,
@@ -39,7 +39,7 @@ enum IOSTheme {
     static let bad = Color(red: 1.0, green: 0.32, blue: 0.28)
 
     static let chartDown = Color(red: 0.98, green: 0.52, blue: 0.38)
-    static let chartUp = Color(red: 0.22, green: 0.88, blue: 0.68)
+    static let chartUp = Color(red: 0.28, green: 0.70, blue: 0.98)
     static let chartDownGradient = LinearGradient(
         colors: [chartDown.opacity(0.45), chartDown.opacity(0.02)],
         startPoint: .top, endPoint: .bottom

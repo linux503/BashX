@@ -2,7 +2,7 @@ import Foundation
 
 enum ChinaSmartRules {
     /// Bump when bundled rule set changes so existing installs auto-upgrade.
-    static let version = 14
+    static let version = 16
 
     /// Published rules list (also shipped at Resources/rules/bashx-smart-rules.txt).
     static let rules: [String] = loadBundledRules()
@@ -77,6 +77,10 @@ enum ChinaSmartRules {
         // v13: Telegram dedicated group + DC CIDRs
         if !rules.contains(where: { $0.contains(",TELEGRAM") }) { return true }
         if !rules.contains(where: { $0.contains("149.154.160.0/20") }) { return true }
+        // v15: translate-pa API must be listed before category-ads-all
+        if !rules.contains(where: { $0.contains("translate-pa.googleapis.com") }) { return true }
+        // v16: full Telegram DC block 91.108.0.0/16 (partial /22 lists miss DCs → spinning)
+        if !rules.contains(where: { $0.contains("91.108.0.0/16") }) { return true }
         return false
     }
 

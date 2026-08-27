@@ -106,6 +106,48 @@ enum ClashCore {
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
+    /// Snapshot of a proxy-group from mihomo `/proxies/{name}`.
+    struct ProxyGroupInfo: Equatable, Sendable {
+        var name: String
+        var type: String
+        var now: String
+        var all: [String]
+    }
+
+    static func fetchProxyGroup(
+        controller: String,
+        secret: String,
+        group: String
+    ) async -> ProxyGroupInfo? {
+        let encoded = encodePath(group)
+        guard let url = URL(string: "http://\(controller)/proxies/\(encoded)") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.httpMethod = "GET"
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let now = json["now"] as? String ?? ""
+        let type = json["type"] as? String ?? ""
+        let all = (json["all"] as? [String]) ?? []
+        return ProxyGroupInfo(name: group, type: type, now: now, all: all)
+    }
+
+    static func closeAllConnections(controller: String, secret: String) async {
+        guard let url = URL(string: "http://\(controller)/connections") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.httpMethod = "DELETE"
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
     @discardableResult
     static func start(binary: String, configDir: URL) throws -> Process {
         let logURL = configDir.appendingPathComponent("core.log")

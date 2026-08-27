@@ -8,22 +8,23 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: String { title(lang: .current) }
+
+    func title(lang: AppLanguage) -> String {
         switch self {
-        case .smart: return "智能分流"
-        case .domestic: return "国内优选"
-        case .foreign: return "国外优选"
+        case .smart: return L10n.t("dns.smart", lang)
+        case .domestic: return L10n.t("dns.domestic", lang)
+        case .foreign: return L10n.t("dns.foreign", lang)
         }
     }
 
-    var subtitle: String {
+    var subtitle: String { subtitle(lang: .current) }
+
+    func subtitle(lang: AppLanguage) -> String {
         switch self {
-        case .smart:
-            return "国内站走阿里/腾讯 DoH，国外站自动回落 Cloudflare/Google（默认）"
-        case .domestic:
-            return "默认使用国内 DNS，国外域名再回落海外解析，适合日常国内浏览"
-        case .foreign:
-            return "默认使用 Cloudflare/Google，国内域名走专用国内 DNS，适合海外节点为主"
+        case .smart: return L10n.t("dns.smart.sub", lang)
+        case .domestic: return L10n.t("dns.domestic.sub", lang)
+        case .foreign: return L10n.t("dns.foreign.sub", lang)
         }
     }
 
@@ -184,11 +185,12 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "https://1.12.12.12/dns-query",
             "https://doh.pub/dns-query",
         ]
+        // DoH first — bare UDP:53 often fails under NE bind ("network is unreachable").
         let foreignNS = [
-            "8.8.8.8",
-            "1.1.1.1",
             "https://8.8.8.8/dns-query",
             "https://1.1.1.1/dns-query",
+            "8.8.8.8",
+            "1.1.1.1",
         ]
         let (nameserver, fallback): ([String], [String]) = {
             switch preference {
@@ -201,79 +203,79 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         // Never use "system" DNS in NE — /etc/resolv.conf does not exist; DIRECT dials fail with
         // "can't resolve ip … open /etc/resolv.conf: no such file or directory".
         let bootstrapNS = [
+            "223.5.5.5",
+            "119.29.29.29",
             "https://223.5.5.5/dns-query",
-            "https://1.12.12.12/dns-query",
         ]
-        var policy: [String: Any] = [
-            "+.local": bootstrapNS,
-            "+.lan": bootstrapNS,
-            "+.cn": cnNS,
-            "+.baidu.com": cnNS,
-            "+.qq.com": cnNS,
-            "+.taobao.com": cnNS,
-            "+.aliyun.com": cnNS,
-            "+.jd.com": cnNS,
-            "+.bilibili.com": cnNS,
-            "+.zhihu.com": cnNS,
-            "+.weixin.com": cnNS,
-            "+.github.com": foreignNS,
-            "+.twitter.com": foreignNS,
-            "+.facebook.com": foreignNS,
-            "+.instagram.com": foreignNS,
-            "+.telegram.org": foreignNS,
-            "+.telegram-cdn.org": foreignNS,
-            "+.cdn-telegram.org": foreignNS,
-            "+.telesco.pe": foreignNS,
-            "+.t.me": foreignNS,
-            "+.graph.org": foreignNS,
-            "+.tdesktop.com": foreignNS,
-        ]
-        for (suffix, _) in googleDnsPolicy {
+        // Build programmatically — duplicate keys in dictionary literals trap at runtime in Debug.
+        var policy: [String: Any] = [:]
+        for suffix in [
+            "+.local", "+.lan",
+        ] {
+            policy[suffix] = bootstrapNS
+        }
+        for suffix in [
+            "+.cn", "+.baidu.com", "+.bdstatic.com", "+.bdimg.com",
+            "+.baidubce.com", "+.bcebos.com",
+            "+.qq.com", "+.weixin.qq.com", "+.weixin.com",
+            "+.taobao.com", "+.aliyun.com", "+.alicdn.com",
+            "+.jd.com", "+.bilibili.com", "+.zhihu.com",
+        ] {
+            policy[suffix] = cnNS
+        }
+        for suffix in [
+            "+.github.com",
+            "+.twitter.com", "+.x.com", "+.twimg.com", "+.t.co",
+            "+.facebook.com", "+.instagram.com",
+            "+.telegram.org", "+.telegram-cdn.org", "+.cdn-telegram.org",
+            "+.telesco.pe", "+.t.me", "+.graph.org", "+.tdesktop.com",
+        ] {
             policy[suffix] = foreignNS
         }
-        return [
-            "enable": true,
-            // Bind localhost — 198.18.0.2:53 cannot bind; NE still points DNS at 198.18.0.2,
-            // and TUN dns-hijack feeds queries into mihomo (BaoLianDeng pattern).
-            "listen": "127.0.0.1:1053",
-            "enhanced-mode": "fake-ip",
-            "fake-ip-range": "198.18.0.1/16",
-            "use-system-hosts": false,
-            "respect-rules": false,
-            "fake-ip-filter": [
-                "*.lan", "*.local", "+.local", "+.lan",
-                "+.cn",
-                // Domestic apps hit DIRECT — real IPs avoid fake-ip re-resolve.
-                "+.qq.com", "+.weixin.qq.com", "+.weixin.com", "+.tenpay.com",
-                // baidu: keep fake-ip so IP→domain mapping hits DOMAIN-SUFFIX,baidu.com,DIRECT
-                // (real-IP CDN hops like 117.34.x miss rules → MATCH,PROXY → broken QUIC).
-                "+.alicdn.com", "+.taobao.com", "+.aliyun.com",
-                "+.jd.com", "+.bilibili.com", "+.zhihu.com", "+.netease.com",
-                "+.apple.com", "+.icloud.com", "+.cdn-apple.com", "+.mzstatic.com",
-                "+.push.apple.com", "+.apple-cloudkit.com",
-                // Telegram MUST stay in fake-ip so DOMAIN/TELEGRAM rules can match.
-                "localhost.ptlogin2.qq.com",
-                "+.stun.*.*", "lens.l.google.com",
-            ],
-            // IP-literal DoH bootstrap — plain UDP:53 often returns "network is unreachable" under NE bind.
-            "default-nameserver": bootstrapNS,
-            "proxy-server-nameserver": [
-                "https://223.5.5.5/dns-query",
-                "https://doh.pub/dns-query",
-                "119.29.29.29",
-            ],
-            "nameserver": nameserver,
-            "fallback": fallback,
-            // Explicit geoip:false — mihomo Default() has geoip:true; YAML merge keeps it
-            // unless overridden, which triggers MMDB download and hangs the NE.
-            "fallback-filter": [
-                "geoip": false,
-                "ipcidr": ["240.0.0.0/4"],
-            ],
-            // MATCH,DIRECT + fake-ip: re-resolve domain via DoH (not system).
-            "direct-nameserver": bootstrapNS,
-            "direct-nameserver-follow-policy": true,
-            "nameserver-policy": policy,
+        for suffix in googleDnsPolicy.keys {
+            policy[suffix] = foreignNS
+        }
+
+        var block: [String: Any] = [:]
+        block["enable"] = true
+        // Bind localhost — 198.18.0.2:53 cannot bind; NE still points DNS at 198.18.0.2,
+        // and TUN dns-hijack feeds queries into mihomo (BaoLianDeng pattern).
+        block["listen"] = "127.0.0.1:1053"
+        block["enhanced-mode"] = "fake-ip"
+        block["fake-ip-range"] = "198.18.0.1/16"
+        block["use-system-hosts"] = false
+        block["respect-rules"] = false
+        block["fake-ip-filter"] = [
+            "*.lan", "*.local", "+.local", "+.lan",
+            // Apple：Push/系统服务需要真实 IP；分流靠下方 IP-CIDR + DOMAIN 规则。
+            "+.apple.com", "+.icloud.com", "+.cdn-apple.com", "+.mzstatic.com",
+            "+.push.apple.com", "+.apple-cloudkit.com",
+            // 国内站走真实 IP，避免 fake-ip→DIRECT 二次解析拖慢百度等。
+            "+.baidu.com", "+.bdstatic.com", "+.bdimg.com",
+            "+.baidubce.com", "+.bcebos.com",
+            // Telegram 保持 fake-ip → DOMAIN/TELEGRAM 规则可命中。
+            "localhost.ptlogin2.qq.com",
+            "+.stun.*.*", "lens.l.google.com",
         ]
+        // IP-literal DoH bootstrap — plain UDP:53 often returns "network is unreachable" under NE bind.
+        block["default-nameserver"] = bootstrapNS
+        block["proxy-server-nameserver"] = [
+            "https://223.5.5.5/dns-query",
+            "https://doh.pub/dns-query",
+            "119.29.29.29",
+        ]
+        block["nameserver"] = nameserver
+        block["fallback"] = fallback
+        // Explicit geoip:false — mihomo Default() has geoip:true; YAML merge keeps it
+        // unless overridden, which triggers MMDB download and hangs the NE.
+        block["fallback-filter"] = [
+            "geoip": false,
+            "ipcidr": ["240.0.0.0/4"],
+        ]
+        // MATCH,DIRECT + fake-ip: re-resolve domain via DoH (not system).
+        block["direct-nameserver"] = bootstrapNS
+        block["direct-nameserver-follow-policy"] = true
+        block["nameserver-policy"] = policy
+        return block
     }
 }

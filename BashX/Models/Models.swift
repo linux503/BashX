@@ -8,19 +8,23 @@ enum ProxyMode: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: String { title(lang: .current) }
+
+    func title(lang: AppLanguage) -> String {
         switch self {
-        case .rule: return "规则"
-        case .global: return "全局"
-        case .direct: return "直连"
+        case .rule: return L10n.t("proxy.rule", lang)
+        case .global: return L10n.t("proxy.global", lang)
+        case .direct: return L10n.t("proxy.direct", lang)
         }
     }
 
-    var subtitle: String {
+    var subtitle: String { subtitle(lang: .current) }
+
+    func subtitle(lang: AppLanguage) -> String {
         switch self {
-        case .rule: return "按规则分流"
-        case .global: return "全部走代理"
-        case .direct: return "全部直连"
+        case .rule: return L10n.t("proxy.rule.sub", lang)
+        case .global: return L10n.t("proxy.global.sub", lang)
+        case .direct: return L10n.t("proxy.direct.sub", lang)
         }
     }
 
@@ -40,10 +44,12 @@ enum NodeDisplayMode: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: String { title(lang: .current) }
+
+    func title(lang: AppLanguage) -> String {
         switch self {
-        case .card: return "卡片"
-        case .list: return "列表"
+        case .card: return L10n.t("nodes.card", lang)
+        case .list: return L10n.t("nodes.list", lang)
         }
     }
 
@@ -61,7 +67,10 @@ enum AppAppearance: String, CaseIterable, Codable, Identifiable {
     case dark
 
     var id: String { rawValue }
-    var title: String { self == .light ? "浅色" : "深色" }
+    var title: String { title(lang: .current) }
+    func title(lang: AppLanguage) -> String {
+        self == .light ? L10n.t("appearance.light", lang) : L10n.t("appearance.dark", lang)
+    }
     var colorScheme: ColorScheme { self == .light ? .light : .dark }
 }
 
@@ -84,6 +93,18 @@ struct ProxyNode: Identifiable, Hashable, Codable {
         guard let delayMs else { return "—" }
         if delayMs < 0 { return "超时" }
         return "\(delayMs) ms"
+    }
+
+    /// Subtitle under node name. Many airports share one entry IP with different ports —
+    /// always include port so rows don't look identical.
+    var endpointSubtitle: String {
+        let t = type.uppercased()
+        guard !server.isEmpty else { return t }
+        guard port > 0 else { return "\(t) · \(server)" }
+        if server.contains(":") && !server.hasPrefix("[") {
+            return "\(t) · [\(server)]:\(port)"
+        }
+        return "\(t) · \(server):\(port)"
     }
 }
 
@@ -137,8 +158,8 @@ struct AppSettings: Codable {
     var subscriptions: [Subscription] = []
     var selectedNodeName: String?
     var testURL: String = "https://www.gstatic.com/generate_204"
-    var testTimeoutMs: Int = 2500
-    var concurrency: Int = 8
+    var testTimeoutMs: Int = 4000
+    var concurrency: Int = 6
     var clashBinaryPath: String = ""
     var externalController: String = "127.0.0.1:19090"
     var secret: String = ""
@@ -150,6 +171,8 @@ struct AppSettings: Codable {
     /// User explicitly turned off system proxy in UI — skip auto-enable on launch.
     var userDisabledSystemProxy: Bool = false
     var tunEnabled: Bool = false
+    /// iOS: true = TUN 捕获全 App 流量；false = 仅 HTTP 系统代理（微信/Telegram 无效，实验用）。
+    var iosTunnelCapture: Bool = true
     var tunStack: String = "mixed"
     /// Block video / streaming ad domains via REJECT rules.
     var videoAdBlockEnabled: Bool = true
@@ -175,29 +198,37 @@ struct AppSettings: Codable {
     /// DNS resolver preference for mihomo (smart / domestic / foreign).
     var dnsPreference: DnsPreference = .smart
     var rules: [String] = AppSettings.defaultRules
+    /// Clash Verge-style prepend: custom rules always above base/smart rules; survive subscription & smart-rule upgrades.
+    var rulesPrepend: [String] = []
     /// Tracks bundled ChinaSmartRules version for silent upgrades.
     var rulesVersion: Int = ChinaSmartRules.version
+    /// Close active connections when switching nodes (Clash Verge default).
+    var closeConnectionsOnSwitch: Bool = true
     /// Clash-like: rule / global / direct
     var proxyMode: ProxyMode = .rule
     /// Menu bar / panel logo style.
     var logoStyle: LogoStyle = .default
     /// Panel nodes tab: list or card grid.
-    var nodeDisplayMode: NodeDisplayMode = .card
+    var nodeDisplayMode: NodeDisplayMode = .list
     /// Panel / settings color theme.
     var appearance: AppAppearance = .light
     /// Persisted node latency keyed by `ProxyNode.delayCacheKey`.
     var nodeDelayCache: [String: Int] = [:]
+    /// iOS: show wallpaper camouflage on launch; unlock via tip card 5 taps.
+    var iosDisguiseEnabled: Bool = true
+    /// UI language: system / Chinese / English.
+    var uiLanguage: AppLanguage = .system
 
     static let defaultRules: [String] = ChinaSmartRules.rules
 
     enum CodingKeys: String, CodingKey {
         case subscriptions, selectedNodeName, testURL, testTimeoutMs, concurrency
         case clashBinaryPath, externalController, secret, mixedPort, allowLan
-        case systemProxyEnabled, userDisabledSystemProxy, tunEnabled, tunStack, videoAdBlockEnabled
+        case systemProxyEnabled, userDisabledSystemProxy, tunEnabled, iosTunnelCapture, tunStack, videoAdBlockEnabled
         case launchAtLoginEnabled, menuNodeLimit, showMenuBarTraffic, showDockIcon, allowInsecureHTTPSubscriptions
         case autoSpeedTestEnabled, autoSpeedTestIntervalMinutes, autoSelectFastest, turboMode, domainSniffing, dnsPreference
-        case rules, rulesVersion, proxyMode
-        case logoStyle, nodeDisplayMode, appearance, nodeDelayCache
+        case rules, rulesPrepend, rulesVersion, closeConnectionsOnSwitch, proxyMode
+        case logoStyle, nodeDisplayMode, appearance, nodeDelayCache, iosDisguiseEnabled, uiLanguage
     }
 
     init() {}
@@ -207,8 +238,8 @@ struct AppSettings: Codable {
         subscriptions = try c.decodeIfPresent([Subscription].self, forKey: .subscriptions) ?? []
         selectedNodeName = try c.decodeIfPresent(String.self, forKey: .selectedNodeName)
         testURL = try c.decodeIfPresent(String.self, forKey: .testURL) ?? "https://www.gstatic.com/generate_204"
-        testTimeoutMs = try c.decodeIfPresent(Int.self, forKey: .testTimeoutMs) ?? 2500
-        concurrency = try c.decodeIfPresent(Int.self, forKey: .concurrency) ?? 8
+        testTimeoutMs = try c.decodeIfPresent(Int.self, forKey: .testTimeoutMs) ?? 4000
+        concurrency = try c.decodeIfPresent(Int.self, forKey: .concurrency) ?? 6
         clashBinaryPath = try c.decodeIfPresent(String.self, forKey: .clashBinaryPath) ?? ""
         externalController = try c.decodeIfPresent(String.self, forKey: .externalController) ?? "127.0.0.1:19090"
         secret = try c.decodeIfPresent(String.self, forKey: .secret) ?? ""
@@ -217,6 +248,7 @@ struct AppSettings: Codable {
         systemProxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .systemProxyEnabled) ?? true
         userDisabledSystemProxy = try c.decodeIfPresent(Bool.self, forKey: .userDisabledSystemProxy) ?? false
         tunEnabled = try c.decodeIfPresent(Bool.self, forKey: .tunEnabled) ?? false
+        iosTunnelCapture = try c.decodeIfPresent(Bool.self, forKey: .iosTunnelCapture) ?? true
         tunStack = try c.decodeIfPresent(String.self, forKey: .tunStack) ?? "mixed"
         videoAdBlockEnabled = try c.decodeIfPresent(Bool.self, forKey: .videoAdBlockEnabled) ?? true
         launchAtLoginEnabled = try c.decodeIfPresent(Bool.self, forKey: .launchAtLoginEnabled) ?? false
@@ -232,12 +264,17 @@ struct AppSettings: Codable {
         domainSniffing = try c.decodeIfPresent(Bool.self, forKey: .domainSniffing) ?? true
         dnsPreference = try c.decodeIfPresent(DnsPreference.self, forKey: .dnsPreference) ?? .smart
         rules = try c.decodeIfPresent([String].self, forKey: .rules) ?? AppSettings.defaultRules
+        rulesPrepend = try c.decodeIfPresent([String].self, forKey: .rulesPrepend) ?? []
         rulesVersion = try c.decodeIfPresent(Int.self, forKey: .rulesVersion) ?? 0
+        closeConnectionsOnSwitch = try c.decodeIfPresent(Bool.self, forKey: .closeConnectionsOnSwitch) ?? true
         proxyMode = try c.decodeIfPresent(ProxyMode.self, forKey: .proxyMode) ?? .rule
         logoStyle = try c.decodeIfPresent(LogoStyle.self, forKey: .logoStyle) ?? .default
         nodeDisplayMode = try c.decodeIfPresent(NodeDisplayMode.self, forKey: .nodeDisplayMode) ?? .card
         appearance = try c.decodeIfPresent(AppAppearance.self, forKey: .appearance) ?? .light
         nodeDelayCache = try c.decodeIfPresent([String: Int].self, forKey: .nodeDelayCache) ?? [:]
+        iosDisguiseEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosDisguiseEnabled) ?? true
+        uiLanguage = try c.decodeIfPresent(AppLanguage.self, forKey: .uiLanguage) ?? .system
+        L10n.apply(uiLanguage)
     }
 }
 

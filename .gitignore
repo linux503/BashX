@@ -1,4 +1,9 @@
 build/
+Android/.gradle/
+Android/app/build/
+Android/local.properties
+Android/libs/*.aar
+Android/libs/*.jar
 *.xcuserdata
 xcuserdata/
 DerivedData/
@@ -20,3 +25,6 @@ build-intel/
 build-ios/
 dist/
 Framework/MihomoCore.xcframework/
+
+# Android release artifacts
+Android/*.apk

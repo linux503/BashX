@@ -16,6 +16,12 @@ struct MenuBarView: View {
 
     private func refreshSnap() {
         snap = MenuBarSnapshot.capture(from: state)
+        Task {
+            let groups = await state.fetchMenuProxyGroups()
+            await MainActor.run {
+                snap.proxyGroups = groups.map { MenuProxyGroupSnapshot(from: $0) }
+            }
+        }
     }
 }
 
@@ -60,6 +66,8 @@ private struct MenuBarFrozenContent: View, Equatable {
 
         nodePickerSection
 
+        proxyGroupsSection
+
         Divider()
 
         Toggle(isOn: Binding(
@@ -67,6 +75,16 @@ private struct MenuBarFrozenContent: View, Equatable {
             set: { v in Task { await state.setSystemProxy(v) } }
         )) {
             Text("系统代理")
+        }
+
+        Toggle(isOn: Binding(
+            get: { snap.closeConnectionsOnSwitch },
+            set: { v in
+                state.setCloseConnectionsOnSwitch(v)
+                snap = MenuBarSnapshot.capture(from: state)
+            }
+        )) {
+            Text("切节点关闭连接")
         }
 
         Toggle(isOn: Binding(
@@ -97,7 +115,7 @@ private struct MenuBarFrozenContent: View, Equatable {
             get: { snap.videoAdBlockEnabled },
             set: { v in Task { await state.setVideoAdBlock(v) } }
         )) {
-            Text("视频广告过滤")
+            Text("去广告")
         }
 
         Divider()
@@ -115,10 +133,45 @@ private struct MenuBarFrozenContent: View, Equatable {
 
         Divider()
 
+        Button("复制终端代理环境变量") {
+            state.copyExternalProxy(kind: .exportEnv)
+        }
+        .keyboardShortcut("c", modifiers: [.command, .option])
+
+        Divider()
+
         Button("退出 BashX") {
             state.quitApp()
         }
         .keyboardShortcut("q")
+    }
+
+    @ViewBuilder
+    private var proxyGroupsSection: some View {
+        if snap.proxyGroups.isEmpty {
+            EmptyView()
+        } else {
+            ForEach(snap.proxyGroups) { group in
+                Menu("\(group.name) · \(snap.shortName(group.now.isEmpty ? "—" : group.now, 12))") {
+                    ForEach(group.all.prefix(40), id: \.self) { name in
+                        Button {
+                            Task {
+                                await state.selectGroupProxy(group: group.name, name: name)
+                                snap = MenuBarSnapshot.capture(from: state)
+                                let groups = await state.fetchMenuProxyGroups()
+                                snap.proxyGroups = groups.map { MenuProxyGroupSnapshot(from: $0) }
+                            }
+                        } label: {
+                            menuCheckRow(snap.shortName(name, 28), on: name == group.now)
+                        }
+                    }
+                    if group.all.count > 40 {
+                        Text("…共 \(group.all.count) 个")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -127,7 +180,7 @@ private struct MenuBarFrozenContent: View, Equatable {
             Text("暂无节点")
                 .foregroundStyle(.secondary)
         } else {
-            Menu("节点\(snap.selectedHint) · 最快10") {
+            Menu("节点\(snap.selectedHint) · 最快\(snap.menuNodeLimit)") {
                 ForEach(snap.menuNodes) { node in
                     Button {
                         Task { await state.selectNode(node.name) }
@@ -256,6 +309,19 @@ private struct MenuBarFrozenContent: View, Equatable {
 
 // MARK: - Snapshot
 
+private struct MenuProxyGroupSnapshot: Equatable, Identifiable {
+    var id: String { name }
+    var name: String
+    var now: String
+    var all: [String]
+
+    init(from info: ClashCore.ProxyGroupInfo) {
+        name = info.name
+        now = info.now
+        all = info.all
+    }
+}
+
 private struct MenuBarSnapshot: Equatable {
     var status: String
     var coreRunning: Bool
@@ -266,8 +332,10 @@ private struct MenuBarSnapshot: Equatable {
     var systemProxyOn: Bool
     var tunEnabled: Bool
     var videoAdBlockEnabled: Bool
+    var closeConnectionsOnSwitch: Bool
     var subscriptions: [Subscription]
     var menuNodes: [ProxyNode]
+    var menuNodeLimit: Int
     var totalNodeCount: Int
     var selectedNodeName: String?
     var launchAtLoginEnabled: Bool
@@ -278,6 +346,7 @@ private struct MenuBarSnapshot: Equatable {
     var logoStyleTitle: String
     var subscriptionMenuTitle: String
     var selectedHint: String
+    var proxyGroups: [MenuProxyGroupSnapshot]
 
     static let empty = MenuBarSnapshot(
         status: "",
@@ -289,8 +358,10 @@ private struct MenuBarSnapshot: Equatable {
         systemProxyOn: false,
         tunEnabled: false,
         videoAdBlockEnabled: false,
+        closeConnectionsOnSwitch: true,
         subscriptions: [],
         menuNodes: [],
+        menuNodeLimit: 10,
         totalNodeCount: 0,
         selectedNodeName: nil,
         launchAtLoginEnabled: false,
@@ -300,7 +371,8 @@ private struct MenuBarSnapshot: Equatable {
         logoStyle: .ring,
         logoStyleTitle: LogoStyle.ring.title,
         subscriptionMenuTitle: "订阅",
-        selectedHint: ""
+        selectedHint: "",
+        proxyGroups: []
     )
 
     @MainActor
@@ -326,8 +398,10 @@ private struct MenuBarSnapshot: Equatable {
             systemProxyOn: state.systemProxyOn,
             tunEnabled: state.settings.tunEnabled,
             videoAdBlockEnabled: state.settings.videoAdBlockEnabled,
+            closeConnectionsOnSwitch: state.settings.closeConnectionsOnSwitch,
             subscriptions: subs,
             menuNodes: state.menuNodes,
+            menuNodeLimit: min(500, max(5, state.settings.menuNodeLimit)),
             totalNodeCount: state.nodes.count,
             selectedNodeName: state.settings.selectedNodeName,
             launchAtLoginEnabled: state.settings.launchAtLoginEnabled,
@@ -337,7 +411,8 @@ private struct MenuBarSnapshot: Equatable {
             logoStyle: state.settings.logoStyle,
             logoStyleTitle: state.settings.logoStyle.title,
             subscriptionMenuTitle: subTitle,
-            selectedHint: hint
+            selectedHint: hint,
+            proxyGroups: []
         )
     }
 

@@ -1,7 +1,10 @@
 import SwiftUI
 
 struct RootTabView: View {
+    @EnvironmentObject private var state: IOSAppState
     @EnvironmentObject private var vpn: VPNManager
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
 
     init() {
         let appearance = UITabBarAppearance()
@@ -12,18 +15,32 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $state.selectedTab) {
             HomeView()
                 .tabItem {
-                    Label("首页", systemImage: vpn.isConnected ? "checkmark.shield.fill" : "house.fill")
+                    Label(
+                        L10n.t("tab.home", lang),
+                        systemImage: vpn.isConnected ? "checkmark.shield.fill" : "house.fill"
+                    )
                 }
+                .tag(0)
             NodesView()
-                .tabItem { Label("节点", systemImage: "point.3.connected.trianglepath.dotted") }
+                .tabItem {
+                    Label(L10n.t("tab.nodes", lang), systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                .tag(1)
             SubscriptionsView()
-                .tabItem { Label("订阅", systemImage: "tray.full.fill") }
+                .tabItem {
+                    Label(L10n.t("tab.subscriptions", lang), systemImage: "tray.full.fill")
+                }
+                .tag(2)
             SettingsViewIOS()
-                .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                .tabItem {
+                    Label(L10n.t("tab.settings", lang), systemImage: "gearshape.fill")
+                }
+                .tag(3)
         }
         .tint(IOSTheme.accent)
+        .id(lang.id)
     }
 }

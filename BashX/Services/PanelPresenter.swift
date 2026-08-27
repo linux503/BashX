@@ -85,6 +85,7 @@ final class SettingsPresenter {
     func refreshAppearance(state: AppState) {
         guard let host else { return }
         host.rootView = settingsRoot(state: state)
+        window?.title = L10n.t("mac.settings.title", state.settings.uiLanguage)
     }
 
     private func settingsRoot(state: AppState) -> AnyView {
@@ -105,7 +106,7 @@ final class SettingsPresenter {
         if host == nil {
             let controller = NSHostingController(rootView: root)
             let win = NSWindow(contentViewController: controller)
-            win.title = "BashX 设置"
+            win.title = L10n.t("mac.settings.title", state.settings.uiLanguage)
             win.setContentSize(NSSize(width: 680, height: 660))
             win.minSize = NSSize(width: 620, height: 560)
             win.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -149,8 +150,10 @@ final class PanelPresenter {
     /// Fallbacks so the panel never crashes when opened before traffic sync.
     private let fallbackTraffic = TrafficMonitor()
     private let fallbackRates = MenuBarRateStore()
-    /// True when the live hosting tree still observes `fallbackRates` (needs one-time rebind).
+    /// True when the live hosting tree still observes fallback stores (needs one-time rebind).
     private var panelBoundToFallbackRates = false
+    private weak var boundMonitor: TrafficMonitor?
+    private weak var boundRates: MenuBarRateStore?
     private var isPresenting = false
     private var pendingPresent: (state: AppState, intent: AppState.PanelIntent)?
 
@@ -200,6 +203,39 @@ final class PanelPresenter {
         let monitor = resolvedTraffic()
         let rates = resolvedRates()
         host.rootView = panelRoot(state: state, monitor: monitor, rates: rates)
+        boundMonitor = monitor
+        boundRates = rates
+        panelBoundToFallbackRates = false
+        if let window {
+            applyPanelChrome(window, appearance: state.settings.appearance)
+        }
+    }
+
+    /// Re-wire an open panel when live traffic/rates become available (fixes empty monitor chart).
+    func rebindOpenPanelIfNeeded(state: AppState) {
+        guard host != nil else { return }
+        guard let traffic, let menuRates else { return }
+        let needsRebind = panelBoundToFallbackRates
+            || boundMonitor == nil
+            || boundRates == nil
+            || boundMonitor !== traffic
+            || boundRates !== menuRates
+        guard needsRebind else { return }
+        guard let host else { return }
+        traffic.configure(
+            controller: state.settings.externalController,
+            secret: state.settings.secret
+        )
+        traffic.menuBarRates = menuRates
+        host.rootView = panelRoot(state: state, monitor: traffic, rates: menuRates)
+        boundMonitor = traffic
+        boundRates = menuRates
+        panelBoundToFallbackRates = false
+    }
+
+    private func applyPanelChrome(_ win: NSWindow, appearance: AppAppearance) {
+        win.isOpaque = true
+        win.backgroundColor = BashXTheme.canvasNSColor(for: appearance)
     }
 
     private func panelRoot(state: AppState, monitor: TrafficMonitor, rates: MenuBarRateStore) -> AnyView {
@@ -228,10 +264,7 @@ final class PanelPresenter {
             controller: state.settings.externalController,
             secret: state.settings.secret
         )
-        // configure() may cancel the SSE task when controller/secret changes — restart if core is up.
-        if state.isCoreVisiblyAlive || state.coreRunning {
-            monitor.startTraffic()
-        }
+        monitor.menuBarRates = rates
 
         if intent != .none {
             state.panelIntent = intent
@@ -254,6 +287,7 @@ final class PanelPresenter {
             win.isMovableByWindowBackground = false
             win.center()
             win.identifier = NSUserInterfaceItemIdentifier(AppActivation.panelID)
+            applyPanelChrome(win, appearance: state.settings.appearance)
             let delegate = BashXWindowDelegate { [weak self] in
                 guard let self else { return }
                 self.traffic?.chartSamplesEnabled = false
@@ -266,13 +300,11 @@ final class PanelPresenter {
             windowDelegate = delegate
             host = controller
             window = win
-            panelBoundToFallbackRates = (menuRates == nil)
-        } else if let host, let window {
-            // One-time upgrade if panel was created before syncTraffic wired the live rate store.
-            if panelBoundToFallbackRates, let menuRates {
-                host.rootView = panelRoot(state: state, monitor: monitor, rates: menuRates)
-                panelBoundToFallbackRates = false
-            }
+            boundMonitor = monitor
+            boundRates = rates
+            panelBoundToFallbackRates = (self.traffic == nil || self.menuRates == nil)
+        } else if let window {
+            rebindOpenPanelIfNeeded(state: state)
             // Do NOT replace rootView on every open — resets @State and can freeze hit-testing on Ventura.
             let preferred = Self.defaultSize
             let current = window.contentLayoutRect.size

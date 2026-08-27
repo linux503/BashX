@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct IOSTrafficChart: View {
+    @EnvironmentObject private var state: IOSAppState
     let samples: [TrafficSample]
     let uploadRate: Int64
     let downloadRate: Int64
@@ -8,6 +9,9 @@ struct IOSTrafficChart: View {
     var downloadTotal: Int64 = 0
     var isLive: Bool
     var duration: TimeInterval = 0
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
 
     private var peakRate: Int64 {
         max(samples.map(\.down).max() ?? 0, samples.map(\.up).max() ?? 0, downloadRate, uploadRate, 1)
@@ -44,7 +48,7 @@ struct IOSTrafficChart: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("实时流量")
+                    Text(t("traffic.title"))
                         .font(.system(.subheadline, design: .rounded).weight(.bold))
                     if isLive {
                         LiveBadge()
@@ -52,13 +56,13 @@ struct IOSTrafficChart: View {
                 }
                 if isLive {
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        Text("已连接 \(IOSTheme.formatDuration(duration)) · 峰 \(ByteFormat.compactRate(peakRate))/s")
+                        Text(String(format: t("traffic.connected"), IOSTheme.formatDuration(duration), ByteFormat.compactRate(peakRate)))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                 } else {
-                    Text("连接 VPN 后显示")
+                    Text(t("traffic.needVpn"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -79,12 +83,27 @@ struct IOSTrafficChart: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.07, green: 0.13, blue: 0.15),
-                            Color(red: 0.05, green: 0.16, blue: 0.18),
+                            Color(red: 0.93, green: 0.97, blue: 1.0),
+                            Color(red: 0.88, green: 0.94, blue: 0.99),
+                            Color(red: 0.91, green: 0.96, blue: 0.95),
                         ],
-                        startPoint: .top,
-                        endPoint: .bottom
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.55, green: 0.78, blue: 0.98).opacity(0.45),
+                                    Color(red: 0.45, green: 0.85, blue: 0.80).opacity(0.25),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
                 )
 
             if samples.count > 1 {
@@ -92,9 +111,9 @@ struct IOSTrafficChart: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 10)
             } else {
-                Text(isLive ? "等待流量…" : "暂无数据")
+                Text(isLive ? t("traffic.wait") : t("traffic.none"))
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(Color.white.opacity(0.4))
+                    .foregroundStyle(Color(red: 0.35, green: 0.48, blue: 0.58).opacity(0.75))
             }
         }
     }
@@ -108,8 +127,8 @@ struct IOSTrafficChart: View {
             }
             Spacer()
             HStack(spacing: 12) {
-                legend("下行", IOSTheme.chartDown)
-                legend("上行", IOSTheme.chartUp)
+                legend(t("traffic.down"), IOSTheme.chartDown)
+                legend(t("traffic.up"), IOSTheme.chartUp)
             }
         }
     }
@@ -199,7 +218,7 @@ private struct TrafficSparkline: View {
                 var path = Path()
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: sz.width, y: y))
-                ctx.stroke(path, with: .color(.white.opacity(0.06)), lineWidth: 0.5)
+                ctx.stroke(path, with: .color(Color(red: 0.45, green: 0.62, blue: 0.78).opacity(0.18)), lineWidth: 0.6)
             }
         }
     }

@@ -529,46 +529,35 @@ struct SubscriptionTrafficBlock: View {
     private var accent: Color { BashXTheme.accent(for: appearance) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 14) {
-                usageRing
-                    .frame(width: 56, height: 56)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(info.usedText)
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(accent)
-                        Text("/ \(info.totalText)")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                        Spacer(minLength: 0)
-                        Text(percentLabel)
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(barColor)
-                    }
-
-                    // Fixed-height bar — avoids GeometryReader layout flicker.
-                    usageBar
-
-                    HStack(spacing: 16) {
-                        metricInline(label: "剩余", value: info.remainingText, color: remainingColor)
-                        metricInline(
-                            label: "到期",
-                            value: info.expireDetailText,
-                            color: info.isExpired ? BashXTheme.bad : BashXTheme.warn
-                        )
-                    }
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(info.usedText)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(accent)
+                Text("/ \(info.totalText)")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                Text(percentLabel)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(barColor)
             }
-        }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(BashXTheme.secondaryFill(for: appearance))
+
+            usageBar
+
+            HStack(spacing: 12) {
+                Text("剩余 \(info.remainingText)")
+                    .foregroundStyle(remainingColor)
+                Text("·")
+                    .foregroundStyle(.quaternary)
+                Text("到期 \(info.expireDetailText)")
+                    .foregroundStyle(info.isExpired ? BashXTheme.bad(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
+            }
+            .font(.system(size: 10, weight: .medium, design: .rounded))
+            .lineLimit(1)
         }
         .transaction { $0.animation = nil }
     }
@@ -578,84 +567,43 @@ struct SubscriptionTrafficBlock: View {
         return String(format: "%.0f%%", ratio * 100)
     }
 
-    private var usageRing: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.primary.opacity(0.06), lineWidth: 5)
-            Circle()
-                .trim(from: 0, to: max(0.02, ratio))
-                .stroke(
-                    AngularGradient(
-                        colors: [barColor.opacity(0.55), barColor],
-                        center: .center
-                    ),
-                    style: StrokeStyle(lineWidth: 5, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-            VStack(spacing: 0) {
-                Text(info.usedRatio == nil ? "∞" : String(format: "%.0f", ratio * 100))
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(barColor)
-                if info.usedRatio != nil {
-                    Text("%")
-                        .font(.system(size: 8, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        }
-    }
-
     private var usageBar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.primary.opacity(0.06))
+                    .fill(BashXTheme.secondaryFill(for: appearance))
                 Capsule()
                     .fill(
                         LinearGradient(
-                            colors: [barColor.opacity(0.65), barColor],
+                            colors: [barColor.opacity(0.7), barColor],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
                     )
-                    .frame(width: max(4, geo.size.width * CGFloat(max(0, min(1, ratio)))))
+                    .frame(width: max(3, geo.size.width * CGFloat(max(0, min(1, ratio)))))
             }
         }
-        .frame(height: 5)
+        .frame(height: 4)
     }
 
     private var remainingColor: Color {
         guard let r = info.usedRatio else { return BashXTheme.good(for: appearance) }
-        if r >= 0.9 { return BashXTheme.bad }
-        if r >= 0.7 { return BashXTheme.warn }
+        if r >= 0.9 { return BashXTheme.bad(for: appearance) }
+        if r >= 0.7 { return BashXTheme.warn(for: appearance) }
         return BashXTheme.good(for: appearance)
     }
 
     private var barColor: Color {
         guard let r = info.usedRatio else { return accent }
-        if r >= 0.9 { return BashXTheme.bad }
-        if r >= 0.7 { return BashXTheme.warn }
+        if r >= 0.9 { return BashXTheme.bad(for: appearance) }
+        if r >= 0.7 { return BashXTheme.warn(for: appearance) }
         return accent
-    }
-
-    private func metricInline(label: String, value: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(.tertiary)
-            Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
     }
 }
 
 // MARK: - Subscription enable toggle
 
-/// Circular merge toggle — replaces the old square checkmark control.
+/// Checkbox-style enable control for multi-select subscription merge.
 struct SubscriptionEnableControl: View {
     @Environment(\.bashxAppearance) private var appearance
 
@@ -665,57 +613,31 @@ struct SubscriptionEnableControl: View {
     var emphasized: Bool = false
 
     private var accent: Color { BashXTheme.accent(for: appearance) }
+    private var corner: CGFloat { max(4, size * 0.22) }
+    private var boxSize: CGFloat { size }
 
     var body: some View {
         ZStack {
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(enabled ? accent : Color.primary.opacity(appearance == .dark ? 0.06 : 0.04))
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .strokeBorder(
+                    enabled
+                        ? accent.opacity(emphasized ? 1 : 0.85)
+                        : Color.primary.opacity(appearance == .dark ? 0.35 : 0.28),
+                    lineWidth: enabled ? (emphasized ? 2 : 1.5) : 1.5
+                )
             if enabled {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [accent, accent.opacity(0.78)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                Circle()
-                    .strokeBorder(Color.white.opacity(appearance == .dark ? 0.22 : 0.35), lineWidth: 1)
-                if size >= 28 {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: size * 0.34, weight: .black))
-                        .foregroundStyle(.white)
-                } else {
-                    Circle()
-                        .fill(Color.white)
-                        .frame(width: size * 0.28, height: size * 0.28)
-                }
-            } else {
-                Circle()
-                    .fill(Color.primary.opacity(appearance == .dark ? 0.08 : 0.05))
-                Circle()
-                    .strokeBorder(
-                        Color.primary.opacity(0.18),
-                        style: StrokeStyle(lineWidth: 1.5, dash: [3.5, 2.5])
-                    )
-                if size >= 28, !monogram.isEmpty {
-                    Text(monogram)
-                        .font(.system(size: size * 0.36, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary.opacity(0.75))
-                } else {
-                    Image(systemName: "plus")
-                        .font(.system(size: size * 0.34, weight: .bold))
-                        .foregroundStyle(.secondary.opacity(0.55))
-                }
-            }
-
-            if enabled, emphasized {
-                Circle()
-                    .strokeBorder(accent.opacity(0.45), lineWidth: 2)
-                    .padding(-4)
+                Image(systemName: "checkmark")
+                    .font(.system(size: size * 0.52, weight: .bold))
+                    .foregroundStyle(.white)
             }
         }
-        .frame(width: size, height: size)
-        .shadow(color: enabled ? accent.opacity(0.28) : .clear, radius: emphasized ? 6 : 4, y: 2)
-        .animation(.easeOut(duration: 0.16), value: enabled)
+        .frame(width: boxSize, height: boxSize)
+        .contentShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+        .animation(.easeOut(duration: 0.14), value: enabled)
+        .accessibilityLabel(enabled ? "已启用" : "未启用")
+        .accessibilityAddTraits(.isButton)
     }
 }
 

@@ -38,6 +38,12 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,wechat.com,DIRECT",
         "DOMAIN-SUFFIX,tenpay.com,DIRECT",
         "DOMAIN-KEYWORD,weixin,DIRECT",
+        // Tencent / WeChat CDN（fake-ip 映射失败时的兜底，日志里 183.x/119.x 曾误走 PROXY）
+        "IP-CIDR,183.47.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,183.60.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,119.147.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,101.227.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,14.116.0.0/16,DIRECT,no-resolve",
         // iOS / carrier / local discovery
         "DOMAIN-SUFFIX,local,DIRECT",
         "DOMAIN-SUFFIX,home.arpa,DIRECT",
@@ -58,6 +64,10 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,autonavi.com,DIRECT",
         "DOMAIN-SUFFIX,baidu.com,DIRECT",
         "DOMAIN-SUFFIX,bdstatic.com,DIRECT",
+        "DOMAIN-SUFFIX,bdimg.com,DIRECT",
+        "DOMAIN-SUFFIX,baidubce.com,DIRECT",
+        "DOMAIN-SUFFIX,bcebos.com,DIRECT",
+        "DOMAIN-SUFFIX,baidu-int.com,DIRECT",
         "DOMAIN-SUFFIX,aliyun.com,DIRECT",
         "DOMAIN-SUFFIX,alicdn.com,DIRECT",
         "DOMAIN-SUFFIX,taobao.com,DIRECT",

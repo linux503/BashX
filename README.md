@@ -53,6 +53,15 @@ open build/Build/Products/Debug/BashX.app
 
 完整客户端（订阅 / 节点 / 测速 / VPN）见 **[docs/ios.md](docs/ios.md)**。
 
+## Android（Galaxy Z Fold 6）
+
+见 **[Android/README.md](Android/README.md)**。外屏底栏、内屏双栏，功能对齐 iOS。
+
+```bash
+bash scripts/build_mihomo_android.sh   # 可选，VPN 内核
+cd Android && ./gradlew :app:assembleDebug
+```
+
 ## 说明
 
 - 测速为 TCP / 代理延迟，不是完整网页测速

@@ -2,8 +2,18 @@ import Foundation
 
 /// Build the rule list actually written into mihomo config (shared Mac / iOS logic).
 enum RuntimeRules {
-    static func effective(base: [String], videoAdBlockEnabled: Bool) -> [String] {
-        let merged = VideoAdBlock.merge(into: base, enabled: videoAdBlockEnabled)
+    /// Clash Verge Merge/Prepend: `prepend` always comes first and survives smart-rule / subscription upgrades.
+    static func effective(
+        base: [String],
+        prepend: [String] = [],
+        videoAdBlockEnabled: Bool
+    ) -> [String] {
+        let cleanedPrepend = prepend
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+            .filter { !$0.uppercased().hasPrefix("MATCH,") }
+        let withPrepend = cleanedPrepend + base
+        let merged = VideoAdBlock.merge(into: withPrepend, enabled: videoAdBlockEnabled)
         #if os(iOS)
         return GeoSiteRules.sanitize(insertIosProxyRules(into: adaptForPlatform(merged)))
         #else

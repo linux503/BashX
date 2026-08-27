@@ -17,5 +17,8 @@ enum AppConstants {
     static let tunDNS = "198.18.0.2"
     static let tunIPv6Address = "fdfe:dcba:9876::1"
     static let tunIPv6PrefixLength = 126
-    static let defaultMTU = 1500
+    static let defaultMTU = 1400
+
+    /// App Group: full TUN capture (default) vs HTTP-proxy-only experiment.
+    static let iosTunnelCaptureKey = "iosTunnelCapture"
 }

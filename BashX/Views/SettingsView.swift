@@ -6,14 +6,16 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    var title: String { title(lang: .current) }
+
+    func title(lang: AppLanguage) -> String {
         switch self {
-        case .general: return "常用"
-        case .speed: return "测速"
-        case .proxy: return "外置代理"
-        case .core: return "内核"
-        case .appearance: return "外观"
-        case .about: return "关于"
+        case .general: return L10n.t("mac.tab.general", lang)
+        case .speed: return L10n.t("mac.tab.speed", lang)
+        case .proxy: return L10n.t("mac.tab.proxy", lang)
+        case .core: return L10n.t("mac.tab.core", lang)
+        case .appearance: return L10n.t("mac.tab.appearance", lang)
+        case .about: return L10n.t("mac.tab.about", lang)
         }
     }
 }
@@ -23,6 +25,9 @@ struct SettingsView: View {
     @Environment(\.bashxAppearance) private var appearance
     @ObservedObject private var updater = AppUpdateController.shared
     @State private var tab: SettingsTab = .general
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
 
     var body: some View {
         BashXThemed(appearance: state.settings.appearance) {
@@ -61,7 +66,7 @@ struct SettingsView: View {
                 Button {
                     tab = item
                 } label: {
-                    Text(item.title)
+                    Text(item.title(lang: lang))
                         .font(.system(size: 13, weight: tab == item ? .semibold : .medium))
                         .foregroundStyle(tab == item ? BashXTheme.accent(for: appearance) : .secondary)
                         .frame(maxWidth: .infinity)
@@ -82,7 +87,7 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
-            Section("代理模式") {
+            Section(t("mac.sec.proxyMode")) {
                 HStack(spacing: 10) {
                     ForEach(ProxyMode.allCases) { mode in
                         settingsProxyModeButton(mode)
@@ -90,25 +95,33 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, 6)
 
-                Toggle("系统代理", isOn: Binding(
+                Toggle(t("mac.sec.systemProxy"), isOn: Binding(
                     get: { state.systemProxyOn },
                     set: { v in Task { await state.setSystemProxy(v) } }
                 ))
-                Text("开启前会备份原有代理；关闭时自动恢复。指向 127.0.0.1:\(state.settings.mixedPort)。")
+                Text(t("mac.systemProxy.hint").replacingOccurrences(of: "%@", with: "\(state.settings.mixedPort)"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 if SystemProxy.hasSnapshot() {
-                    Button("恢复网络代理备份") {
+                    Button(t("mac.restoreProxy")) {
                         let ok = SystemProxy.restoreFromSnapshot()
-                        state.statusText = ok ? "已恢复开启前的系统代理设置" : "没有可恢复的备份"
+                        state.statusText = ok ? t("mac.restoreProxy.ok") : t("mac.restoreProxy.none")
                     }
                 }
 
-                Toggle("TUN 模式", isOn: Binding(
+                Toggle(t("mac.closeConnOnSwitch"), isOn: Binding(
+                    get: { state.settings.closeConnectionsOnSwitch },
+                    set: { state.setCloseConnectionsOnSwitch($0) }
+                ))
+                Text(t("mac.closeConnOnSwitch.hint"))
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+
+                Toggle(t("mac.tun"), isOn: Binding(
                     get: { state.settings.tunEnabled },
                     set: { v in Task { await state.setTUN(v) } }
                 ))
-                Text("增强模式，可接管更多流量。首次会安装 TUN 权限（输一次管理员密码），之后开关无需再输。")
+                Text(t("mac.tun.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
 
@@ -119,19 +132,19 @@ struct SettingsView: View {
                     Spacer()
                 }
                 HStack(spacing: 10) {
-                    Button(TunPrivilege.isReady ? "重新安装授权" : "安装 TUN 授权") {
+                    Button(TunPrivilege.isReady ? t("mac.tun.reinstall") : t("mac.tun.install")) {
                         do {
                             try TunPrivilege.install()
-                            state.statusText = "TUN 权限已就绪，之后开 TUN 无需密码"
+                            state.statusText = t("mac.tun.ready")
                         } catch {
                             state.statusText = error.localizedDescription
                         }
                     }
                     if TunPrivilege.isInstalledOnDisk {
-                        Button("移除授权", role: .destructive) {
+                        Button(t("mac.tun.remove"), role: .destructive) {
                             do {
                                 try TunPrivilege.uninstall()
-                                state.statusText = "已移除 TUN 权限"
+                                state.statusText = t("mac.tun.removed")
                             } catch {
                                 state.statusText = error.localizedDescription
                             }
@@ -139,70 +152,91 @@ struct SettingsView: View {
                     }
                 }
 
-                Toggle("视频广告过滤", isOn: Binding(
+                Toggle(t("mac.adblock"), isOn: Binding(
                     get: { state.settings.videoAdBlockEnabled },
                     set: { v in Task { await state.setVideoAdBlock(v) } }
                 ))
-                Text("域名级 REJECT。需「规则」模式（开过滤时会自动切回）。无法拦截与正片同 CDN 的贴片广告。")
+                Text(t("mac.adblock.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
 
-                Toggle("允许不安全 HTTP 订阅", isOn: Binding(
+                Toggle(t("mac.httpSubs"), isOn: Binding(
                     get: { state.settings.allowInsecureHTTPSubscriptions },
                     set: {
                         state.settings.allowInsecureHTTPSubscriptions = $0
                         state.persist()
-                        state.statusText = $0 ? "已允许明文 HTTP 订阅（不推荐）" : "仅允许 HTTPS 订阅"
+                        state.statusText = $0 ? t("mac.httpSubs.on") : t("mac.httpSubs.off")
                     }
                 ))
-                Text("默认仅 HTTPS。开启后才接受 http:// 订阅链接。")
+                Text(t("mac.httpSubs.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
-            Section("DNS 优选") {
-                Picker("解析策略", selection: Binding(
+            Section(t("mac.sec.dns")) {
+                Picker(t("mac.dns.picker"), selection: Binding(
                     get: { state.settings.dnsPreference },
                     set: { v in Task { await state.setDnsPreference(v) } }
                 )) {
                     ForEach(DnsPreference.allCases) { pref in
-                        Text(pref.title).tag(pref)
+                        Text(pref.title(lang: lang)).tag(pref)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Text(state.settings.dnsPreference.subtitle)
+                Text(state.settings.dnsPreference.subtitle(lang: lang))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Text("修改后自动写入 config.yaml 并重载内核。")
+                Text(t("mac.dns.reloadHint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
             }
 
-            Section("启动") {
-                Toggle("开机自动启动", isOn: Binding(
+            Section(t("mac.sec.shortcuts")) {
+                Button {
+                    state.openConfigFolder()
+                } label: {
+                    Label(t("mac.openConfig"), systemImage: "folder")
+                }
+                Text(t("mac.openConfig.hint"))
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+
+                Button {
+                    state.openDashboard()
+                } label: {
+                    Label(t("mac.openDashboard"), systemImage: "safari")
+                }
+                .disabled(!state.coreRunning)
+                Text(t("mac.openDashboard.hint"))
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+            }
+
+            Section(t("mac.sec.launch")) {
+                Toggle(t("mac.launchAtLogin"), isOn: Binding(
                     get: { state.settings.launchAtLoginEnabled },
                     set: { state.setLaunchAtLogin($0) }
                 ))
                 Text(LaunchAtLogin.statusText)
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Text("开启后登录 Mac 会自动运行 BashX（菜单栏）。若提示需批准，请到「系统设置 → 通用 → 登录项」。")
+                Text(t("mac.launchAtLogin.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
-            Section("测速快捷") {
-                Toggle("自动测速", isOn: Binding(
+            Section(t("mac.sec.speedQuick")) {
+                Toggle(t("mac.autoSpeed"), isOn: Binding(
                     get: { state.settings.autoSpeedTestEnabled },
                     set: { state.setAutoSpeedTestEnabled($0) }
                 ))
                 .disabled(state.nodes.isEmpty)
-                Toggle("测速后自动选用最快节点", isOn: Binding(
+                Toggle(t("mac.autoFastest"), isOn: Binding(
                     get: { state.settings.autoSelectFastest },
                     set: { state.setAutoSelectFastest($0) }
                 ))
-                Text("更细的超时 / 并发 / 间隔请到「测速」页。")
+                Text(t("mac.speedQuick.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
@@ -218,7 +252,7 @@ struct SettingsView: View {
         return Button {
             Task { await state.setProxyMode(mode) }
         } label: {
-            Text(mode.title)
+            Text(mode.title(lang: lang))
                 .font(.system(size: 13, weight: selected ? .semibold : .medium))
                 .foregroundStyle(selected ? color : .primary)
                 .frame(maxWidth: .infinity)
@@ -229,52 +263,52 @@ struct SettingsView: View {
                 }
         }
         .buttonStyle(.plain)
-        .help(mode.subtitle)
+        .help(mode.subtitle(lang: lang))
     }
 
     // MARK: - 测速
 
     private var speedTestTab: some View {
         Form {
-            Section("参数") {
-                TextField("超时 (ms)", value: $state.settings.testTimeoutMs, format: .number)
-                TextField("并发数", value: $state.settings.concurrency, format: .number)
-                TextField("测速 URL（预留）", text: $state.settings.testURL)
+            Section(t("mac.sec.speed")) {
+                TextField(t("mac.timeout"), value: $state.settings.testTimeoutMs, format: .number)
+                TextField(t("mac.concurrency"), value: $state.settings.concurrency, format: .number)
+                TextField(t("mac.testURL"), text: $state.settings.testURL)
             }
 
-            Section("性能") {
-                Toggle("极速模式", isOn: Binding(
+            Section(t("mac.sec.perf")) {
+                Toggle(t("mac.turbo"), isOn: Binding(
                     get: { state.settings.turboMode },
                     set: { v in Task { await state.setTurboMode(v) } }
                 ))
-                Text("开启后启用 mihomo 多连接并发、懒测速，下载/多线程场景更快。")
+                Text(t("mac.turbo.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Toggle("域名嗅探", isOn: Binding(
+                Toggle(t("mac.sniffing"), isOn: Binding(
                     get: { state.settings.domainSniffing },
                     set: { v in Task { await state.setDomainSniffing(v) } }
                 ))
                 .disabled(!state.settings.turboMode)
-                Text("帮助非浏览器应用正确分流；极少数软件可能不兼容。")
+                Text(t("mac.sniffing.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
-            Section("自动") {
-                Toggle("自动测速", isOn: Binding(
+            Section(t("mac.sec.auto")) {
+                Toggle(t("mac.autoSpeed"), isOn: Binding(
                     get: { state.settings.autoSpeedTestEnabled },
                     set: { state.setAutoSpeedTestEnabled($0) }
                 ))
-                TextField("自动测速间隔（分钟）", value: Binding(
+                TextField(t("mac.autoInterval"), value: Binding(
                     get: { state.settings.autoSpeedTestIntervalMinutes },
                     set: { state.setAutoSpeedTestIntervalMinutes($0) }
                 ), format: .number)
                 .disabled(!state.settings.autoSpeedTestEnabled)
-                Toggle("测速后自动选用最快节点", isOn: Binding(
+                Toggle(t("mac.autoFastest"), isOn: Binding(
                     get: { state.settings.autoSelectFastest },
                     set: { state.setAutoSelectFastest($0) }
                 ))
-                Text("开启后按延迟把最快节点排到前面；自动测速会定时重测。")
+                Text(t("mac.autoSpeed.detail"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
@@ -284,19 +318,19 @@ struct SettingsView: View {
         .padding(14)
     }
 
-    // MARK: - 外置代理
+    // MARK: - Proxy
 
     private var proxyTab: some View {
         Form {
-            Section("状态") {
-                LabeledContent("内核") {
-                    Text(state.coreRunning ? "运行中" : "未启动")
+            Section(t("mac.proxy.status")) {
+                LabeledContent(t("mac.proxy.core")) {
+                    Text(state.coreRunning ? t("common.running") : t("common.stopped"))
                         .foregroundStyle(state.coreRunning ? BashXTheme.good(for: appearance) : .secondary)
                 }
             }
 
-            Section("端口") {
-                LabeledContent("地址") {
+            Section(t("mac.proxy.ports")) {
+                LabeledContent(t("mac.proxy.address")) {
                     Text(state.externalProxyAddress)
                         .font(.system(.body, design: .monospaced))
                         .textSelection(.enabled)
@@ -312,28 +346,28 @@ struct SettingsView: View {
                         .textSelection(.enabled)
                 }
                 TextField("mixed-port", value: $state.settings.mixedPort, format: .number)
-                Toggle("允许局域网连接", isOn: Binding(
+                Toggle(t("mac.proxy.allowLan"), isOn: Binding(
                     get: { state.settings.allowLan },
                     set: { v in Task { await state.setAllowLan(v) } }
                 ))
-                Text("开启后 mixed-port 可被局域网访问；会自动确保 API secret，并把 external-controller 限制在 127.0.0.1。")
+                Text(t("mac.proxy.lanHint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Text("HTTP 与 SOCKS5 共用 mixed-port。改端口后需重启内核。")
+                Text(t("mac.proxy.portHint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
-            Section("复制") {
+            Section(t("mac.proxy.copy")) {
                 HStack {
-                    Button("复制地址") { state.copyExternalProxy(kind: .hostPort) }
-                    Button("复制 HTTP") { state.copyExternalProxy(kind: .http) }
-                    Button("复制 SOCKS5") { state.copyExternalProxy(kind: .socks) }
-                    Button("复制环境变量") { state.copyExternalProxy(kind: .exportEnv) }
+                    Button(t("mac.copyHost")) { state.copyExternalProxy(kind: .hostPort) }
+                    Button(t("mac.copyHTTP")) { state.copyExternalProxy(kind: .http) }
+                    Button(t("mac.copySOCKS")) { state.copyExternalProxy(kind: .socks) }
+                    Button(t("mac.copyEnv")) { state.copyExternalProxy(kind: .exportEnv) }
                 }
             }
 
-            Section("示例") {
+            Section(t("mac.proxy.example")) {
                 Text("export https_proxy=\(state.externalProxyHTTPURL)")
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
@@ -347,48 +381,55 @@ struct SettingsView: View {
         .padding(14)
     }
 
-    // MARK: - 内核
+    // MARK: - Core
 
     private var coreTab: some View {
         Form {
-            Section("路径与 API") {
-                TextField("mihomo/clash 路径", text: $state.settings.clashBinaryPath)
+            Section(t("mac.core.paths")) {
+                TextField(t("mac.core.binary"), text: $state.settings.clashBinaryPath)
                 TextField("external-controller", text: $state.settings.externalController)
                 SecureField("secret", text: $state.settings.secret)
-                Text("默认使用 17890/19090，避免和 Stash/ClashX 的 7890/9090 冲突。")
+                Text(t("mac.core.defaultPorts"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
             Section("TUN") {
-                Picker("协议栈", selection: $state.settings.tunStack) {
+                Picker(t("mac.core.stack"), selection: $state.settings.tunStack) {
                     Text("mixed").tag("mixed")
                     Text("system").tag("system")
                     Text("gvisor").tag("gvisor")
                 }
-                Text("开启 TUN 时启动内核会请求一次管理员权限；退出软件不再要求密码。")
+                Text(t("mac.core.tunHint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
-            Section("维护") {
-                LabeledContent("状态") {
-                    Text(state.coreRunning ? "运行中" : (state.coreConnecting ? "连接中…" : "未启动"))
+            Section(t("mac.core.maint")) {
+                LabeledContent(t("mac.proxy.status")) {
+                    Text(coreStatusText)
                         .foregroundStyle(state.coreRunning ? BashXTheme.good(for: appearance) : .secondary)
                 }
-                Text("mihomo 已内置在 App 中，启动时自动安装并运行，无需手动下载。")
+                Button(t("mac.openDashboard")) {
+                    state.openDashboard()
+                }
+                .disabled(!state.coreRunning)
+                Text(t("mac.core.dashHint"))
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                Text(t("mac.core.bundled"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 if state.coreRunning || state.isCoreVisiblyAlive {
-                    Button("停止内核") {
+                    Button(t("mac.core.stop")) {
                         state.stopCore(force: true)
                     }
                 } else if !state.coreConnecting {
-                    Button("启动内核") {
+                    Button(t("mac.core.start")) {
                         Task { await state.ensureCoreRunning() }
                     }
                 }
-                Button("修复内核") {
+                Button(t("mac.core.repair")) {
                     Task { await state.installOrRepairCore() }
                 }
                 .disabled(state.isBusy)
@@ -399,40 +440,74 @@ struct SettingsView: View {
         .padding(14)
     }
 
+    private var coreStatusText: String {
+        if state.coreRunning { return t("common.running") }
+        if state.coreConnecting { return t("common.connecting") }
+        return t("common.stopped")
+    }
+
     // MARK: - 外观
 
     private var appearanceTab: some View {
         Form {
-            Section("外观") {
-                Picker("界面主题", selection: Binding(
+            Section(t("lang.title")) {
+                Picker(t("lang.title"), selection: Binding(
+                    get: { state.settings.uiLanguage },
+                    set: { state.setUiLanguage($0) }
+                )) {
+                    ForEach(AppLanguage.allCases) { item in
+                        Text(item.pickerTitle).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(t("lang.footer"))
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+            }
+
+            Section(t("mac.appearance.section")) {
+                Picker(t("mac.appearance.theme"), selection: Binding(
                     get: { state.settings.appearance },
                     set: { state.setAppearance($0) }
                 )) {
                     ForEach(AppAppearance.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(mode.title(lang: lang)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Picker("节点展示", selection: Binding(
+                Picker(t("mac.nodeDisplay"), selection: Binding(
                     get: { state.settings.nodeDisplayMode },
                     set: { state.setNodeDisplayMode($0) }
                 )) {
                     ForEach(NodeDisplayMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(mode.title(lang: lang)).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
 
-                Text("菜单栏固定展示延迟最快的前 10 个节点；面板内仍显示全部。")
+                Text(t("mac.menuNode.hint").replacingOccurrences(of: "%@", with: "\(state.settings.menuNodeLimit)"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
 
-                Toggle("菜单栏显示网速", isOn: Binding(
+                Stepper(
+                    t("mac.menuNodeLimit").replacingOccurrences(of: "%@", with: "\(state.settings.menuNodeLimit)"),
+                    value: Binding(
+                        get: { state.settings.menuNodeLimit },
+                        set: { state.setMenuNodeLimit($0) }
+                    ),
+                    in: 5...50
+                )
+
+                Text(t("mac.hotkeys.hint"))
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+
+                Toggle(t("mac.menuTraffic"), isOn: Binding(
                     get: { state.settings.showMenuBarTraffic },
                     set: { state.setShowMenuBarTraffic($0) }
                 ))
-                Text("在 Logo 旁显示 ↓/↑。若菜单栏图标「消失」，多半被挤进右侧 ❯❯，关掉此项或点 ❯❯ 查看；也可开「程序坞显示图标」。")
+                Text(t("mac.menuTraffic.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
 
@@ -444,15 +519,15 @@ struct SettingsView: View {
                     appearance: appearance
                 )
 
-                Toggle("程序坞显示图标", isOn: Binding(
+                Toggle(t("mac.dockIcon"), isOn: Binding(
                     get: { state.settings.showDockIcon },
                     set: { state.setShowDockIcon($0) }
                 ))
-                Text("关闭后仅保留菜单栏图标；开启后 BashX 会常驻程序坞。")
+                Text(t("mac.dockIcon.hint"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
 
-                Text("主题、展示方式切换后立即生效；Logo 同步到菜单栏。")
+                Text(t("mac.appearance.footer"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
@@ -472,10 +547,10 @@ struct SettingsView: View {
                 aboutUpdateSection
 
                 VStack(alignment: .leading, spacing: 10) {
-                    aboutFeatureRow("tray.full.fill", "多订阅合并", "勾选多个订阅，节点自动合并到同一列表")
-                    aboutFeatureRow("network", "系统代理 / TUN", "一键接管系统流量，可选增强模式")
-                    aboutFeatureRow("slider.horizontal.3", "规则 / 全局 / 直连", "BashX 智能规则分流，支持视频广告过滤")
-                    aboutFeatureRow("gauge.with.dots.needle.67percent", "测速与菜单栏", "延迟测速、最快节点、网速可开关展示")
+                    aboutFeatureRow("tray.full.fill", t("mac.about.f1"), t("mac.about.f1d"))
+                    aboutFeatureRow("network", t("mac.about.f2"), t("mac.about.f2d"))
+                    aboutFeatureRow("slider.horizontal.3", t("mac.about.f3"), t("mac.about.f3d"))
+                    aboutFeatureRow("gauge.with.dots.needle.67percent", t("mac.about.f4"), t("mac.about.f4d"))
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -489,12 +564,12 @@ struct SettingsView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    LabeledContent("版本") {
+                    LabeledContent(t("mac.about.version")) {
                         Text(AppVersion.display)
                             .font(.body.monospacedDigit())
                             .textSelection(.enabled)
                     }
-                    LabeledContent("智能规则") {
+                    LabeledContent(t("mac.about.rules")) {
                         Text("v\(ChinaSmartRules.version)")
                             .font(.body.monospacedDigit())
                     }
@@ -503,13 +578,13 @@ struct SettingsView: View {
                             .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                     }
                     Divider()
-                    LabeledContent("配置目录") {
+                    LabeledContent(t("mac.about.configDir")) {
                         Text(Paths.supportDir.path)
                             .font(.caption)
                             .textSelection(.enabled)
                             .lineLimit(2)
                     }
-                    Button("打开配置目录") { state.openConfigFolder() }
+                    Button(t("mac.openConfig")) { state.openConfigFolder() }
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -522,7 +597,7 @@ struct SettingsView: View {
                         )
                 }
 
-                Text("macOS 菜单栏代理工具 · 内核基于 mihomo / Clash Meta")
+                Text(t("mac.about.footer"))
                     .font(.caption2)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                     .frame(maxWidth: .infinity)
@@ -542,11 +617,11 @@ struct SettingsView: View {
     private var aboutUpdateSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("软件更新", systemImage: "arrow.down.circle")
+                Label(t("mac.update.title"), systemImage: "arrow.down.circle")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
                 if let checked = updater.lastChecked {
-                    Text("上次检查 \(checked.formatted(date: .omitted, time: .shortened))")
+                    Text(t("mac.update.lastCheck").replacingOccurrences(of: "%@", with: checked.formatted(date: .omitted, time: .shortened)))
                         .font(.caption2)
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                 }
@@ -566,7 +641,7 @@ struct SettingsView: View {
                     Button {
                         Task { await updater.downloadAndInstall() }
                     } label: {
-                        Text("下载并安装")
+                        Text(t("mac.update.download"))
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(BashXTheme.accent(for: appearance))
@@ -574,13 +649,13 @@ struct SettingsView: View {
                 }
 
                 if case .failed = updater.phase {
-                    Button("打开发布页") {
+                    Button(t("mac.update.openReleases")) {
                         updater.openReleasesPage()
                     }
                 }
             }
 
-            Text("检查到新版本后可直接下载安装，完成后请重启 BashX。")
+            Text(t("mac.update.footer"))
                 .font(.caption)
                 .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
         }
@@ -600,33 +675,33 @@ struct SettingsView: View {
     private var updateStatusView: some View {
         switch updater.phase {
         case .idle:
-            Text("点击「检查更新」获取最新版本。")
+            Text(t("mac.update.idle"))
                 .font(.caption)
                 .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
         case .checking:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("正在检查更新…")
+                Text(t("mac.update.checking"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
         case .upToDate(let remote):
-            Label("已是最新版本（当前 \(AppVersion.short)，GitHub \(remote)）", systemImage: "checkmark.circle.fill")
+            Label(t("mac.update.upToDate").replacingOccurrences(of: "%1", with: AppVersion.short).replacingOccurrences(of: "%2", with: remote), systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(BashXTheme.good)
                 .fixedSize(horizontal: false, vertical: true)
         case .ahead(let remote):
-            Label("当前 \(AppVersion.short) 高于 GitHub 最新 \(remote)，无需更新", systemImage: "info.circle.fill")
+            Label(t("mac.update.ahead").replacingOccurrences(of: "%1", with: AppVersion.short).replacingOccurrences(of: "%2", with: remote), systemImage: "info.circle.fill")
                 .font(.caption)
                 .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 .fixedSize(horizontal: false, vertical: true)
         case .available(let info):
             VStack(alignment: .leading, spacing: 4) {
-                Text("发现新版本 \(info.version)（当前 \(AppVersion.short)）")
+                Text(t("mac.update.available").replacingOccurrences(of: "%1", with: info.version).replacingOccurrences(of: "%2", with: AppVersion.short))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(BashXTheme.accent(for: appearance))
                 if info.fileSize > 0 {
-                    Text("安装包 \(AppUpdateService.formatSize(info.fileSize))")
+                    Text(t("mac.update.pkgSize").replacingOccurrences(of: "%@", with: AppUpdateService.formatSize(info.fileSize)))
                         .font(.caption2)
                         .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 }
@@ -639,14 +714,14 @@ struct SettingsView: View {
             }
         case .downloading(let progress):
             VStack(alignment: .leading, spacing: 6) {
-                Text("正在下载… \(Int(progress * 100))%")
+                Text(t("mac.update.downloading").replacingOccurrences(of: "%@", with: "\(Int(progress * 100))"))
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
             }
         case .downloaded:
-            Label("下载完成，已打开安装包。请将 BashX 拖入「应用程序」后重启。", systemImage: "externaldrive.fill.badge.checkmark")
+            Label(t("mac.update.downloaded"), systemImage: "externaldrive.fill.badge.checkmark")
                 .font(.caption)
                 .foregroundStyle(BashXTheme.good)
                 .fixedSize(horizontal: false, vertical: true)
@@ -667,8 +742,8 @@ struct SettingsView: View {
 
     private var updaterCheckButtonTitle: String {
         switch updater.phase {
-        case .checking: return "检查中…"
-        default: return "检查更新"
+        case .checking: return t("mac.update.checkingBtn")
+        default: return t("mac.update.check")
         }
     }
 
@@ -700,10 +775,10 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("BashX")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("轻量菜单栏代理客户端")
+                Text(t("mac.about.tagline"))
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Text("订阅管理 · 智能分流 · 系统代理 · 流量监控")
+                Text(t("mac.about.subtitle"))
                     .font(.system(size: 11, design: .rounded))
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                     .fixedSize(horizontal: false, vertical: true)

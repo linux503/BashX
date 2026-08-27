@@ -2,26 +2,26 @@ import AppKit
 import SwiftUI
 
 enum BashXTheme {
-    // Light: soft powder blue · Dark: high-contrast slate + clear blue
+    // Sky blue (天蓝) — unified accent across panel, sidebar, and nodes
     static func accent(for appearance: AppAppearance) -> Color {
         appearance == .dark
-            ? Color(red: 0.55, green: 0.78, blue: 1.00)
-            : Color(red: 0.36, green: 0.52, blue: 0.68)
+            ? Color(red: 0.42, green: 0.78, blue: 1.00)
+            : Color(red: 0.18, green: 0.62, blue: 0.98)
     }
 
     static func accentSoft(for appearance: AppAppearance) -> Color {
-        accent(for: appearance).opacity(appearance == .dark ? 0.26 : 0.14)
+        accent(for: appearance).opacity(appearance == .dark ? 0.24 : 0.12)
     }
 
     static func accentGlow(for appearance: AppAppearance) -> Color {
-        accent(for: appearance).opacity(appearance == .dark ? 0.35 : 0.20)
+        accent(for: appearance).opacity(appearance == .dark ? 0.32 : 0.18)
     }
 
     /// Window / panel backdrop
     static func canvas(for appearance: AppAppearance) -> Color {
         appearance == .dark
-            ? Color(red: 0.06, green: 0.07, blue: 0.09)
-            : Color(red: 0.96, green: 0.97, blue: 0.99)
+            ? Color(red: 0.05, green: 0.07, blue: 0.11)
+            : Color(red: 0.95, green: 0.97, blue: 1.00)
     }
 
     /// Cards, side panels — clearly elevated above canvas in dark
@@ -40,8 +40,12 @@ enum BashXTheme {
 
     static func sidebarTint(for appearance: AppAppearance) -> Color {
         appearance == .dark
-            ? Color(red: 0.09, green: 0.10, blue: 0.13)
-            : Color(red: 0.94, green: 0.96, blue: 0.98).opacity(0.72)
+            ? Color(red: 0.07, green: 0.09, blue: 0.14)
+            : Color(red: 0.92, green: 0.96, blue: 1.00)
+    }
+
+    static func canvasNSColor(for appearance: AppAppearance) -> NSColor {
+        NSColor(canvas(for: appearance))
     }
 
     /// Primary body text — deeper ink in light mode
@@ -65,9 +69,9 @@ enum BashXTheme {
             : Color(red: 0.42, green: 0.48, blue: 0.56)
     }
 
-    static let accent = Color(red: 0.36, green: 0.52, blue: 0.68)
-    static let accentSoft = Color(red: 0.36, green: 0.52, blue: 0.68).opacity(0.14)
-    static let accentGlow = Color(red: 0.72, green: 0.84, blue: 0.94).opacity(0.35)
+    static let accent = Color(red: 0.18, green: 0.62, blue: 0.98)
+    static let accentSoft = Color(red: 0.18, green: 0.62, blue: 0.98).opacity(0.12)
+    static let accentGlow = Color(red: 0.55, green: 0.82, blue: 1.00).opacity(0.28)
     static let good = Color(red: 0.42, green: 0.72, blue: 0.58)
     static let warn = Color(red: 0.92, green: 0.68, blue: 0.38)
     static let bad = Color(red: 0.88, green: 0.45, blue: 0.48)
@@ -179,7 +183,7 @@ struct SettingsCardShell<Content: View>: View {
                 .padding(18)
                 .background {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(BashXTheme.card(for: appearance).opacity(appearance == .dark ? 1 : 0.72))
+                        .fill(BashXTheme.card(for: appearance))
                         .overlay(
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
                                 .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: appearance == .dark ? 1 : 0.5)
@@ -200,8 +204,8 @@ struct PanelAtmosphere: View {
             BashXTheme.canvas(for: appearance)
             LinearGradient(
                 colors: [
-                    BashXTheme.accent(for: appearance).opacity(appearance == .dark ? 0.08 : 0.07),
-                    Color(red: 0.55, green: 0.68, blue: 0.82).opacity(appearance == .dark ? 0.06 : 0.04),
+                    BashXTheme.accent(for: appearance).opacity(appearance == .dark ? 0.10 : 0.08),
+                    Color(red: 0.45, green: 0.78, blue: 1.0).opacity(appearance == .dark ? 0.05 : 0.04),
                     Color.clear,
                 ],
                 startPoint: .topLeading,

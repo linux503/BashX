@@ -6,7 +6,7 @@ import UIKit
 final class IOSAppState: ObservableObject {
     @Published var settings: AppSettings
     @Published var nodes: [ProxyNode] = []
-    @Published var statusText = "就绪"
+    @Published var statusText = L10n.t("status.ready")
     @Published var isBusy = false
     @Published var isTesting = false
     @Published var testedCount = 0
@@ -16,15 +16,29 @@ final class IOSAppState: ObservableObject {
     @Published var outboundIP: String = "—"
     @Published var outboundIPLoading = false
     @Published var isPreparingGeodata = false
+    @Published var proxyGroups: [VPNManager.ProxyGroupSnapshot] = []
+    /// Root tab index: 0 home / 1 nodes / 2 subscriptions / 3 settings
+    @Published var selectedTab = 0
+    /// When true, SubscriptionsView should present the add sheet once.
+    @Published var pendingShowAddSubscription = false
+    /// Session unlock for wallpaper disguise (re-locks on background).
+    @Published var isAppUnlocked = false
+    /// Prefill URL when opened via QR / deep link.
+    @Published var pendingSubscriptionURL: String?
 
     let vpn = VPNManager()
     private let tester = SpeedTester()
     private var persistTask: Task<Void, Never>?
     private var outboundIPTask: Task<Void, Never>?
     private var vpnWatchTask: Task<Void, Never>?
+    private var proxyGroupsTask: Task<Void, Never>?
 
+    var showsDisguise: Bool {
+        settings.iosDisguiseEnabled && !isAppUnlocked
+    }
     init() {
         settings = SettingsStore.load()
+        L10n.apply(settings.uiLanguage)
         settings.externalController = AppConstants.externalController
         settings.mixedPort = AppConstants.mixedPort
         if ChinaSmartRules.needsUpgrade(settings.rules, storedVersion: settings.rulesVersion) {
@@ -51,9 +65,11 @@ final class IOSAppState: ObservableObject {
                     lastConnected = connected
                     if connected {
                         self.scheduleOutboundIPRefresh(delay: 1.2)
+                        self.scheduleProxyGroupsRefresh(delay: 0.8)
                     } else {
                         self.outboundIP = "—"
                         self.outboundIPLoading = false
+                        self.proxyGroups = []
                     }
                 }
                 try? await Task.sleep(nanoseconds: 800_000_000)
@@ -117,6 +133,65 @@ final class IOSAppState: ObservableObject {
         }
     }
 
+    /// Flush settings immediately — used for mode / critical toggles so relaunch doesn't lose them.
+    func persistNow() {
+        persistTask?.cancel()
+        persistTask = nil
+        _ = SettingsStore.save(settings)
+    }
+
+    func setMode(_ mode: ProxyMode) {
+        guard settings.proxyMode != mode else {
+            // Re-assert live mode if UI already shows it but tunnel drifted.
+            if vpn.isConnected {
+                vpn.setProxyMode(mode.rawValue)
+                if mode != .direct, let name = settings.selectedNodeName {
+                    Task { await vpn.selectNode(name) }
+                }
+            }
+            return
+        }
+        var note = ""
+        if settings.videoAdBlockEnabled, mode != .rule {
+            settings.videoAdBlockEnabled = false
+            note = L10n.t("status.adOffNote")
+        }
+        settings.proxyMode = mode
+        writeConfig()
+        persistNow()
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(mode.rawValue, forKey: "proxyMode")
+        if vpn.isConnected {
+            vpn.setProxyMode(mode.rawValue)
+            // rule/global 出口节点；direct 忽略 selector。
+            if mode != .direct, let name = settings.selectedNodeName, !name.isEmpty {
+                Task { await vpn.selectNode(name) }
+            }
+        }
+        statusText = String(format: L10n.t("status.modeSwitched"), mode.title, note)
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    func setVideoAdBlock(_ enabled: Bool) {
+        settings.videoAdBlockEnabled = enabled
+        var forcedRule = false
+        if enabled, settings.proxyMode != .rule {
+            settings.proxyMode = .rule
+            forcedRule = true
+        }
+        writeConfig()
+        persistNow()
+        if forcedRule, vpn.isConnected {
+            vpn.setProxyMode("rule")
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set(ProxyMode.rule.rawValue, forKey: "proxyMode")
+        }
+        statusText = enabled
+            ? String(format: L10n.t("status.adOn"), "\(VideoAdBlock.ruleCount)")
+            : L10n.t("status.adOff")
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
     func reloadNodesFromCache() {
         var merged: [ProxyNode] = []
         var seen = Set<String>()
@@ -151,12 +226,12 @@ final class IOSAppState: ObservableObject {
 
     func addSubscription(name: String, url: String) {
         guard let trimmed = SubscriptionURL.normalized(url, allowInsecureHTTP: true) else {
-            statusText = "链接无效，请使用 http:// 或 https:// 开头"
+            statusText = L10n.t("status.badURL")
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             return
         }
         let sub = Subscription(
-            name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "订阅" : name,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L10n.t("status.subDefault") : name,
             url: trimmed
         )
         settings.subscriptions.append(sub)
@@ -174,7 +249,7 @@ final class IOSAppState: ObservableObject {
 
     func updateAllSubscriptions() async {
         isBusy = true
-        statusText = "更新订阅…"
+        statusText = L10n.t("status.updatingSubs")
         defer { isBusy = false }
         var okCount = 0
         var failCount = 0
@@ -186,13 +261,13 @@ final class IOSAppState: ObservableObject {
             }
         }
         if failCount == 0 {
-            statusText = "订阅已更新 · \(nodes.count) 节点"
+            statusText = String(format: L10n.t("status.subsUpdated"), "\(nodes.count)")
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } else if okCount == 0 {
-            statusText = "全部更新失败（\(failCount) 个）"
+            statusText = String(format: L10n.t("status.subsAllFail"), "\(failCount)")
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         } else {
-            statusText = "部分成功：\(okCount) 成功，\(failCount) 失败 · \(nodes.count) 节点"
+            statusText = String(format: L10n.t("status.subsPartial"), "\(okCount)", "\(failCount)", "\(nodes.count)")
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
         }
     }
@@ -203,7 +278,7 @@ final class IOSAppState: ObservableObject {
         let subName = settings.subscriptions[idx].name
         if showBusy {
             isBusy = true
-            statusText = "更新 \(subName)…"
+            statusText = String(format: L10n.t("status.updatingOne"), subName)
         }
         defer { if showBusy { isBusy = false } }
 
@@ -211,7 +286,7 @@ final class IOSAppState: ObservableObject {
             settings.subscriptions[idx].url,
             allowInsecureHTTP: true
         ) else {
-            statusText = "「\(subName)」链接无效"
+            statusText = String(format: L10n.t("status.oneBadURL"), subName)
             if showBusy { UINotificationFeedbackGenerator().notificationOccurred(.error) }
             return false
         }
@@ -230,23 +305,25 @@ final class IOSAppState: ObservableObject {
             settings.subscriptions[idx].updatedAt = Date()
             settings.subscriptions[idx].userInfo = result.userInfo
             if let suggested = result.suggestedName,
-               settings.subscriptions[idx].name == "订阅" || settings.subscriptions[idx].name.isEmpty {
+               settings.subscriptions[idx].name == L10n.t("status.subDefault", .zh)
+                || settings.subscriptions[idx].name == L10n.t("status.subDefault", .en)
+                || settings.subscriptions[idx].name.isEmpty {
                 settings.subscriptions[idx].name = suggested
             }
             reloadNodesFromCache()
             writeConfig()
             persist()
             if showBusy {
-                statusText = "已更新「\(subName)」· \(parsed.nodes.count) 节点"
+                statusText = String(format: L10n.t("status.oneUpdated"), subName, "\(parsed.nodes.count)")
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
             return true
         } catch {
             var message = error.localizedDescription
             if vpn.isConnected {
-                message += "（可先断开 VPN 再试）"
+                message += L10n.t("status.disconnectRetry")
             }
-            statusText = "「\(subName)」更新失败：\(message)"
+            statusText = String(format: L10n.t("status.oneFail"), subName, message)
             if showBusy { UINotificationFeedbackGenerator().notificationOccurred(.error) }
             return false
         }
@@ -256,7 +333,7 @@ final class IOSAppState: ObservableObject {
         guard settings.logoStyle != style else { return }
         settings.logoStyle = style
         persist()
-        statusText = "图标：\(style.title)"
+        statusText = String(format: L10n.t("status.icon"), style.title)
         Task { @MainActor in
             await IOSIconManager.apply(style: style)
         }
@@ -268,11 +345,45 @@ final class IOSAppState: ObservableObject {
         writeConfig()
         persist()
         Task { await vpn.selectNode(name) }
-        statusText = "已选：\(name)"
+        statusText = String(format: L10n.t("status.selected"), name)
         UISelectionFeedbackGenerator().selectionChanged()
         if vpn.isConnected {
             scheduleOutboundIPRefresh(delay: 0.8)
         }
+    }
+
+    func selectGroupProxy(group: String, name: String) {
+        guard vpn.isConnected else {
+            statusText = String(format: L10n.t("status.needVpnSwitch"), group)
+            return
+        }
+        statusText = String(format: L10n.t("status.switching"), group, name)
+        Task {
+            await vpn.selectGroupProxy(group: group, name: name)
+            await refreshProxyGroups()
+            statusText = String(format: L10n.t("status.groupSelected"), group, name)
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    func scheduleProxyGroupsRefresh(delay: TimeInterval = 0) {
+        proxyGroupsTask?.cancel()
+        proxyGroupsTask = Task { [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+            guard !Task.isCancelled else { return }
+            await self?.refreshProxyGroups()
+        }
+    }
+
+    func refreshProxyGroups() async {
+        guard vpn.isConnected else {
+            proxyGroups = []
+            return
+        }
+        let groups = await vpn.fetchProxyGroups()
+        proxyGroups = groups
     }
 
     func scheduleOutboundIPRefresh(delay: TimeInterval = 0.6) {
@@ -301,7 +412,7 @@ final class IOSAppState: ObservableObject {
         if let ip = await OutboundIPProbe.fetch(viaProxyPort: nil) {
             outboundIP = ip
         } else {
-            outboundIP = "查询失败"
+            outboundIP = L10n.t("status.ipFail")
         }
     }
 
@@ -310,26 +421,10 @@ final class IOSAppState: ObservableObject {
         selectNode(fastest.name)
     }
 
-    func setMode(_ mode: ProxyMode) {
-        guard settings.proxyMode != mode else { return }
-        var note = ""
-        if settings.videoAdBlockEnabled, mode != .rule {
-            settings.videoAdBlockEnabled = false
-            note = "（视频广告过滤已关闭）"
-        }
-        settings.proxyMode = mode
-        writeConfig()
-        persist()
-        if vpn.isConnected {
-            vpn.setProxyMode(mode.rawValue)
-        }
-        statusText = "已切换为\(mode.title)模式\(note)"
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
-
     func effectiveRuntimeRules() -> [String] {
         RuntimeRules.effective(
             base: settings.rules,
+            prepend: settings.rulesPrepend,
             videoAdBlockEnabled: settings.videoAdBlockEnabled
         )
     }
@@ -340,20 +435,7 @@ final class IOSAppState: ObservableObject {
         settings.rules = GeoSiteRules.sanitize(settings.rules)
         writeConfig()
         persist()
-        statusText = "已应用 BashX 智能规则 v\(ChinaSmartRules.version)（\(effectiveRuntimeRules().count) 条）"
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
-
-    func setVideoAdBlock(_ enabled: Bool) {
-        settings.videoAdBlockEnabled = enabled
-        if enabled, settings.proxyMode != .rule {
-            settings.proxyMode = .rule
-        }
-        writeConfig()
-        persist()
-        statusText = enabled
-            ? "视频广告过滤已开启（\(VideoAdBlock.ruleCount) 条）"
-            : "视频广告过滤已关闭"
+        statusText = String(format: L10n.t("status.rulesApplied"), "\(ChinaSmartRules.version)", "\(effectiveRuntimeRules().count)")
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
@@ -363,32 +445,45 @@ final class IOSAppState: ObservableObject {
         writeConfig()
         persist()
         if vpn.isConnected {
-            statusText = "DNS 已设为\(preference.title)，请重连 VPN 生效"
+            statusText = String(format: L10n.t("status.dnsReconnect"), preference.title)
         } else {
-            statusText = "DNS 已设为\(preference.title)"
+            statusText = String(format: L10n.t("status.dnsSet"), preference.title)
         }
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
     func writeConfig() {
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(settings.secret, forKey: "apiSecret")
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(settings.proxyMode.rawValue, forKey: "proxyMode")
         _ = IOSConfigWriter.write(
             nodes: nodes,
             selectedName: settings.selectedNodeName,
             mode: settings.proxyMode,
             rules: effectiveRuntimeRules(),
             secret: settings.secret,
-            dnsPreference: settings.dnsPreference
+            dnsPreference: settings.dnsPreference,
+            tunnelCapture: settings.iosTunnelCapture
         )
+    }
+
+    func setIosTunnelCapture(_ enabled: Bool) {
+        guard settings.iosTunnelCapture != enabled else { return }
+        settings.iosTunnelCapture = enabled
+        persist()
+        writeConfig()
+        statusText = enabled ? L10n.t("status.tunOn") : L10n.t("status.tunOff")
     }
 
     func testSpeeds(selectFastest: Bool = false) async {
         guard !nodes.isEmpty else { return }
         isTesting = true
         testedCount = 0
-        statusText = "测速中…"
+        statusText = L10n.t("status.testing")
         defer {
             isTesting = false
-            statusText = "测速完成"
+            statusText = L10n.t("status.tested")
         }
         let snapshot = nodes
         let results = await tester.testAll(
@@ -418,7 +513,80 @@ final class IOSAppState: ObservableObject {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
+    func openAddSubscription() {
+        pendingShowAddSubscription = true
+        selectedTab = 2
+    }
+
+    func unlockApp() {
+        isAppUnlocked = true
+        if pendingSubscriptionURL != nil {
+            openAddSubscription()
+        }
+    }
+
+    func lockApp() {
+        guard settings.iosDisguiseEnabled else { return }
+        isAppUnlocked = false
+    }
+
+    func setDisguiseEnabled(_ enabled: Bool) {
+        settings.iosDisguiseEnabled = enabled
+        if !enabled {
+            isAppUnlocked = true
+        }
+        persist()
+    }
+
+    func setUiLanguage(_ language: AppLanguage) {
+        settings.uiLanguage = language
+        L10n.apply(language)
+        persist()
+        switch language {
+        case .zh: statusText = L10n.t("lang.changed.zh", language)
+        case .en: statusText = L10n.t("lang.changed.en", language)
+        case .system: statusText = L10n.t("lang.changed.system", language)
+        }
+    }
+
+    func handleOpenURL(_ url: URL) {
+        // bashx://add?url=https%3A%2F%2F...
+        // bashx://add/<url>
+        // https://... subscription link opened into BashX
+        let subURL: String? = {
+            if url.scheme?.lowercased() == "bashx" {
+                if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let q = comps.queryItems?.first(where: { $0.name == "url" })?.value,
+                   !q.isEmpty {
+                    return q
+                }
+                let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if path.lowercased().hasPrefix("http") {
+                    return path.removingPercentEncoding ?? path
+                }
+                return nil
+            }
+            if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+                return url.absoluteString
+            }
+            return nil
+        }()
+
+        guard let subURL, !subURL.isEmpty else { return }
+        pendingSubscriptionURL = subURL
+        if showsDisguise {
+            // Wait until unlock, then add sheet opens.
+            return
+        }
+        openAddSubscription()
+    }
+
     func toggleVPN() async {
+        if nodes.isEmpty, !vpn.isConnected {
+            statusText = L10n.t("status.needSubs")
+            openAddSubscription()
+            return
+        }
         if let name = settings.selectedNodeName, !name.isEmpty {
             UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
                 .set(name, forKey: "selectedNode")

@@ -6,7 +6,11 @@ struct HomeView: View {
     @EnvironmentObject private var vpn: VPNManager
     @State private var showNodePicker = false
     @State private var showQuickTools = false
+    @State private var showModePicker = false
     @State private var brandAppear = false
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
 
     var body: some View {
         NavigationStack {
@@ -18,6 +22,10 @@ struct HomeView: View {
                             .padding(.bottom, 16)
 
                         locationBar
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        proxyGroupsBar
                             .padding(.horizontal, 20)
                             .padding(.bottom, 18)
 
@@ -44,15 +52,13 @@ struct HomeView: View {
                 .background(Color.clear)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        modeMenu
-                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             Task { await state.updateAllSubscriptions() }
                         } label: {
                             if state.isBusy {
                                 ProgressView().tint(IOSTheme.accent)
+            .id(lang.id)
                             } else {
                                 Image(systemName: "arrow.triangle.2.circlepath")
                                     .font(.body.weight(.semibold))
@@ -60,7 +66,7 @@ struct HomeView: View {
                             }
                         }
                         .disabled(state.isBusy)
-                        .accessibilityLabel("更新订阅")
+                        .accessibilityLabel(t("home.updateSubs"))
                     }
                 }
                 .toolbarBackground(.hidden, for: .navigationBar)
@@ -74,8 +80,27 @@ struct HomeView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showModePicker) {
+            ProxyModePickerSheet(
+                current: state.settings.proxyMode,
+                onSelect: { mode in
+                    state.setMode(mode)
+                    showModePicker = false
+                }
+            )
+            .presentationDetents([.height(320)])
+            .presentationDragIndicator(.visible)
+        }
         .onAppear {
             withAnimation(.easeOut(duration: 0.7)) { brandAppear = true }
+            if vpn.isConnected {
+                state.scheduleProxyGroupsRefresh()
+            }
+        }
+        .onChange(of: vpn.isConnected) { connected in
+            if connected {
+                state.scheduleProxyGroupsRefresh(delay: 0.6)
+            }
         }
     }
 
@@ -128,20 +153,29 @@ struct HomeView: View {
             }
 
             IOSStatusPill(
-                text: vpn.statusText,
+                text: homeStatusText,
                 tone: vpn.isConnected ? .connected : (vpn.isBusyConnecting ? .connecting : .idle)
             )
             .scaleEffect(brandAppear ? 1 : 0.9)
             .opacity(brandAppear ? 1 : 0)
 
+            modePill
+                .opacity(brandAppear ? 1 : 0)
+
             IOSConnectControl(
                 isConnected: vpn.isConnected,
                 isBusy: vpn.isBusyConnecting,
-                isEnabled: !state.nodes.isEmpty || vpn.isConnected
+                isEnabled: true
             ) {
                 Task { await state.toggleVPN() }
             }
             .padding(.top, 4)
+
+            if state.nodes.isEmpty, !vpn.isConnected {
+                firstUseGuide
+                    .padding(.top, 8)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
 
             if let err = vpn.lastError, !err.isEmpty {
                 HStack(spacing: 8) {
@@ -179,17 +213,111 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var heroSubtitle: String {
-        if vpn.isConnected {
-            return "已加密连接 · 流量受保护"
-        }
-        if vpn.isBusyConnecting {
-            return "正在建立安全隧道…"
+    private var homeStatusText: String {
+        if vpn.isConnected || vpn.isBusyConnecting {
+            return vpn.statusText
         }
         if state.nodes.isEmpty {
-            return "添加订阅后一键连接全球节点"
+            return t("home.addSubFirst")
         }
-        return "一键连接 · 智能分流保护隐私"
+        if state.settings.selectedNodeName == nil {
+            return t("home.pickNode")
+        }
+        return vpn.statusText
+    }
+
+    private var heroSubtitle: String {
+        if vpn.isConnected {
+            return t("home.hero.connected")
+        }
+        if vpn.isBusyConnecting {
+            return t("home.hero.connecting")
+        }
+        if state.nodes.isEmpty {
+            return t("home.hero.empty")
+        }
+        return t("home.hero.ready")
+    }
+
+    private var modePill: some View {
+        let current = state.settings.proxyMode
+        let color = IOSTheme.proxyModeColor(current)
+        return Button { showModePicker = true } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+                Text(current.title(lang: lang))
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.primary)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(color.opacity(0.12))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(color.opacity(0.22), lineWidth: 0.8)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(format: t("home.mode.a11y"), current.title(lang: lang)))
+    }
+
+    private var firstUseGuide: some View {
+        VStack(spacing: 12) {
+            Text(t("home.firstUse"))
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 8) {
+                guideStep(1, t("home.guide.1"))
+                guideStep(2, t("home.guide.2"))
+                guideStep(3, t("home.guide.3"))
+            }
+            Button {
+                state.openAddSubscription()
+            } label: {
+                Text(t("home.goAddSub"))
+                    .font(.system(.body, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(IOSTheme.accentGradient)
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(IOSTheme.cardStroke, lineWidth: 0.5)
+                )
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private func guideStep(_ n: Int, _ text: String) -> some View {
+        HStack(spacing: 10) {
+            Text("\(n)")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(IOSTheme.accent))
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
     }
 
     // MARK: - Location
@@ -208,10 +336,10 @@ struct HomeView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("连接位置")
+                    Text(t("home.location"))
                         .font(.system(.caption, design: .rounded).weight(.medium))
                         .foregroundStyle(.secondary)
-                    Text(state.settings.selectedNodeName ?? "选择节点")
+                    Text(state.settings.selectedNodeName ?? t("home.selectNode"))
                         .font(.system(.body, design: .rounded).weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
@@ -220,11 +348,11 @@ struct HomeView: View {
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(IOSTheme.delay(node.delayMs))
                     } else if state.nodes.isEmpty {
-                        Text("请先添加订阅")
+                        Text(t("home.addSubFirst"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("\(state.nodes.count) 个节点可用")
+                        Text(String(format: t("home.nodesAvailable"), "\(state.nodes.count)"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -259,6 +387,104 @@ struct HomeView: View {
         .opacity(state.nodes.isEmpty ? 0.55 : 1)
     }
 
+    // MARK: - Proxy groups (GOOGLE / TELEGRAM / AUTO)
+
+    @ViewBuilder
+    private var proxyGroupsBar: some View {
+        if !vpn.isConnected {
+            EmptyView()
+        } else if state.proxyGroups.isEmpty {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(t("home.loadingGroups"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(t("home.refresh")) {
+                    state.scheduleProxyGroupsRefresh()
+                }
+                .font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(groupBarBackground)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(t("home.groups"))
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        state.scheduleProxyGroupsRefresh()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(IOSTheme.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(t("home.refreshGroups"))
+                }
+
+                ForEach(state.proxyGroups) { group in
+                    Menu {
+                        ForEach(group.all.prefix(60), id: \.self) { name in
+                            Button {
+                                state.selectGroupProxy(group: group.name, name: name)
+                            } label: {
+                                if name == group.now {
+                                    Label(shortGroupMember(name), systemImage: "checkmark")
+                                } else {
+                                    Text(shortGroupMember(name))
+                                }
+                            }
+                        }
+                        if group.all.count > 60 {
+                            Text(String(format: t("home.groupsMore"), "\(group.all.count)"))
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text(group.name)
+                                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                .foregroundStyle(IOSTheme.accentDeep)
+                                .frame(width: 88, alignment: .leading)
+                            Text(shortGroupMember(group.now.isEmpty ? "—" : group.now))
+                                .font(.system(.subheadline, design: .rounded).weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background(groupBarBackground)
+                    }
+                }
+            }
+        }
+    }
+
+    private var groupBarBackground: some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.systemBackground).opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(IOSTheme.cardStroke, lineWidth: 0.5)
+            )
+    }
+
+    private func shortGroupMember(_ name: String) -> String {
+        if name.count <= 22 { return name }
+        return String(name.prefix(20)) + "…"
+    }
+
     // MARK: - Quick tools (secondary, below fold)
 
     private var quickTools: some View {
@@ -267,7 +493,7 @@ struct HomeView: View {
                 withAnimation(.easeInOut(duration: 0.25)) { showQuickTools.toggle() }
             } label: {
                 HStack {
-                    Text("快捷控制")
+                    Text(t("home.quick"))
                         .font(.system(.subheadline, design: .rounded).weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -283,26 +509,29 @@ struct HomeView: View {
                     dnsPicker
                     HStack(spacing: 10) {
                         miniTool(
-                            title: "测速",
+                            title: t("home.test"),
                             icon: "gauge.with.dots.needle.50percent",
                             disabled: state.nodes.isEmpty || state.isTesting
                         ) { Task { await state.testSpeeds() } }
                         miniTool(
-                            title: "最快",
+                            title: t("home.fastest"),
                             icon: "bolt.fill",
                             disabled: state.nodes.isEmpty || state.isTesting
                         ) { Task { await state.testSpeeds(selectFastest: true) } }
                         miniTool(
-                            title: "节点",
+                            title: t("home.nodes"),
                             icon: "list.bullet",
                             disabled: false
                         ) { showNodePicker = true }
                     }
+                    WebsiteProbeStrip()
+                        .environmentObject(vpn)
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            if !state.statusText.isEmpty, state.statusText != "就绪" {
+            // 不展示「未连接/已连接」等 VPN 状态文案（状态pill 已有）；只留操作反馈。
+            if shouldShowStatusHint(state.statusText) {
                 Text(state.statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -311,49 +540,21 @@ struct HomeView: View {
         }
     }
 
-    private var modeMenu: some View {
-        let current = state.settings.proxyMode
-        return Menu {
-            ForEach(ProxyMode.allCases) { mode in
-                Button {
-                    state.setMode(mode)
-                } label: {
-                    if mode == current {
-                        Label(mode.title, systemImage: "checkmark")
-                    } else {
-                        Label(mode.title, systemImage: mode.systemImage)
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: current.systemImage)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(IOSTheme.proxyModeColor(current))
-                Text(current.title)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(.ultraThickMaterial)
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .fill(Color(.systemBackground).opacity(0.72))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
-            }
+    private func shouldShowStatusHint(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty || t == L10n.t("status.ready", .zh) || t == L10n.t("status.ready", .en) {
+            return false
         }
-        .accessibilityLabel("分流模式，当前\(current.title)")
+        let noise: Set<String> = [
+            L10n.t("vpn.disconnected", .zh), L10n.t("vpn.disconnected", .en),
+            L10n.t("vpn.connected", .zh), L10n.t("vpn.connected", .en),
+            L10n.t("vpn.connecting", .zh), L10n.t("vpn.connecting", .en),
+            L10n.t("connect.connecting", .zh), L10n.t("connect.connecting", .en),
+            L10n.t("vpn.disconnecting", .zh), L10n.t("vpn.disconnecting", .en),
+            L10n.t("vpn.reconnecting", .zh), L10n.t("vpn.reconnecting", .en),
+            "未配置", "Not configured",
+        ]
+        return !noise.contains(t)
     }
 
     private var dnsPicker: some View {
@@ -404,12 +605,15 @@ struct NodeQuickPickerSheet: View {
     @EnvironmentObject private var state: IOSAppState
     @Environment(\.dismiss) private var dismiss
 
+    private var lang: AppLanguage { state.settings.uiLanguage }
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
+
     var body: some View {
         NavigationStack {
             List {
                 if let fastest = state.fastestNode {
                     Section {
-                        nodeButton(fastest, badge: "最快")
+                        nodeButton(fastest, badge: t("home.fastest"))
                     }
                 }
                 ForEach(state.categoryGroups.prefix(10)) { group in
@@ -421,14 +625,14 @@ struct NodeQuickPickerSheet: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("选择位置")
+            .navigationTitle(t("home.pickLocation"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("完成") { dismiss() }
+                    Button(t("common.done")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("测速") { Task { await state.testSpeeds() } }
+                    Button(t("home.test")) { Task { await state.testSpeeds() } }
                         .disabled(state.isTesting || state.nodes.isEmpty)
                 }
             }
@@ -453,7 +657,7 @@ struct NodeQuickPickerSheet: View {
                                 .foregroundStyle(IOSTheme.accentDeep)
                         }
                     }
-                    Text("\(node.type.uppercased()) · \(node.server)")
+                    Text(node.endpointSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -467,6 +671,85 @@ struct NodeQuickPickerSheet: View {
                         .foregroundStyle(IOSTheme.accent)
                 }
             }
+        }
+    }
+}
+
+// MARK: - Proxy mode picker
+
+private struct ProxyModePickerSheet: View {
+    let current: ProxyMode
+    let onSelect: (ProxyMode) -> Void
+
+    private func t(_ key: String) -> String { L10n.t(key) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(t("home.modeTitle"))
+                    .font(.system(.title3, design: .rounded).weight(.bold))
+                Text(t("home.modeHint"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 8)
+
+            VStack(spacing: 10) {
+                ForEach(ProxyMode.allCases) { mode in
+                    let selected = mode == current
+                    let color = IOSTheme.proxyModeColor(mode)
+                    Button {
+                        onSelect(mode)
+                    } label: {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(color.opacity(selected ? 0.22 : 0.12))
+                                    .frame(width: 42, height: 42)
+                                Image(systemName: modeIcon(mode))
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(color)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(mode.title)
+                                    .font(.system(.body, design: .rounded).weight(.semibold))
+                                    .foregroundStyle(.primary)
+                                Text(mode.subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            if selected {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(color)
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .background {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color(.secondarySystemGroupedBackground))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(selected ? color.opacity(0.55) : Color.clear, lineWidth: 1.5)
+                                )
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
+    }
+
+    private func modeIcon(_ mode: ProxyMode) -> String {
+        switch mode {
+        case .rule: return "slider.horizontal.3"
+        case .global: return "globe.asia.australia.fill"
+        case .direct: return "link"
         }
     }
 }

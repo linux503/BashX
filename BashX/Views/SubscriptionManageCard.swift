@@ -23,157 +23,128 @@ struct SubscriptionManageCard: View {
 
     private var accent: Color { BashXTheme.accent(for: appearance) }
 
-    private var monogram: String {
-        let trimmed = sub.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first else { return "#" }
-        return String(first).uppercased()
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+
             if let info = sub.userInfo {
+                Divider().opacity(0.45)
                 SubscriptionTrafficBlock(info: info)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, showActions ? 4 : 14)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
             } else if sub.updatedAt != nil {
-                Text("未识别到流量信息 · 点更新再试")
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-            } else {
-                Color.clear.frame(height: 8)
+                Text("未识别流量 · 点更新")
+                    .font(.caption2)
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
             }
 
             if showActions {
+                Divider().opacity(0.45)
                 footer
             }
         }
         .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(
-                            sub.enabled
-                                ? (onlyThisEnabled ? accent.opacity(0.35) : accent.opacity(0.2))
-                                : BashXTheme.separator(for: appearance),
-                            lineWidth: sub.enabled ? 1.2 : 0.5
+                            sub.enabled ? accent.opacity(onlyThisEnabled ? 0.32 : 0.18) : BashXTheme.separator(for: appearance),
+                            lineWidth: sub.enabled ? 1 : 0.5
                         )
                 )
-                .shadow(
-                    color: Color.black.opacity(appearance == .dark ? 0.25 : 0.05),
-                    radius: 10,
-                    y: 3
-                )
         }
-        .opacity(sub.enabled ? 1 : 0.68)
+        .opacity(sub.enabled ? 1 : 0.72)
         .transaction { $0.animation = nil }
-        .contextMenu {
-            Button("重命名") { beginRename() }
-            Button("更新此订阅") {
-                Task { await state.updateSubscription(subscriptionId) }
-            }
-            .disabled(state.isBusy)
-            Button(sub.enabled ? "停用" : "启用") {
-                Task { await state.setSubscriptionEnabled(subscriptionId, enabled: !sub.enabled) }
-            }
-            Button("仅用此订阅") {
-                Task { await state.switchToSubscription(subscriptionId) }
-            }
-            Button("复制链接") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(sub.url, forType: .string)
-            }
-            Button("在 Finder 中显示缓存") {
-                state.revealSubscriptionFile(id: subscriptionId)
-            }
-            Button("删除", role: .destructive) {
-                state.removeSubscription(subscriptionId)
-            }
-        }
+        .contextMenu { contextActions }
         .onValueChange(isEditingName) { editing in
-            if editing {
-                DispatchQueue.main.async { nameFocused = true }
-            }
+            if editing { DispatchQueue.main.async { nameFocused = true } }
         }
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Button {
                 Task { await state.setSubscriptionEnabled(subscriptionId, enabled: !sub.enabled) }
             } label: {
                 SubscriptionEnableControl(
                     enabled: sub.enabled,
-                    monogram: monogram,
-                    size: 40,
+                    size: 32,
                     emphasized: onlyThisEnabled
                 )
             }
             .buttonStyle(PanelPressButtonStyle())
-            .help(sub.enabled ? "已合并到节点列表 · 点击停用" : "点击合并到节点列表（可多选）")
+            .help(sub.enabled ? "点击停用" : "点击启用并合并")
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    if isEditingName {
-                        TextField("订阅名称", text: $draftName)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .focused($nameFocused)
-                            .onSubmit { commitRename() }
-                        Button("保存") { commitRename() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(accent)
-                            .controlSize(.mini)
-                        Button("取消") { cancelRename() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.mini)
-                    } else {
-                        Text(sub.name)
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .lineLimit(1)
-                            .onTapGesture(count: 2) { beginRename() }
-                        Button { beginRename() } label: {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("编辑名称")
-                        if sub.enabled {
-                            Text(onlyThisEnabled ? "当前" : "已启用")
-                                .font(.system(size: 9, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(accent))
-                        }
-                    }
-                }
-
+            VStack(alignment: .leading, spacing: 3) {
+                nameRow
                 Text(displayHost)
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, design: .rounded))
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(sub.url)
-                    .textSelection(.enabled)
-
-                subscriptionCacheRow
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
 
             if !isEditingName {
-                statusBadge
+                statusCaption
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var nameRow: some View {
+        HStack(spacing: 5) {
+            if isEditingName {
+                TextField("名称", text: $draftName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .focused($nameFocused)
+                    .onSubmit { commitRename() }
+                Button("保存") { commitRename() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent)
+                    .controlSize(.mini)
+                Button("取消") { cancelRename() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+            } else {
+                Text(sub.name)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .onTapGesture(count: 2) { beginRename() }
+                if sub.enabled {
+                    Text(onlyThisEnabled ? "当前" : "已启用")
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(accent.opacity(0.12)))
+                }
+            }
+        }
+    }
+
+    private var statusCaption: some View {
+        Text(statusText)
+            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+            .multilineTextAlignment(.trailing)
+            .lineLimit(2)
+    }
+
+    private var statusText: String {
+        if !sub.enabled { return "已停用" }
+        if let updated = sub.updatedAt {
+            return updated.formatted(.relative(presentation: .named))
+        }
+        return "未更新"
     }
 
     private var displayHost: String {
@@ -183,138 +154,71 @@ struct SubscriptionManageCard: View {
         return sub.url
     }
 
-    private var subscriptionCacheRow: some View {
+    private var footer: some View {
         HStack(spacing: 6) {
-            Image(systemName: "folder")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
-            Text(state.subscriptionCacheExists(for: subscriptionId)
-                 ? state.subscriptionCachePathLabel(for: subscriptionId)
-                 : "尚未缓存 · \(Paths.shortPath(Paths.subscriptionsCacheDir))")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
             Button {
-                state.revealSubscriptionFile(id: subscriptionId)
+                Task { await state.switchToSubscription(subscriptionId) }
             } label: {
-                Text("打开目录")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                Text(onlyThisEnabled ? "已选用" : "仅用此订阅")
+                    .font(.caption.weight(.medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(onlyThisEnabled ? accent : BashXTheme.secondaryLabel(for: appearance))
+            .disabled(onlyThisEnabled || state.isBusy)
+
+            Text("·").foregroundStyle(.quaternary)
+
+            Button {
+                Task { await state.updateSubscription(subscriptionId) }
+            } label: {
+                Label("更新", systemImage: "arrow.clockwise")
+                    .font(.caption.weight(.medium))
             }
             .buttonStyle(.plain)
             .foregroundStyle(accent)
-            .help("在 Finder 中显示订阅缓存文件")
-        }
-    }
-
-    private var footer: some View {
-        HStack(spacing: 8) {
-            footerChip(
-                onlyThisEnabled ? "已选用" : "仅用此订阅",
-                icon: "scope",
-                emphasized: onlyThisEnabled
-            ) {
-                Task { await state.switchToSubscription(subscriptionId) }
-            }
-            .disabled(onlyThisEnabled || state.isBusy)
-            .help("只启用这一个订阅，停用其他")
-
-            footerChip("更新", icon: "arrow.clockwise") {
-                Task { await state.updateSubscription(subscriptionId) }
-            }
             .disabled(state.isBusy)
-
-            footerChip("复制", icon: "link") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(sub.url, forType: .string)
-                state.statusText = "已复制订阅链接"
-            }
-
-            footerChip("目录", icon: "folder") {
-                state.revealSubscriptionFile(id: subscriptionId)
-            }
-            .help("在 Finder 中显示订阅缓存文件")
 
             Spacer(minLength: 0)
 
-            Button {
-                state.removeSubscription(subscriptionId)
+            Menu {
+                contextActions
             } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(BashXTheme.bad.opacity(0.85))
-                    .frame(width: 28, height: 28)
-                    .background(
-                        Circle()
-                            .fill(BashXTheme.bad.opacity(0.08))
-                    )
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
-            .help("删除订阅")
+            .menuStyle(.borderlessButton)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(BashXTheme.secondaryFill(for: appearance))
-        .clipShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: 16,
-                bottomTrailingRadius: 16,
-                topTrailingRadius: 0,
-                style: .continuous
-            )
-        )
-    }
-
-    private func footerChip(_ title: String, icon: String, emphasized: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(emphasized ? accent : .primary.opacity(0.75))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(emphasized ? accent.opacity(0.12) : Color.primary.opacity(0.04))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(
-                                emphasized ? accent.opacity(0.25) : Color.primary.opacity(0.06),
-                                lineWidth: 0.5
-                            )
-                    )
-            }
-        }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
-    private var statusBadge: some View {
-        let text: String = {
-            if !sub.enabled { return "已停用" }
-            if let updated = sub.updatedAt {
-                return updated.formatted(.relative(presentation: .named))
-            }
-            return "未更新"
-        }()
-        HStack(spacing: 4) {
-            Circle()
-                .fill(sub.enabled ? BashXTheme.good(for: appearance) : Color.secondary.opacity(0.4))
-                .frame(width: 5, height: 5)
-            Text(text)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(sub.enabled ? .secondary : .tertiary)
+    private var contextActions: some View {
+        Button("重命名") { beginRename() }
+        Button("更新此订阅") {
+            Task { await state.updateSubscription(subscriptionId) }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background {
-            Capsule(style: .continuous)
-                .fill(Color.primary.opacity(0.04))
+        .disabled(state.isBusy)
+        Button(sub.enabled ? "停用" : "启用") {
+            Task { await state.setSubscriptionEnabled(subscriptionId, enabled: !sub.enabled) }
+        }
+        Button("仅用此订阅") {
+            Task { await state.switchToSubscription(subscriptionId) }
+        }
+        Divider()
+        Button("复制链接") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(sub.url, forType: .string)
+            state.statusText = "已复制订阅链接"
+        }
+        Button("打开缓存目录") {
+            state.revealSubscriptionFile(id: subscriptionId)
+        }
+        Divider()
+        Button("删除", role: .destructive) {
+            state.removeSubscription(subscriptionId)
         }
     }
 

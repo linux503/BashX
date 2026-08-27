@@ -43,7 +43,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // Broken / mismatched geo files make mihomo try GitHub download during Parse and hang the NE.
         scrubStaleGeoDatabases()
 
-        let settings = makeNetworkSettings()
+        let settings = makeNetworkSettings(tunnelCapture: Self.loadTunnelCapture())
         setTunnelNetworkSettings(settings) { [weak self] error in
             guard let self else { return }
             if let error {
@@ -60,66 +60,59 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     #if canImport(MihomoCore)
-    /// Primary: real utun fd + gVisor (BaoLianDeng) — full TCP/UDP.
-    /// Fallback: socketpair + packetFlow + system stack (QUIC-heavy only; TCP often missing in logs).
+    /// iOS 18+：必须 socketpair + packetFlow 桥；utun 直读收不到 App 包（Stash 新版用 Darwin Tun + 自有桥）。
     private func startEngine(_ completionHandler: @escaping (Error?) -> Void) {
         BridgeUpdateLogLevel("info")
 
+        let tunnelCapture = Self.loadTunnelCapture()
         let bindIF = TunnelInterface.preferredOutboundInterface() ?? ""
         BridgeSetOutboundInterface(bindIF)
         writeLog("outbound bindIF=\(bindIF.isEmpty ? "(none)" : bindIF)")
         writeLog("ifaces \(TunnelInterface.outboundInterfaceDebugLine())")
 
-        let mode: TunnelDataMode
-        if let utun = TunnelInterface.scanUtunFD(preferAddress: AppConstants.tunAddress),
-           let goFd = TunnelInterface.duplicatedFD(utun) {
-            ownedTunFd = goFd
-            writeLog("TUN mode=utun-direct fd=\(utun) dup=\(goFd) (primary)")
-            mode = .utunDirect(goFd: goFd)
-        } else if let pair = TunnelSocketPair.make() {
-            writeLog("TUN mode=socketpair+system mihomoFd=\(pair.mihomoFd) bridgeFd=\(pair.bridgeFd) (fallback)")
-            mode = .socketpair(pair)
-        } else if let utun = TunnelInterface.fileDescriptor(packetFlow: packetFlow),
-                  let goFd = TunnelInterface.duplicatedFD(utun) {
-            ownedTunFd = goFd
-            writeLog("TUN mode=utun-direct-fallback fd=\(utun) source=\(TunnelInterface.fdSource(packetFlow: packetFlow))")
-            mode = .utunDirect(goFd: goFd)
-        } else {
-            writeLog("utun+socketpair both failed errno=\(errno)")
-            finish(completionHandler, TunnelError.tunFDNotFound)
+        guard tunnelCapture else {
+            writeLog("TUN mode=off proxy-only mixed-port=\(AppConstants.mixedPort)")
+            packetBridge = nil
+            applyAndStart(tunFd: -1, socketpair: false, completionHandler)
             return
         }
 
-        switch mode {
-        case .socketpair(let pair):
-            startPacketBridge(bridgeFd: pair.bridgeFd)
-            applyAndStart(tunFd: pair.mihomoFd, socketpair: true, completionHandler)
-        case .utunDirect(let goFd):
-            packetBridge = nil
-            applyAndStart(tunFd: goFd, socketpair: false, completionHandler)
+        guard let pair = TunnelSocketPair.make() else {
+            writeLog("socketpair failed errno=\(errno)")
+            finish(completionHandler, TunnelError.tunFDNotFound)
+            return
         }
+        writeLog("TUN mode=socketpair+gvisor mihomoFd=\(pair.mihomoFd) bridgeFd=\(pair.bridgeFd)")
+        startPacketBridge(bridgeFd: pair.bridgeFd)
+        applyAndStart(tunFd: pair.mihomoFd, socketpair: true, completionHandler)
     }
 
     private enum TunnelDataMode {
-        case utunDirect(goFd: Int32)
         case socketpair(TunnelSocketPair.Pair)
     }
 
     private func applyAndStart(tunFd: Int32, socketpair: Bool, _ completionHandler: @escaping (Error?) -> Void) {
         BridgeConfigureTUNPath(socketpair)
 
-        var fdErr: NSError?
-        if !BridgeSetTUNFd(tunFd, &fdErr) || fdErr != nil {
-            let err = fdErr ?? NSError(domain: "BashX", code: -2, userInfo: [
-                NSLocalizedDescriptionKey: "SetTUNFd 失败"
-            ])
-            writeLog("SetTUNFd failed: \(err)")
-            finish(completionHandler, err)
-            return
+        if tunFd >= 0 {
+            var fdErr: NSError?
+            if !BridgeSetTUNFd(tunFd, &fdErr) || fdErr != nil {
+                let err = fdErr ?? NSError(domain: "BashX", code: -2, userInfo: [
+                    NSLocalizedDescriptionKey: "SetTUNFd 失败"
+                ])
+                writeLog("SetTUNFd failed: \(err)")
+                finish(completionHandler, err)
+                return
+            }
+        } else {
+            writeLog("SetTUNFd skipped (proxy-only)")
         }
 
         var startErr: NSError?
-        let ok = BridgeStartWithExternalController(AppConstants.externalController, "", &startErr)
+        let apiSecret = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .string(forKey: "apiSecret")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let ok = BridgeStartWithExternalController(AppConstants.externalController, apiSecret, &startErr)
         if !ok || startErr != nil {
             let err = startErr ?? NSError(domain: "BashX", code: -3, userInfo: [
                 NSLocalizedDescriptionKey: "mihomo 启动失败"
@@ -128,12 +121,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             finish(completionHandler, err)
             return
         }
+        writeLog("api secret=\(apiSecret.isEmpty ? "off" : "on")")
 
         proxyStarted = true
         startMemoryManagement()
         selectSavedNodeWithRetry()
-        let path = socketpair ? "socketpair+system" : "utun-direct"
+        let path: String = {
+            if tunFd < 0 { return "proxy-only" }
+            return socketpair ? "socketpair+gvisor" : "utun-direct+gvisor"
+        }()
         writeLog("proxy started running=\(BridgeIsRunning()) path=\(path)")
+        // Proxy-only: re-assert NEProxySettings after mixed-port is listening.
+        if tunFd < 0 {
+            let settings = makeNetworkSettings(tunnelCapture: false)
+            setTunnelNetworkSettings(settings) { [weak self] error in
+                if let error {
+                    self?.writeLog("re-apply proxy settings failed: \(error.localizedDescription)")
+                } else {
+                    self?.writeLog("re-apply proxy settings ok (127.0.0.1:\(AppConstants.mixedPort))")
+                }
+            }
+        }
         finish(completionHandler, nil)
 
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) { [weak self] in
@@ -219,6 +227,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 selectSavedNode(name)
             }
             completionHandler?(nil)
+        case "select_group":
+            if let group = message["group"] as? String,
+               let name = message["node"] as? String {
+                selectGroupProxy(group: group, name: name)
+            }
+            completionHandler?(nil)
+        case "get_proxy_groups":
+            Task {
+                let groups = await Self.fetchMenuProxyGroups()
+                completionHandler?(try? JSONSerialization.data(withJSONObject: ["groups": groups]))
+            }
         case "set_mode":
             if let mode = message["mode"] as? String {
                 patchProxyMode(mode)
@@ -232,6 +251,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 let ip = await Self.probeOutboundIP()
                 completionHandler?(ip?.data(using: .utf8))
             }
+        case "probe_websites":
+            let timeoutMs = (message["timeout_ms"] as? NSNumber)?.intValue
+                ?? (message["timeout_ms"] as? Int)
+                ?? 8000
+            let rows = message["targets"] as? [[String: Any]] ?? []
+            Task {
+                let results = await Self.probeWebsites(rows: rows, timeoutMs: max(timeoutMs, 1000))
+                completionHandler?(try? JSONSerialization.data(withJSONObject: ["results": results]))
+            }
         default:
             completionHandler?(nil)
         }
@@ -240,17 +268,55 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         #endif
     }
 
-    private func makeNetworkSettings() -> NEPacketTunnelNetworkSettings {
+    private static func loadTunnelCapture() -> Bool {
+        let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+        if ud?.object(forKey: AppConstants.iosTunnelCaptureKey) == nil { return true }
+        return ud?.bool(forKey: AppConstants.iosTunnelCaptureKey) ?? true
+    }
+
+    private func makeNetworkSettings(tunnelCapture: Bool) -> NEPacketTunnelNetworkSettings {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "254.1.1.1")
 
-        let ipv4 = NEIPv4Settings(addresses: [AppConstants.tunAddress], subnetMasks: [AppConstants.tunSubnetMask])
-        ipv4.includedRoutes = [NEIPv4Route.default()]
-        settings.ipv4Settings = ipv4
-        settings.ipv6Settings = nil
+        if tunnelCapture {
+            let ipv4 = NEIPv4Settings(addresses: [AppConstants.tunAddress], subnetMasks: [AppConstants.tunSubnetMask])
+            ipv4.includedRoutes = [NEIPv4Route.default()]
+            settings.ipv4Settings = ipv4
+            settings.ipv6Settings = nil
 
-        let dns = NEDNSSettings(servers: [AppConstants.tunDNS])
-        dns.matchDomains = [""]
-        settings.dnsSettings = dns
+            let dns = NEDNSSettings(servers: [AppConstants.tunDNS])
+            dns.matchDomains = [""]
+            settings.dnsSettings = dns
+        } else {
+            // HTTP 代理实验：不全量接管路由。
+            // 代理必须指向 127.0.0.1（不进 utun/packetFlow）；不要把 198.18.0.1 放进 includedRoutes，
+            // 否则系统把发往代理的 TCP 灌进 packetFlow，而本模式不跑桥 → 黑洞。
+            let ipv4 = NEIPv4Settings(
+                addresses: [AppConstants.tunAddress],
+                subnetMasks: ["255.255.255.255"]
+            )
+            ipv4.includedRoutes = []
+            settings.ipv4Settings = ipv4
+            settings.ipv6Settings = nil
+            // 不设 dnsSettings：系统 DNS；HTTPS CONNECT 由 mihomo 解析。
+
+            let proxy = NEProxySettings()
+            proxy.httpEnabled = true
+            proxy.httpsEnabled = true
+            proxy.httpServer = NEProxyServer(address: "127.0.0.1", port: AppConstants.mixedPort)
+            proxy.httpsServer = NEProxyServer(address: "127.0.0.1", port: AppConstants.mixedPort)
+            proxy.matchDomains = nil
+            proxy.excludeSimpleHostnames = true
+            proxy.exceptionList = [
+                "localhost",
+                "127.0.0.1",
+                "*.local",
+                "10.0.0.0/8",
+                "172.16.0.0/12",
+                "192.168.0.0/16",
+            ]
+            settings.proxySettings = proxy
+        }
+
         settings.mtu = NSNumber(value: AppConstants.defaultMTU)
         return settings
     }
@@ -278,6 +344,80 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
         }
         return nil
+    }
+
+    /// mihomo `/proxies/{group}/delay` — runs inside NE (same path as user traffic).
+    private static func probeWebsites(rows: [[String: Any]], timeoutMs: Int) async -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        let batchSize = 2
+        var index = 0
+        while index < rows.count {
+            let slice = Array(rows[index..<min(index + batchSize, rows.count)])
+            await withTaskGroup(of: [String: Any].self) { group in
+                for row in slice {
+                    group.addTask {
+                        let id = row["id"] as? String ?? ""
+                        let url = row["url"] as? String ?? ""
+                        let fallback = row["fallback"] as? String
+                        let proxy = row["proxy"] as? String ?? "PROXY"
+                        var (ok, ms, err) = await mihomoDelay(proxy: proxy, testURL: url, timeoutMs: timeoutMs)
+                        if !ok, let fallback, !fallback.isEmpty {
+                            (ok, ms, err) = await mihomoDelay(proxy: proxy, testURL: fallback, timeoutMs: timeoutMs)
+                        }
+                        return [
+                            "id": id,
+                            "ok": ok,
+                            "ms": ms,
+                            "error": err ?? "",
+                        ]
+                    }
+                }
+                for await item in group {
+                    out.append(item)
+                }
+            }
+            index += batchSize
+        }
+        return out
+    }
+
+        private static func mihomoDelay(proxy: String, testURL: String, timeoutMs: Int) async -> (Bool, Int, String?) {
+        let name = proxy.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? proxy
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = "127.0.0.1"
+        components.port = 19090
+        components.percentEncodedPath = "/proxies/\(name)/delay"
+        components.queryItems = [
+            URLQueryItem(name: "timeout", value: String(max(timeoutMs, 1000))),
+            URLQueryItem(name: "url", value: testURL),
+        ]
+        guard let reqURL = components.url else { return (false, -1, "URL 无效") }
+        var request = URLRequest(url: reqURL, timeoutInterval: TimeInterval(timeoutMs) / 1000 + 4)
+        if let secret = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?.string(forKey: "apiSecret"),
+           !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (data, response) = try await localAPISession().data(for: request)
+            guard let http = response as? HTTPURLResponse else { return (false, -1, "无响应") }
+            guard (200...299).contains(http.statusCode) else {
+                return (false, -1, "HTTP \(http.statusCode)")
+            }
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return (false, -1, "解析失败")
+            }
+            let delay: Int = {
+                if let v = json["delay"] as? Int { return v }
+                if let v = json["delay"] as? Double { return Int(v.rounded()) }
+                if let v = json["delay"] as? NSNumber { return v.intValue }
+                return -1
+            }()
+            if delay <= 0 || delay >= 65535 { return (false, delay, "不可达") }
+            return (true, delay, nil)
+        } catch {
+            return (false, -1, error.localizedDescription)
+        }
     }
 
     private func startMemoryManagement() {
@@ -310,18 +450,80 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let name = override
             ?? UserDefaults(suiteName: AppConstants.appGroupIdentifier)?.string(forKey: "selectedNode")
         guard let name, !name.isEmpty else { return }
-        guard let url = URL(string: "http://\(AppConstants.externalController)/proxies/PROXY") else { return }
+        // rule → PROXY; global → GLOBAL；两边都同步，避免切全局后仍走 DIRECT。
+        selectGroupProxy(group: "PROXY", name: name)
+        selectGroupProxy(group: "GLOBAL", name: name)
+    }
+
+    private func apiSecretHeader() -> String? {
+        let secret = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .string(forKey: "apiSecret")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return secret.isEmpty ? nil : secret
+    }
+
+    /// Local API must not go through system/NE HTTP proxy (proxy-only mode loop).
+    private static func localAPISession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.connectionProxyDictionary = [:]
+        config.timeoutIntervalForRequest = 5
+        return URLSession(configuration: config)
+    }
+
+    private func selectGroupProxy(group: String, name: String) {
+        let encoded = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
+        guard let url = URL(string: "http://\(AppConstants.externalController)/proxies/\(encoded)") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let secret = apiSecretHeader() {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["name": name])
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+        Self.localAPISession().dataTask(with: request) { [weak self] _, response, error in
             if let error {
-                self?.writeLog("select \(name) failed: \(error.localizedDescription)")
+                self?.writeLog("select \(group)→\(name) failed: \(error.localizedDescription)")
             } else if let http = response as? HTTPURLResponse {
-                self?.writeLog("select \(name) → \(http.statusCode)")
+                self?.writeLog("select \(group)→\(name) → \(http.statusCode)")
             }
         }.resume()
+    }
+
+    private static func fetchMenuProxyGroups() async -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        for name in ["GOOGLE", "TELEGRAM", "AUTO"] {
+            guard let info = await fetchProxyGroup(name) else { continue }
+            out.append(info)
+        }
+        return out
+    }
+
+    private static func fetchProxyGroup(_ group: String) async -> [String: Any]? {
+        let encoded = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
+        guard let url = URL(string: "http://\(AppConstants.externalController)/proxies/\(encoded)") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.httpMethod = "GET"
+        let secret = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .string(forKey: "apiSecret")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await localAPISession().data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let now = json["now"] as? String ?? ""
+        let all = (json["all"] as? [String]) ?? []
+        guard !all.isEmpty else { return nil }
+        return [
+            "name": group,
+            "type": json["type"] as? String ?? "",
+            "now": now,
+            "all": all,
+        ]
     }
 
     private func patchProxyMode(_ mode: String) {
@@ -334,12 +536,61 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let secret = apiSecretHeader() {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["mode": mode])
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+        Self.localAPISession().dataTask(with: request) { [weak self] _, response, error in
+            guard let self else { return }
             if let error {
-                self?.writeLog("set_mode \(mode) failed: \(error.localizedDescription)")
+                self.writeLog("set_mode \(mode) failed: \(error.localizedDescription)")
+                return
+            }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            self.writeLog("set_mode \(mode) → \(code)")
+            // rule/global：同步 PROXY+GLOBAL 出口；切模式后关掉旧连接，避免串线。
+            if mode != "direct" {
+                self.selectSavedNode()
+            }
+            self.closeAllConnections()
+            self.verifyProxyMode(expected: mode)
+        }.resume()
+    }
+
+    private func verifyProxyMode(expected: String) {
+        guard let url = URL(string: "http://\(AppConstants.externalController)/configs") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.httpMethod = "GET"
+        if let secret = apiSecretHeader() {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        Self.localAPISession().dataTask(with: request) { [weak self] data, _, _ in
+            guard let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let mode = (json["mode"] as? String)?.lowercased() else {
+                self?.writeLog("set_mode verify skipped (no mode field)")
+                return
+            }
+            if mode == expected {
+                self?.writeLog("set_mode verified=\(mode)")
+            } else {
+                self?.writeLog("set_mode MISMATCH expected=\(expected) got=\(mode)")
+            }
+        }.resume()
+    }
+
+    private func closeAllConnections() {
+        guard let url = URL(string: "http://\(AppConstants.externalController)/connections") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        if let secret = apiSecretHeader() {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        Self.localAPISession().dataTask(with: request) { [weak self] _, response, error in
+            if let error {
+                self?.writeLog("close connections failed: \(error.localizedDescription)")
             } else if let http = response as? HTTPURLResponse {
-                self?.writeLog("set_mode \(mode) → \(http.statusCode)")
+                self?.writeLog("close connections → \(http.statusCode)")
             }
         }.resume()
     }

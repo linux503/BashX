@@ -1,7 +1,8 @@
 import Foundation
 
 enum IOSConfigWriter {
-    /// Write Clash/mihomo YAML tailored for iOS Packet Tunnel (fd-injected TUN).
+    /// Write Clash/mihomo YAML for iOS Packet Tunnel.
+    /// - `tunnelCapture`: true = TUN+gVisor（全 App）；false = 仅 mixed-port + 系统 HTTP 代理（实验）。
     @discardableResult
     static func write(
         nodes: [ProxyNode],
@@ -9,7 +10,8 @@ enum IOSConfigWriter {
         mode: ProxyMode,
         rules: [String],
         secret: String = "",
-        dnsPreference: DnsPreference = .smart
+        dnsPreference: DnsPreference = .smart,
+        tunnelCapture: Bool = true
     ) -> Bool {
         let yaml = ClashConfigParser.buildConfig(
             nodes: nodes,
@@ -18,7 +20,7 @@ enum IOSConfigWriter {
             controller: AppConstants.externalController,
             secret: secret,
             rules: rules,
-            tunEnabled: true,
+            tunEnabled: tunnelCapture,
             tunStack: "gvisor",
             mode: mode,
             allowLan: false,
@@ -27,10 +29,12 @@ enum IOSConfigWriter {
             dnsPreference: dnsPreference,
             forIOS: true
         )
-        let patched = patchForPacketTunnel(yaml)
+        let patched = tunnelCapture ? patchForPacketTunnel(yaml) : patchForProxyOnly(yaml)
         do {
             try patched.write(to: Paths.mihomoConfigURL, atomically: true, encoding: .utf8)
             try? patched.write(to: Paths.configURL, atomically: true, encoding: .utf8)
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set(tunnelCapture, forKey: AppConstants.iosTunnelCaptureKey)
             return true
         } catch {
             return false
@@ -45,7 +49,6 @@ enum IOSConfigWriter {
         for line in yaml.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
-            // DNS listen: never bind 198.18.0.2 (fails); use localhost (BaoLianDeng).
             if trimmed.hasPrefix("listen:") {
                 out.append("  listen: \(AppConstants.dnsListen)")
                 continue
@@ -84,6 +87,20 @@ enum IOSConfigWriter {
                 }
             }
 
+            out.append(line)
+        }
+        return out.joined(separator: "\n")
+    }
+
+    /// Proxy-only: keep DNS listen on loopback; mixed-port already binds 127.0.0.1 in YAML.
+    private static func patchForProxyOnly(_ yaml: String) -> String {
+        var out: [String] = []
+        for line in yaml.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("listen:") {
+                out.append("  listen: \(AppConstants.dnsListen)")
+                continue
+            }
             out.append(line)
         }
         return out.joined(separator: "\n")

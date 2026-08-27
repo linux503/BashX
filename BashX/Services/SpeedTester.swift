@@ -7,6 +7,10 @@ actor SpeedTester {
         let delayMs: Int
     }
 
+    /// Live proxy names from mihomo `/proxies` — used when UI name differs slightly from runtime.
+    private var proxyCatalog: [String: String] = [:]
+    private var catalogController = ""
+
     func testAll(
         nodes: [ProxyNode],
         timeoutMs: Int,
@@ -16,13 +20,21 @@ actor SpeedTester {
         testURL: String = "https://www.gstatic.com/generate_204",
         onProgress: @MainActor @escaping (String, Int) -> Void
     ) async -> [Result] {
-        let limit = max(1, concurrency)
-        var results: [Result] = []
-        results.reserveCapacity(nodes.count)
+        let testables = nodes.filter { ClashConfigParser.isSpeedTestable($0) }
+        guard !testables.isEmpty else { return [] }
+
+        let limit = max(1, min(concurrency, 16))
+        let apiTimeout = max(timeoutMs, 5000)
         let useAPI = controller != nil
+        if useAPI, let controller {
+            await refreshProxyCatalog(controller: controller, secret: secret)
+        }
+
+        var results: [Result] = []
+        results.reserveCapacity(testables.count)
 
         await withTaskGroup(of: Result.self) { group in
-            var iterator = nodes.makeIterator()
+            var iterator = testables.makeIterator()
 
             func enqueueNext() {
                 guard let node = iterator.next() else { return }
@@ -30,20 +42,20 @@ actor SpeedTester {
                     let delay: Int
                     if useAPI, let controller {
                         delay = await self.apiDelay(
-                            name: node.name,
+                            node: node,
                             controller: controller,
                             secret: secret,
-                            timeoutMs: timeoutMs,
+                            timeoutMs: apiTimeout,
                             testURL: testURL
                         )
                     } else {
-                        delay = await self.tcpDelay(host: node.server, port: node.port, timeoutMs: timeoutMs)
+                        delay = await self.tcpDelay(host: node.server, port: node.port, timeoutMs: apiTimeout)
                     }
                     return Result(name: node.name, delayMs: delay)
                 }
             }
 
-            for _ in 0..<min(limit, nodes.count) {
+            for _ in 0..<min(limit, testables.count) {
                 enqueueNext()
             }
 
@@ -57,33 +69,73 @@ actor SpeedTester {
         return results
     }
 
+    private func refreshProxyCatalog(controller: String, secret: String) async {
+        if catalogController == controller, !proxyCatalog.isEmpty { return }
+        catalogController = controller
+        proxyCatalog.removeAll(keepingCapacity: true)
+
+        guard let url = URL(string: "http://\(controller)/proxies") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 4)
+        applyAuth(&request, secret: secret)
+        let config = URLSessionConfiguration.ephemeral
+        config.connectionProxyDictionary = [:]
+        guard let (data, response) = try? await URLSession(configuration: config).data(for: request),
+              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let proxies = json["proxies"] as? [String: Any] else { return }
+
+        for (name, value) in proxies {
+            guard let dict = value as? [String: Any] else { continue }
+            let type = (dict["type"] as? String)?.lowercased() ?? ""
+            if ["direct", "reject", "select", "url-test", "fallback", "load-balance", "relay", "pass", "compatible"].contains(type) {
+                continue
+            }
+            proxyCatalog[name] = name
+            if let server = dict["server"] as? String, let port = intValue(dict["port"]) {
+                let key = "\(server.lowercased()):\(port)"
+                proxyCatalog[key] = name
+            }
+        }
+    }
+
+    private func resolveProxyName(_ node: ProxyNode) -> String {
+        if proxyCatalog[node.name] != nil { return node.name }
+        let key = "\(node.server.lowercased()):\(node.port)"
+        if let resolved = proxyCatalog[key] { return resolved }
+        return node.name
+    }
+
     private func apiDelay(
-        name: String,
+        node: ProxyNode,
         controller: String,
         secret: String,
         timeoutMs: Int,
         testURL: String
     ) async -> Int {
-        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
-        var components = URLComponents()
-        components.scheme = "http"
-        let hostPort = controller.split(separator: ":", maxSplits: 1).map(String.init)
-        components.host = hostPort.first
-        if hostPort.count == 2 { components.port = Int(hostPort[1]) }
-        components.percentEncodedPath = "/proxies/\(encoded)/delay"
-        components.queryItems = [
-            URLQueryItem(name: "timeout", value: String(max(timeoutMs, 1000))),
-            URLQueryItem(name: "url", value: testURL)
+        let proxyName = resolveProxyName(node)
+        let encoded = Self.encodePath(proxyName)
+        var components = URLComponents(string: "http://\(controller)/proxies/\(encoded)/delay")
+        components?.queryItems = [
+            URLQueryItem(name: "timeout", value: String(max(timeoutMs, 3000))),
+            URLQueryItem(name: "url", value: testURL),
         ]
-        guard let url = components.url else { return -1 }
-        var request = URLRequest(url: url, timeoutInterval: TimeInterval(timeoutMs) / 1000.0 + 2.0)
-        if !secret.isEmpty {
-            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
-        }
+        guard let url = components?.url else { return -1 }
+
+        var request = URLRequest(url: url, timeoutInterval: TimeInterval(timeoutMs) / 1000.0 + 4.0)
+        request.httpMethod = "GET"
+        applyAuth(&request, secret: secret)
+
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = TimeInterval(timeoutMs) / 1000.0 + 4
+        config.connectionProxyDictionary = [:]
+
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession(configuration: config).data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return -1
+            }
+            if let message = json["message"] as? String, !message.isEmpty, json["delay"] == nil {
                 return -1
             }
             return parseDelay(json) ?? -1
@@ -93,10 +145,14 @@ actor SpeedTester {
     }
 
     private func parseDelay(_ json: [String: Any]) -> Int? {
-        if let v = json["delay"] as? Int { return v }
-        if let v = json["delay"] as? Double { return Int(v.rounded()) }
-        if let v = json["delay"] as? NSNumber { return v.intValue }
-        return nil
+        let raw: Int? = {
+            if let v = json["delay"] as? Int { return v }
+            if let v = json["delay"] as? Double { return Int(v.rounded()) }
+            if let v = json["delay"] as? NSNumber { return v.intValue }
+            return nil
+        }()
+        guard let raw, raw > 0, raw < 60_000 else { return nil }
+        return raw
     }
 
     private func tcpDelay(host: String, port: Int, timeoutMs: Int) async -> Int {
@@ -145,5 +201,26 @@ actor SpeedTester {
                 finish(false)
             }
         }
+    }
+
+    private func applyAuth(_ req: inout URLRequest, secret: String) {
+        let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            req.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    private static func encodePath(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let v = value as? Int { return v }
+        if let v = value as? Int64 { return Int(v) }
+        if let v = value as? NSNumber { return v.intValue }
+        if let v = value as? String { return Int(v) }
+        return nil
     }
 }

@@ -40,13 +40,12 @@ enum VPNQuickControl {
     }
 
     static func statusText() async -> String {
-        guard let mgr = await loadManager() else { return "未配置" }
+        guard let mgr = await loadManager() else { return "未连接" }
         switch mgr.connection.status {
         case .connected: return "已连接"
         case .connecting, .reasserting: return "连接中"
         case .disconnecting: return "断开中"
-        case .disconnected: return "未连接"
-        case .invalid: return "未配置"
+        case .disconnected, .invalid: return "未连接"
         @unknown default: return "未知"
         }
     }

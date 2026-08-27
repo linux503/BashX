@@ -56,7 +56,7 @@ enum LogoStyle: String, CaseIterable, Identifiable, Codable {
 
     var subtitle: String {
         switch self {
-        case .markX: return "品牌默认 · X"
+        case .markX: return "品牌默认 · 黄底 X"
         case .bolt: return "琥珀棱锥"
         case .ring: return "靛蓝轨道"
         case .signal: return "珊瑚罗盘"
@@ -77,14 +77,14 @@ enum LogoStyle: String, CaseIterable, Identifiable, Codable {
     var palette: LogoStylePalette {
         switch self {
         case .markX:
-            // Classic BashX — navy → teal, white X (matches original Mac dock mark).
+            // BashX default — solid yellow field, dark X for contrast.
             return .init(
-                deep: CGColor(red: 0.06, green: 0.10, blue: 0.16, alpha: 1),
-                mid: CGColor(red: 0.04, green: 0.48, blue: 0.52, alpha: 1),
-                accent: CGColor(red: 0.12, green: 0.72, blue: 0.58, alpha: 1),
-                rim: CGColor(red: 0.45, green: 0.90, blue: 0.78, alpha: 0.40),
-                ink: CGColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1),
-                inkSoft: CGColor(red: 0.72, green: 0.96, blue: 0.88, alpha: 1)
+                deep: CGColor(red: 0.92, green: 0.68, blue: 0.04, alpha: 1),
+                mid: CGColor(red: 1.0, green: 0.84, blue: 0.12, alpha: 1),
+                accent: CGColor(red: 1.0, green: 0.94, blue: 0.38, alpha: 1),
+                rim: CGColor(red: 1.0, green: 0.97, blue: 0.62, alpha: 0.55),
+                ink: CGColor(red: 0.12, green: 0.10, blue: 0.04, alpha: 1),
+                inkSoft: CGColor(red: 0.30, green: 0.22, blue: 0.06, alpha: 1)
             )
         case .bolt:
             return .init( // amber / ember — warm, not teal
@@ -217,7 +217,7 @@ struct LogoStylePalette {
 }
 
 enum LogoPalette {
-    /// Fallback brand teal (BashX default).
+    /// Fallback brand yellow (BashX default).
     static let deep = LogoStyle.markX.palette.deep
     static let slate = LogoStyle.markX.palette.mid
     static let teal = LogoStyle.markX.palette.mid
@@ -466,7 +466,7 @@ enum LogoRenderer {
 
     // MARK: - Default mark
 
-    /// BashX brand: bold X on teal — same mark for menu bar, dock, and iOS.
+    /// BashX brand: bold X on yellow — same mark for menu bar, dock, and iOS.
     private static func drawMarkX(
         in ctx: CGContext,
         size s: CGFloat,

@@ -147,6 +147,7 @@ struct BashXApp: App {
     }
 
     private func syncTraffic() {
+        traffic.menuBarRates = menuRates
         traffic.configure(
             controller: state.settings.externalController,
             secret: state.settings.secret
@@ -163,6 +164,7 @@ struct BashXApp: App {
         appDelegate.traffic = traffic
         PanelPresenter.shared.traffic = traffic
         PanelPresenter.shared.menuRates = menuRates
+        PanelPresenter.shared.rebindOpenPanelIfNeeded(state: state)
         hub.trafficRoot.chrome.refresh(force: false)
     }
 }
@@ -217,14 +219,14 @@ private struct MenuBarStatusLabel: View {
             if chrome.image.size.width > 0.5, chrome.image.size.height > 0.5 {
                 Image(nsImage: chrome.image)
                     .interpolation(.high)
-                    .frame(height: 18)
+                    .frame(height: 24)
             } else {
                 // Absolute fallback so the status item never disappears.
                 Image("MenuBarIcon")
                     .renderingMode(.template)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(width: 16, height: 16)
+                    .frame(width: 22, height: 22)
             }
         }
         .help(chrome.help)
@@ -285,11 +287,11 @@ enum MenuBarStatusImage {
         showTraffic: Bool,
         dimmed: Bool
     ) -> NSImage {
-        let iconPt: CGFloat = 16
+        let iconPt: CGFloat = 22
         let gap: CGFloat = showTraffic ? 3 : 0
         let rateW: CGFloat = showTraffic ? 42 : 0
         let widthPt = iconPt + gap + rateW
-        let heightPt: CGFloat = 18
+        let heightPt: CGFloat = 24
         let alpha: CGFloat = dimmed ? 0.45 : 1
         // Always bake @2x pixels — `lockFocus` produces empty/invisible templates on some Macs.
         let scale: CGFloat = 2
@@ -365,10 +367,10 @@ enum MenuBarStatusImage {
         if let img = NSImage(named: "MenuBarIcon") {
             let copy = img.copy() as? NSImage ?? img
             copy.isTemplate = true
-            copy.size = NSSize(width: 16, height: 16)
+            copy.size = NSSize(width: 22, height: 22)
             return copy
         }
-        let img = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+        let img = NSImage(size: NSSize(width: 22, height: 22), flipped: false) { rect in
             NSColor.black.setFill()
             let inset = rect.insetBy(dx: 3, dy: 3)
             NSBezierPath(ovalIn: inset).fill()
@@ -413,6 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .store(in: &stateCancellables)
         }
         SettingsOpener.register(state)
+        GlobalHotkeys.shared.install(state: state)
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -439,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !didCleanup else { return .terminateNow }
         didCleanup = true
         traffic?.stopAll()
+        GlobalHotkeys.shared.unregister()
         state?.prepareForQuit()
         return .terminateNow
     }
@@ -447,6 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !didCleanup else { return }
         didCleanup = true
         traffic?.stopAll()
+        GlobalHotkeys.shared.unregister()
         state?.prepareForQuit()
     }
 }

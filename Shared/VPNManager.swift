@@ -63,13 +63,13 @@ final class VPNManager: ObservableObject {
 
     var statusText: String {
         switch status {
-        case .invalid: return "未配置"
-        case .disconnected: return "未连接"
-        case .connecting: return "连接中…"
-        case .connected: return "已连接"
-        case .reasserting: return "重连中…"
-        case .disconnecting: return "断开中…"
-        @unknown default: return "未知"
+        case .invalid: return L10n.t("vpn.disconnected")
+        case .disconnected: return L10n.t("vpn.disconnected")
+        case .connecting: return L10n.t("vpn.connecting")
+        case .connected: return L10n.t("vpn.connected")
+        case .reasserting: return L10n.t("vpn.reconnecting")
+        case .disconnecting: return L10n.t("vpn.disconnecting")
+        @unknown default: return L10n.t("vpn.unknown")
         }
     }
 
@@ -205,7 +205,7 @@ final class VPNManager: ObservableObject {
 
         // 3) Detect leftover VPN interfaces we cannot stop (other apps). iOS forbids killing them.
         if hasForeignVPNInterface() {
-            return "检测到其他 VPN 仍在运行。已尝试关闭系统 VPN；请到「设置 → VPN」关掉第三方 VPN 后再连 BashX。"
+            return L10n.t("vpn.otherVpn")
         }
         return nil
     }
@@ -265,14 +265,14 @@ final class VPNManager: ObservableObject {
                         if self.lastError == nil {
                             self.lastError = TunnelLogReader.lastErrorHint()
                                 ?? MihomoConfigCheck.validateFile()
-                                ?? "VPN 连接失败"
+                                ?? L10n.t("vpn.fail")
                         }
                     }
                     return
                 }
                 if tick >= 44 {
                     await MainActor.run {
-                        self.lastError = TunnelLogReader.lastErrorHint() ?? "连接超时，请检查网络后重试"
+                        self.lastError = TunnelLogReader.lastErrorHint() ?? L10n.t("vpn.timeout")
                     }
                     self.disconnect()
                     return
@@ -308,10 +308,61 @@ final class VPNManager: ObservableObject {
         try? session.sendProviderMessage(data) { _ in }
     }
 
+    /// Select a member inside GOOGLE / TELEGRAM / AUTO / PROXY (hot while tunnel is up).
+    func selectGroupProxy(group: String, name: String) async {
+        guard status == .connected,
+              let session = manager?.connection as? NETunnelProviderSession else { return }
+        let payload: [String: Any] = ["action": "select_group", "group": group, "node": name]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        try? session.sendProviderMessage(data) { _ in }
+    }
+
+    struct ProxyGroupSnapshot: Identifiable, Equatable, Sendable {
+        var id: String { name }
+        var name: String
+        var now: String
+        var all: [String]
+    }
+
+    /// Snapshot GOOGLE / TELEGRAM / AUTO from the NE (mihomo API).
+    func fetchProxyGroups() async -> [ProxyGroupSnapshot] {
+        guard status == .connected,
+              let session = manager?.connection as? NETunnelProviderSession,
+              let payload = try? JSONSerialization.data(withJSONObject: ["action": "get_proxy_groups"]) else {
+            return []
+        }
+        let raw: Data? = await withCheckedContinuation { cont in
+            do {
+                try session.sendProviderMessage(payload) { data in
+                    cont.resume(returning: data)
+                }
+            } catch {
+                cont.resume(returning: nil)
+            }
+        }
+        guard let raw,
+              let json = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              let rows = json["groups"] as? [[String: Any]] else {
+            return []
+        }
+        return rows.compactMap { row in
+            guard let name = row["name"] as? String,
+                  let all = row["all"] as? [String],
+                  !all.isEmpty else { return nil }
+            return ProxyGroupSnapshot(
+                name: name,
+                now: row["now"] as? String ?? "",
+                all: all
+            )
+        }
+    }
+
     /// Hot-patch Clash mode while tunnel is up (rule / global / direct).
     func setProxyMode(_ mode: String) {
         guard status == .connected,
               let session = manager?.connection as? NETunnelProviderSession else { return }
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(mode, forKey: "proxyMode")
         let payload: [String: Any] = ["action": "set_mode", "mode": mode]
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         try? session.sendProviderMessage(data) { _ in }
@@ -466,5 +517,63 @@ final class VPNManager: ObservableObject {
         if let d = any as? Double { return Int64(d) }
         if let s = any as? String, let i = Int64(s) { return i }
         return 0
+    }
+
+    /// VPN 已连接：优先走 NE 内 mihomo `/proxies/{group}/delay`（与节点测速同路径）；失败再回退 URLSession。
+    /// 未连接：直连探测（国内可测百度；Google/TG 等预期可能失败）。
+    func probeWebsites(
+        targets: [WebsiteProbe.Target] = WebsiteProbe.defaults,
+        timeoutMs: Int = 10_000
+    ) async -> [String: WebsiteProbe.Status] {
+        let timeout = TimeInterval(max(timeoutMs, 1000)) / 1000
+        guard status == .connected else {
+            return await WebsiteProbe.probeAllDirect(targets: targets, timeout: timeout)
+        }
+
+        if let viaTunnel = await probeWebsitesViaTunnel(targets: targets, timeoutMs: timeoutMs),
+           !viaTunnel.isEmpty {
+            var merged = viaTunnel
+            let needFallback = targets.filter { target in
+                guard let status = merged[target.id] else { return true }
+                if case .fail = status { return true }
+                return false
+            }
+            if !needFallback.isEmpty {
+                let fallback = await WebsiteProbe.probeAllViaVPN(targets: needFallback, timeout: timeout)
+                for (id, status) in fallback {
+                    if case .ok = status {
+                        merged[id] = status
+                    } else if merged[id] == nil {
+                        merged[id] = status
+                    }
+                }
+            }
+            return merged
+        }
+        return await WebsiteProbe.probeAllViaVPN(targets: targets, timeout: timeout)
+    }
+
+    private func probeWebsitesViaTunnel(
+        targets: [WebsiteProbe.Target],
+        timeoutMs: Int
+    ) async -> [String: WebsiteProbe.Status]? {
+        guard let session = manager?.connection as? NETunnelProviderSession,
+              let payload = try? JSONSerialization.data(
+                withJSONObject: WebsiteProbe.payloadForTunnel(targets: targets, timeoutMs: timeoutMs)
+              ) else {
+            return nil
+        }
+        let data: Data? = await withCheckedContinuation { cont in
+            do {
+                try session.sendProviderMessage(payload) { response in
+                    cont.resume(returning: response)
+                }
+            } catch {
+                cont.resume(returning: nil)
+            }
+        }
+        guard let data else { return nil }
+        let parsed = WebsiteProbe.parseTunnelResponse(data)
+        return parsed.isEmpty ? nil : parsed
     }
 }

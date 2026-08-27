@@ -11,8 +11,17 @@ enum MihomoConfigCheck {
         if !yaml.contains("proxies:") {
             return "配置缺少节点（proxies）"
         }
-        if !yaml.contains("tun:") {
-            return "配置缺少 TUN 段"
+
+        let tunnelCapture = isTunnelCaptureEnabled()
+        if tunnelCapture {
+            if !yaml.contains("tun:") {
+                return "配置缺少 TUN 段"
+            }
+        } else {
+            // HTTP 代理实验：无 tun:，但必须有可用 mixed-port。
+            if !hasPositiveMixedPort(yaml) {
+                return "HTTP 代理模式配置缺少 mixed-port"
+            }
         }
         return nil
     }
@@ -28,5 +37,28 @@ enum MihomoConfigCheck {
         }
         #endif
         return validateFile()
+    }
+
+    /// Default true (TUN). Explicit App Group false → HTTP-proxy-only experiment.
+    private static func isTunnelCaptureEnabled() -> Bool {
+        #if os(iOS)
+        let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+        if ud?.object(forKey: AppConstants.iosTunnelCaptureKey) == nil { return true }
+        return ud?.bool(forKey: AppConstants.iosTunnelCaptureKey) ?? true
+        #else
+        return true
+        #endif
+    }
+
+    private static func hasPositiveMixedPort(_ yaml: String) -> Bool {
+        for line in yaml.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("mixed-port:") else { continue }
+            let value = trimmed
+                .dropFirst("mixed-port:".count)
+                .trimmingCharacters(in: .whitespaces)
+            if let port = Int(value), port > 0 { return true }
+        }
+        return false
     }
 }

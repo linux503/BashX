@@ -33,17 +33,35 @@ final class PanelRateStore: ObservableObject {
     /// Adaptive compact rate (e.g. `1.7K`, `12M`) — not mega-only (that stuck at `0.0` for normal browsing).
     @Published private(set) var downMbps = "0.0K"
     @Published private(set) var upMbps = "0.0K"
+    @Published private(set) var downTotal: Int64 = 0
+    @Published private(set) var upTotal: Int64 = 0
+    @Published private(set) var isLive = false
+    @Published private(set) var samples: [TrafficSample] = []
 
     func clear() {
         if downMbps != "0.0K" { downMbps = "0.0K" }
         if upMbps != "0.0K" { upMbps = "0.0K" }
+        if downTotal != 0 { downTotal = 0 }
+        if upTotal != 0 { upTotal = 0 }
+        if isLive { isLive = false }
+        if !samples.isEmpty { samples = [] }
     }
 
-    func update(down: Int64, up: Int64) {
+    func update(down: Int64, up: Int64, downTotal: Int64, upTotal: Int64, live: Bool) {
         let pd = ByteFormat.menuBarCompact(down)
         let pu = ByteFormat.menuBarCompact(up)
         if downMbps != pd { downMbps = pd }
         if upMbps != pu { upMbps = pu }
+        if self.downTotal != downTotal { self.downTotal = downTotal }
+        if self.upTotal != upTotal { self.upTotal = upTotal }
+        if isLive != live { isLive = live }
+
+        if live {
+            var next = samples
+            next.append(TrafficSample(up: up, down: down, at: Date()))
+            if next.count > 42 { next.removeFirst(next.count - 42) }
+            samples = next
+        }
     }
 }
 
@@ -82,16 +100,27 @@ final class MenuBarRateStore: ObservableObject {
     }
 
     /// Panel ~1Hz via `panel`; menu bar ~0.6s for live ↓/↑.
-    func update(down: Int64, up: Int64) {
+    func update(down: Int64, up: Int64, downTotal: Int64 = 0, upTotal: Int64 = 0, live: Bool = true) {
         let now = Date()
+        let hasTraffic = down > 0 || up > 0
 
-        if now.timeIntervalSince(lastPanelPublish) >= 1.0 {
+        if hasTraffic || now.timeIntervalSince(lastPanelPublish) >= 1.0 {
             lastPanelPublish = now
-            panel.update(down: down, up: up)
+            panel.update(
+                down: down,
+                up: up,
+                downTotal: downTotal,
+                upTotal: upTotal,
+                live: live
+            )
         }
 
-        guard now.timeIntervalSince(lastMenuPublish) >= 0.6 else { return }
-        lastMenuPublish = now
+        if !hasTraffic && now.timeIntervalSince(lastMenuPublish) < 0.6 { return }
+        if hasTraffic || now.timeIntervalSince(lastMenuPublish) >= 0.6 {
+            lastMenuPublish = now
+        } else {
+            return
+        }
 
         let nd = ByteFormat.menuBarFixed(down)
         let nu = ByteFormat.menuBarFixed(up)
@@ -121,6 +150,8 @@ final class TrafficMonitor: ObservableObject {
     var chartSamplesEnabled = false
 
     private var trafficTask: Task<Void, Never>?
+    private var lastConnTotals: (up: Int64, down: Int64, at: Date)?
+    private var streamFailStreak = 0
     private var connectionsTask: Task<Void, Never>?
     private var logsTask: Task<Void, Never>?
     private var controller = ""
@@ -142,23 +173,37 @@ final class TrafficMonitor: ObservableObject {
     private var lastLogUIPublish = Date.distantPast
 
     func configure(controller: String, secret: String) {
-        let changed = self.controller != controller || self.secret != secret
-        self.controller = controller
-        self.secret = secret
+        let trimmedController = controller.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSecret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let changed = self.controller != trimmedController || self.secret != trimmedSecret
+        self.controller = trimmedController
+        self.secret = trimmedSecret
         if changed {
             trafficTask?.cancel()
             trafficTask = nil
+            lastConnTotals = nil
+            streamFailStreak = 0
         }
     }
 
     func startTraffic() {
         guard !controller.isEmpty else { return }
-        if trafficTask != nil { return }
+        if let task = trafficTask, !task.isCancelled { return }
+        trafficTask?.cancel()
+        trafficTask = nil
         isLive = true
         trafficTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.runTrafficStream()
-                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                guard let self else { return }
+                let streamed = await self.runTrafficStream()
+                if streamed {
+                    self.streamFailStreak = 0
+                } else {
+                    self.streamFailStreak += 1
+                    await self.pollTrafficViaConnections()
+                    let backoff = min(2.0 + Double(self.streamFailStreak) * 0.5, 6.0)
+                    try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                }
             }
         }
     }
@@ -166,6 +211,8 @@ final class TrafficMonitor: ObservableObject {
     func stopTrafficOnly() {
         trafficTask?.cancel()
         trafficTask = nil
+        lastConnTotals = nil
+        streamFailStreak = 0
         upRate = 0
         downRate = 0
         menuBarRates?.clear()
@@ -173,6 +220,7 @@ final class TrafficMonitor: ObservableObject {
     }
 
     func startConnectionsAndLogs() {
+        chartSamplesEnabled = true
         startConnections()
         startLogs()
     }
@@ -234,50 +282,86 @@ final class TrafficMonitor: ObservableObject {
         }
     }
 
-    private func runTrafficStream() async {
-        let controller = controller
-        let secret = secret
-        await Task.detached(priority: .utility) { [weak self] in
-            guard let url = URL(string: "http://\(controller)/traffic") else { return }
-            var req = URLRequest(url: url, timeoutInterval: 60)
-            if !secret.isEmpty {
-                req.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+    /// Returns true when at least one valid traffic frame was received.
+    private func runTrafficStream() async -> Bool {
+        guard let url = URL(string: "http://\(controller)/traffic") else { return false }
+        var req = URLRequest(url: url, timeoutInterval: 60)
+        applyAuth(&req)
+        var received = false
+        do {
+            let (bytes, response) = try await apiSession.bytes(for: req)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                return false
             }
-            let session = URLSession(configuration: .ephemeral)
-            do {
-                let (bytes, _) = try await session.bytes(for: req)
-                for try await line in bytes.lines {
-                    if Task.isCancelled { break }
-                    guard let data = line.data(using: .utf8),
-                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-                    let up = trafficInt64(json["up"])
-                    let down = trafficInt64(json["down"])
-                    let upT = trafficInt64(json["upTotal"])
-                    let downT = trafficInt64(json["downTotal"])
-                    await MainActor.run {
-                        guard let self else { return }
-                        self.pendingUp = up
-                        self.pendingDown = down
-                        if upT > 0 { self.pendingUpTotal = upT }
-                        if downT > 0 { self.pendingDownTotal = downT }
-                        self.publishTrafficUIIfNeeded()
-                    }
-                }
-            } catch {
-                await MainActor.run { self?.isLive = false }
+            for try await line in bytes.lines {
+                if Task.isCancelled { break }
+                guard let data = line.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                if json["message"] != nil, json["up"] == nil, json["down"] == nil { break }
+                let up = trafficInt64(json["up"])
+                let down = trafficInt64(json["down"])
+                let upT = trafficInt64(json["upTotal"])
+                let downT = trafficInt64(json["downTotal"])
+                pendingUp = up
+                pendingDown = down
+                if upT > 0 { pendingUpTotal = upT }
+                if downT > 0 { pendingDownTotal = downT }
+                publishTrafficUIIfNeeded()
+                received = true
             }
-        }.value
+        } catch {
+            if !Task.isCancelled { isLive = false }
+        }
+        return received
     }
 
-    private func publishTrafficUIIfNeeded() {
+    /// Fallback when `/traffic` SSE fails (auth mismatch, stream drop, etc.).
+    private func pollTrafficViaConnections() async {
+        guard let url = URL(string: "http://\(controller)/connections") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 4)
+        applyAuth(&req)
+        do {
+            let (data, response) = try await apiSession.data(for: req)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            let upT = trafficInt64(json["uploadTotal"])
+            let downT = trafficInt64(json["downloadTotal"])
+            let now = Date()
+            if let last = lastConnTotals {
+                let dt = now.timeIntervalSince(last.at)
+                if dt >= 0.35 {
+                    let upRate = Int64(Double(max(0, upT - last.up)) / dt)
+                    let downRate = Int64(Double(max(0, downT - last.down)) / dt)
+                    pendingUp = upRate
+                    pendingDown = downRate
+                    publishTrafficUIIfNeeded(force: true)
+                }
+            }
+            lastConnTotals = (upT, downT, now)
+            if upT > 0 { pendingUpTotal = upT }
+            if downT > 0 { pendingDownTotal = downT }
+            isLive = true
+        } catch {
+            if !Task.isCancelled { isLive = false }
+        }
+    }
+
+    private func publishTrafficUIIfNeeded(force: Bool = false) {
         let now = Date()
         // ~1.2Hz for panel; menu bar throttles separately inside MenuBarRateStore.
-        guard now.timeIntervalSince(lastRateUIPublish) >= 0.85 else { return }
+        guard force || now.timeIntervalSince(lastRateUIPublish) >= 0.85 else { return }
         lastRateUIPublish = now
 
-        menuBarRates?.update(down: pendingDown, up: pendingUp)
+        menuBarRates?.update(
+            down: pendingDown,
+            up: pendingUp,
+            downTotal: pendingDownTotal,
+            upTotal: pendingUpTotal,
+            live: true
+        )
 
-        guard chartSamplesEnabled else { return }
+        let publishMonitor = chartSamplesEnabled || connectionsTask != nil || logsTask != nil
+        guard publishMonitor else { return }
 
         if upRate != pendingUp { upRate = pendingUp }
         if downRate != pendingDown { downRate = pendingDown }
