@@ -1,0 +1,16 @@
+{
+  "name": "BashX Smart Rules",
+  "id": "bashx-smart",
+  "version": 10,
+  "updated": "2026-08-27",
+  "description": "国内直连 + 广告拦截 + 国外智能代理（ACL4SSR / Clash Verge 思路）",
+  "ruleCount": 189,
+  "files": {
+    "rules": "bashx-smart-rules.txt",
+    "docs": "docs/rules.md"
+  },
+  "urls": {
+    "rules": "https://cdn.jsdelivr.net/gh/BashX/BashX@main/Resources/rules/bashx-smart-rules.txt",
+    "manifest": "https://cdn.jsdelivr.net/gh/BashX/BashX@main/Resources/rules/manifest.json"
+  }
+}

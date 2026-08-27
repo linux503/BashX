@@ -1,0 +1,260 @@
+import Foundation
+
+extension ClashCore {
+    static func reloadConfig(controller: String, secret: String, path: String) async throws {
+        guard var components = URLComponents(string: "http://\(controller)/configs") else {
+            throw URLError(.badURL)
+        }
+        components.queryItems = [URLQueryItem(name: "force", value: "true")]
+        guard let url = components.url else { throw URLError(.badURL) }
+
+        var request = URLRequest(url: url, timeoutInterval: 8)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["path": path])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    /// Hot-patch running config (e.g. mode: rule/global/direct).
+    static func patchConfig(controller: String, secret: String, body: [String: Any]) async throws {
+        guard let url = URL(string: "http://\(controller)/configs") else {
+            throw URLError(.badURL)
+        }
+        var request = URLRequest(url: url, timeoutInterval: 5)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+
+    /// Best-effort: turn TUN off via API so traffic stops even before process exits.
+    static func disableTUNViaAPI(controller: String, secret: String) {
+        guard let url = URL(string: "http://\(controller)/configs") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 1)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "tun": ["enable": false]
+        ])
+        URLSession.shared.dataTask(with: request).resume()
+    }
+
+    /// Start core; when `asRoot` is true, prompt for admin (needed for TUN).
+    @discardableResult
+    static func start(binary: String, configDir: URL, asRoot: Bool) throws -> Process? {
+        if asRoot {
+            try startElevated(binary: binary, configDir: configDir)
+            return nil
+        }
+        return try start(binary: binary, configDir: configDir)
+    }
+
+    /// Root start + background watcher: user quit writes `core.stop`, watcher kills mihomo — no password on exit.
+    /// Does NOT write a user-writable launch script; verifies binary owner/mode/hash before elevating.
+    static func startElevated(binary: String, configDir: URL) throws {
+        try validateElevatedBinary(binary)
+
+        func shQuote(_ s: String) -> String {
+            "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }
+
+        try? FileManager.default.removeItem(at: Paths.stopSignalURL)
+        // Remove legacy on-disk launcher if present (was user-writable → root).
+        try? FileManager.default.removeItem(at: Paths.supportDir.appendingPathComponent("tun-launch.sh"))
+
+        // Inline watcher — never executed from a replaceable file in Application Support.
+        let shell = """
+        pkill -9 -f 'Application Support/BashX/mihomo' 2>/dev/null || true; \
+        BIN=\(shQuote(binary)); DIR=\(shQuote(configDir.path)); LOG=\(shQuote(configDir.appendingPathComponent("core.log").path)); PIDF=\(shQuote(Paths.pidURL.path)); STOP=\(shQuote(Paths.stopSignalURL.path)); \
+        rm -f "$PIDF" "$STOP" 2>/dev/null || true; \
+        "$BIN" -d "$DIR" >>"$LOG" 2>&1 & BPID=$!; echo "$BPID" > "$PIDF"; \
+        while kill -0 "$BPID" 2>/dev/null; do \
+          if [ -f "$STOP" ]; then kill -TERM "$BPID" 2>/dev/null || true; sleep 0.4; kill -KILL "$BPID" 2>/dev/null || true; rm -f "$STOP" "$PIDF"; exit 0; fi; \
+          sleep 0.35; \
+        done; rm -f "$PIDF"
+        """
+        let escaped = shell
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "do shell script \"\(escaped) >/dev/null 2>&1 & echo $!\" with administrator privileges"
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(
+                domain: "BashX",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: "需要管理员权限才能开启 TUN"]
+            )
+        }
+        if let pidText = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           let watcherPid = Int32(pidText) {
+            try? String(watcherPid).write(to: Paths.watcherPidURL, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Paths.watcherPidURL.path)
+        }
+    }
+
+    /// Refuse to elevate if binary is missing, group/world-writable, wrong owner, or hash mismatch.
+    private static func validateElevatedBinary(_ path: String) throws {
+        let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: path) else {
+            throw NSError(domain: "BashX", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "内核不可执行，无法提权启动"
+            ])
+        }
+        let attrs = try fm.attributesOfItem(atPath: path)
+        if let perms = attrs[.posixPermissions] as? NSNumber {
+            let mode = perms.uint16Value
+            if mode & 0o022 != 0 {
+                throw NSError(domain: "BashX", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "内核文件可被其他用户写入，已拒绝以管理员运行"
+                ])
+            }
+        }
+        if let owner = attrs[.ownerAccountName] as? String {
+            let me = NSUserName()
+            if owner != me && owner != "root" {
+                throw NSError(domain: "BashX", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "内核所有者异常（\(owner)），已拒绝提权"
+                ])
+            }
+        }
+        // Prefer pinned / recorded SHA-256 for Application Support binary.
+        let supportBin = Paths.supportDir.appendingPathComponent("mihomo").path
+        if (path as NSString).standardizingPath == (supportBin as NSString).standardizingPath {
+            guard CoreInstaller.verifyInstalledBinary(at: path) else {
+                throw NSError(domain: "BashX", code: 4, userInfo: [
+                    NSLocalizedDescriptionKey: "内核完整性校验失败，请到「设置 → 内核」重新安装后再开 TUN"
+                ])
+            }
+        }
+    }
+
+    /// Ask elevated watcher (or soft pkill) to stop — never prompts for password.
+    static func requestStopSignal() {
+        try? Data().write(to: Paths.stopSignalURL, options: .atomic)
+    }
+
+    /// Soft stop — never prompts for admin.
+    static func stopAll(binaryHint: String?) {
+        requestStopSignal()
+
+        if let pidText = try? String(contentsOf: Paths.pidURL, encoding: .utf8),
+           let pid = Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            kill(pid, SIGTERM)
+            try? FileManager.default.removeItem(at: Paths.pidURL)
+        }
+        if let pidText = try? String(contentsOf: Paths.watcherPidURL, encoding: .utf8),
+           let pid = Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            kill(pid, SIGTERM)
+            try? FileManager.default.removeItem(at: Paths.watcherPidURL)
+        }
+
+        let patterns = [
+            "Application Support/BashX/mihomo",
+            "Application Support/BashX/clash"
+        ]
+        for pattern in patterns {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            p.arguments = ["-f", pattern]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+            p.waitUntilExit()
+        }
+
+        if let binaryHint, !binaryHint.isEmpty,
+           binaryHint.contains("Application Support/BashX") {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            p.arguments = ["-f", binaryHint]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+            p.waitUntilExit()
+        }
+    }
+
+    /// Wait for mihomo to exit after stop signal (root watcher handles kill).
+    static func stopAllAndWait(binaryHint: String?, timeoutSeconds: Double = 3.0) {
+        stopAll(binaryHint: binaryHint)
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline, isMihomoAlive() {
+            Thread.sleep(forTimeInterval: 0.2)
+            requestStopSignal()
+        }
+        try? FileManager.default.removeItem(at: Paths.stopSignalURL)
+    }
+
+    /// Non-blocking wait for use from @MainActor (avoids UI freeze).
+    static func stopAllAndWaitAsync(binaryHint: String?, timeoutSeconds: Double = 3.0) async {
+        stopAll(binaryHint: binaryHint)
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline, isMihomoAlive() {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            requestStopSignal()
+        }
+        try? FileManager.default.removeItem(at: Paths.stopSignalURL)
+    }
+
+    static func isMihomoAlive() -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-f", "Application Support/BashX/mihomo"]
+        p.standardOutput = Pipe()
+        p.standardError = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
+
+    /// Kill leftover root mihomo. Default: no password (stop signal + soft).
+    /// Set `allowAdmin: true` only when starting TUN and ports are stuck by an old root process.
+    static func stopAllForce(binaryHint: String?, allowAdmin: Bool = false) {
+        stopAllAndWait(binaryHint: binaryHint, timeoutSeconds: 2.5)
+        guard isMihomoAlive(), allowAdmin else { return }
+
+        let pidPath = Paths.pidURL.path.replacingOccurrences(of: "'", with: "'\\''")
+        let stopPath = Paths.stopSignalURL.path.replacingOccurrences(of: "'", with: "'\\''")
+        let script = "do shell script \"pkill -9 -f 'Application Support/BashX/mihomo' || true; rm -f '\(pidPath)' '\(stopPath)'\" with administrator privileges"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+    }
+}
+
+extension Paths {
+    static var pidURL: URL { supportDir.appendingPathComponent("core.pid") }
+    static var watcherPidURL: URL { supportDir.appendingPathComponent("core.watcher.pid") }
+    /// User-writable; root TUN watcher deletes mihomo when this file appears.
+    static var stopSignalURL: URL { supportDir.appendingPathComponent("core.stop") }
+    /// SHA-256 of the installed mihomo binary (written after verified download).
+    static var coreHashURL: URL { supportDir.appendingPathComponent("mihomo.sha256") }
+}
