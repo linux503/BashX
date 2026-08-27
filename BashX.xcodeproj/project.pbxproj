@@ -56,6 +56,7 @@
 		5FEC2D81F8FDD59F53B942F2 /* Paths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD540993DF70F793F76776BB /* Paths.swift */; };
 		6323909DAC5168B7A9C82DA4 /* OutboundIPProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FD6B4AEB55D6F771FA9A560 /* OutboundIPProbe.swift */; };
 		65A3BBDB9CCFC792A407105C /* VPNQuickControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3948FC3776C3CBD634D912AB /* VPNQuickControl.swift */; };
+		6763F378C92ADE47FB1BDFAC /* GoogleReliability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B93A6D01DC1890B6F02E9A0 /* GoogleReliability.swift */; };
 		67ACDF998536D7F3A932A73E /* VPNQuickControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3948FC3776C3CBD634D912AB /* VPNQuickControl.swift */; };
 		67C936352593B0E659CA5459 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 3F7CEBD460EF0ED713565DC1 /* Yams */; };
 		685D01AA747BCD91E905AE68 /* LocalNetwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E4DABF624BD34E5135D99E6 /* LocalNetwork.swift */; };
@@ -103,8 +104,8 @@
 		DD1110233046B2FCE3F3194F /* IosDirectDomains.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1753C1625A0E90B63CE98322 /* IosDirectDomains.swift */; };
 		DDDDF5C12D0483AC002F132E /* IOSConnectControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D29CE19103EDDEF916488D /* IOSConnectControl.swift */; };
 		E1B6C96E4B0ABBC2D3179670 /* TrafficSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = A034A4F452C327289256F097 /* TrafficSample.swift */; };
-		E33760849550EC09CA5D5EC7 /* GoogleReliability.swift in Sources */ = {isa = PBXBuildFile; fileRef = B462E26ECB3A6E29A8FE2133 /* GoogleReliability.swift */; };
 		E4A23D5F1BE0A4936EBADD98 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ECCBAB998CF4E92BA923E7A1 /* Assets.xcassets */; };
+		E557375D5D98EE89D7A47773 /* GoogleReliability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B93A6D01DC1890B6F02E9A0 /* GoogleReliability.swift */; };
 		E560C3D0D1C07A7E4174DD5D /* BashXiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E0FD9D9C68F56D2839ECB7D /* BashXiOSApp.swift */; };
 		E56923B72CEC949E80AC6854 /* AppUpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 163A5D9D3AF02FE9D97CF982 /* AppUpdateService.swift */; };
 		E58F93876531B495A3D9A716 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9ADD680130DF388420295AA4 /* HomeView.swift */; };
@@ -190,6 +191,7 @@
 		48D059BDA342876DC83C006B /* BashXControls.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BashXControls.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		49A0C28DF2F49B15BBC1AF38 /* BashXiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BashXiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4A57BA1192D708BD2749C5DD /* CoreInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreInstaller.swift; sourceTree = "<group>"; };
+		4B93A6D01DC1890B6F02E9A0 /* GoogleReliability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleReliability.swift; sourceTree = "<group>"; };
 		4BE1C6D169FEBA600577F6C5 /* PacketTunnel.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = PacketTunnel.xcconfig; sourceTree = "<group>"; };
 		4C98783511A14BB0AB6E850F /* IOSTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSTheme.swift; sourceTree = "<group>"; };
 		4DB481D26B2E831C65A3B332 /* rules */ = {isa = PBXFileReference; lastKnownFileType = folder; name = rules; path = Resources/rules; sourceTree = SOURCE_ROOT; };
@@ -230,7 +232,6 @@
 		AA618BE8025F0DE5D461A8B7 /* MihomoConfigCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MihomoConfigCheck.swift; sourceTree = "<group>"; };
 		AD2347CC70114C39454B4BD4 /* AppConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConstants.swift; sourceTree = "<group>"; };
 		AD540993DF70F793F76776BB /* Paths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Paths.swift; sourceTree = "<group>"; };
-		B462E26ECB3A6E29A8FE2133 /* GoogleReliability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleReliability.swift; sourceTree = "<group>"; };
 		B4C7F812BBDBF0B0030DB438 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B6103A7D7AB2ADDA190BC680 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		C04468CEDD7BC8C78B0EF973 /* CoreHealth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreHealth.swift; sourceTree = "<group>"; };
@@ -370,7 +371,6 @@
 				4A57BA1192D708BD2749C5DD /* CoreInstaller.swift */,
 				94F78DC4D192E20DD38DEC2C /* DnsProfile.swift */,
 				04C9EB92FC7AF6763E05E120 /* GeoSiteRules.swift */,
-				B462E26ECB3A6E29A8FE2133 /* GoogleReliability.swift */,
 				1753C1625A0E90B63CE98322 /* IosDirectDomains.swift */,
 				381EA102AD7F5BF7FF911983 /* IosProxyDomains.swift */,
 				32AC14DB3EB96A15293319EF /* LaunchAtLogin.swift */,
@@ -498,6 +498,7 @@
 				AD2347CC70114C39454B4BD4 /* AppConstants.swift */,
 				7AA52AAA929C806FCD9E60AD /* ByteFormat.swift */,
 				93CA516F1FFE0271064DA3A4 /* GeoDataBootstrap.swift */,
+				4B93A6D01DC1890B6F02E9A0 /* GoogleReliability.swift */,
 				CFB4DE9AAC4101B12D14BBE3 /* IOSConfigWriter.swift */,
 				971E0F281D05B66DE1C3AD2C /* IOSIconManager.swift */,
 				AA618BE8025F0DE5D461A8B7 /* MihomoConfigCheck.swift */,
@@ -745,7 +746,7 @@
 				BE1A5CFFED3D4728574575D8 /* DnsProfile.swift in Sources */,
 				33A22B60642342775972DBAD /* ExternalProxyPane.swift in Sources */,
 				9B54C99BE4BD8F8257C7077B /* GeoSiteRules.swift in Sources */,
-				E33760849550EC09CA5D5EC7 /* GoogleReliability.swift in Sources */,
+				6763F378C92ADE47FB1BDFAC /* GoogleReliability.swift in Sources */,
 				DD1110233046B2FCE3F3194F /* IosDirectDomains.swift in Sources */,
 				4DD7CB6344668FEF7D2060C5 /* IosProxyDomains.swift in Sources */,
 				35734EA6A860FC47AC8790DA /* LaunchAtLogin.swift in Sources */,
@@ -822,6 +823,7 @@
 				16D9220DD6722D0B9D5FA293 /* DnsProfile.swift in Sources */,
 				0305B65D50E7D37646C3A86A /* GeoDataBootstrap.swift in Sources */,
 				AAFEE922330C947274801013 /* GeoSiteRules.swift in Sources */,
+				E557375D5D98EE89D7A47773 /* GoogleReliability.swift in Sources */,
 				E58F93876531B495A3D9A716 /* HomeView.swift in Sources */,
 				F03BEE0D2B1AFDCB5706EA00 /* IOSAppState.swift in Sources */,
 				E5F0258B969AD0317D386897 /* IOSConfigWriter.swift in Sources */,
@@ -883,14 +885,14 @@
 				ARCHS = "$(ARCHS_STANDARD)";
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
-				CURRENT_PROJECT_VERSION = 54;
+				CURRENT_PROJECT_VERSION = 55;
 				ENABLE_HARDENED_RUNTIME = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -915,7 +917,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -936,7 +938,7 @@
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1019,7 +1021,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -1047,7 +1049,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;
@@ -1062,14 +1064,14 @@
 				ARCHS = "$(ARCHS_STANDARD)";
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
-				CURRENT_PROJECT_VERSION = 54;
+				CURRENT_PROJECT_VERSION = 55;
 				ENABLE_HARDENED_RUNTIME = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -1085,12 +1087,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = BashX/BashX.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 54;
+				CURRENT_PROJECT_VERSION = 55;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1105,12 +1107,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = BashX/BashX.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 54;
+				CURRENT_PROJECT_VERSION = 55;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1130,7 +1132,7 @@
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1222,7 +1224,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.54;
+				MARKETING_VERSION = 0.1.55;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;

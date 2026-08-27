@@ -60,9 +60,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     #if canImport(MihomoCore)
-    /// Primary: socketpair + packetFlow + system stack.
-    /// (gVisor readv cannot drain Darwin SOCK_DGRAM — logs showed inErr↑ out=0.)
-    /// Fallback: real utun fd (BaoLianDeng) if socketpair fails.
+    /// Primary: real utun fd + gVisor (BaoLianDeng) — full TCP/UDP.
+    /// Fallback: socketpair + packetFlow + system stack (QUIC-heavy only; TCP often missing in logs).
     private func startEngine(_ completionHandler: @escaping (Error?) -> Void) {
         BridgeUpdateLogLevel("info")
 
@@ -71,19 +70,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         writeLog("outbound bindIF=\(bindIF.isEmpty ? "(none)" : bindIF)")
         writeLog("ifaces \(TunnelInterface.outboundInterfaceDebugLine())")
 
-        if let utun = TunnelInterface.fileDescriptor(packetFlow: packetFlow) {
-            writeLog("NE utun fd=\(utun) source=\(TunnelInterface.fdSource(packetFlow: packetFlow)) (info)")
-        }
-
         let mode: TunnelDataMode
-        if let pair = TunnelSocketPair.make() {
-            writeLog("TUN mode=socketpair+system mihomoFd=\(pair.mihomoFd) bridgeFd=\(pair.bridgeFd)")
+        if let utun = TunnelInterface.scanUtunFD(preferAddress: AppConstants.tunAddress),
+           let goFd = TunnelInterface.duplicatedFD(utun) {
+            ownedTunFd = goFd
+            writeLog("TUN mode=utun-direct fd=\(utun) dup=\(goFd) (primary)")
+            mode = .utunDirect(goFd: goFd)
+        } else if let pair = TunnelSocketPair.make() {
+            writeLog("TUN mode=socketpair+system mihomoFd=\(pair.mihomoFd) bridgeFd=\(pair.bridgeFd) (fallback)")
             mode = .socketpair(pair)
-        } else if let utun = TunnelInterface.fileDescriptor(packetFlow: packetFlow) {
-            writeLog("TUN mode=utun-direct-fallback fd=\(utun)")
-            mode = .utunDirect(goFd: utun)
+        } else if let utun = TunnelInterface.fileDescriptor(packetFlow: packetFlow),
+                  let goFd = TunnelInterface.duplicatedFD(utun) {
+            ownedTunFd = goFd
+            writeLog("TUN mode=utun-direct-fallback fd=\(utun) source=\(TunnelInterface.fdSource(packetFlow: packetFlow))")
+            mode = .utunDirect(goFd: goFd)
         } else {
-            writeLog("socketpair+utun both failed errno=\(errno)")
+            writeLog("utun+socketpair both failed errno=\(errno)")
             finish(completionHandler, TunnelError.tunFDNotFound)
             return
         }

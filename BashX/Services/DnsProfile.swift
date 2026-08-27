@@ -52,6 +52,27 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         "+.translate.goog",
     ]
 
+    /// +.google.com does NOT cover google.com.hk / google.cn — CN DNS poisons these unless listed explicitly.
+    private static let googleDnsPolicy: [String: [String]] = [
+        "+.google.com": [],
+        "+.google.com.hk": [],
+        "+.google.cn": [],
+        "+.google.com.tw": [],
+        "+.google.co.jp": [],
+        "+.google.co.uk": [],
+        "+.googleapis.com": [],
+        "+.googleapis.cn": [],
+        "+.gstatic.com": [],
+        "+.gstatic.cn": [],
+        "+.googleusercontent.com": [],
+        "+.googlevideo.com": [],
+        "+.youtube.com": [],
+        "+.youtu.be": [],
+        "+.ytimg.com": [],
+        "+.ggpht.com": [],
+        "+.gmail.com": [],
+    ]
+
     /// Shared fake-ip shell; nameserver / fallback vary by preference.
     static func dnsBlock(for preference: DnsPreference) -> [String: Any] {
         let cnNS = [
@@ -164,8 +185,10 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "https://doh.pub/dns-query",
         ]
         let foreignNS = [
-            "https://1.1.1.1/dns-query",
+            "8.8.8.8",
+            "1.1.1.1",
             "https://8.8.8.8/dns-query",
+            "https://1.1.1.1/dns-query",
         ]
         let (nameserver, fallback): ([String], [String]) = {
             switch preference {
@@ -193,10 +216,6 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "+.bilibili.com": cnNS,
             "+.zhihu.com": cnNS,
             "+.weixin.com": cnNS,
-            "+.google.com": foreignNS,
-            "+.youtube.com": foreignNS,
-            "+.googleapis.com": foreignNS,
-            "+.gstatic.com": foreignNS,
             "+.github.com": foreignNS,
             "+.twitter.com": foreignNS,
             "+.facebook.com": foreignNS,
@@ -209,6 +228,9 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "+.graph.org": foreignNS,
             "+.tdesktop.com": foreignNS,
         ]
+        for (suffix, _) in googleDnsPolicy {
+            policy[suffix] = foreignNS
+        }
         return [
             "enable": true,
             // Bind localhost — 198.18.0.2:53 cannot bind; NE still points DNS at 198.18.0.2,
@@ -223,7 +245,9 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
                 "+.cn",
                 // Domestic apps hit DIRECT — real IPs avoid fake-ip re-resolve.
                 "+.qq.com", "+.weixin.qq.com", "+.weixin.com", "+.tenpay.com",
-                "+.baidu.com", "+.alicdn.com", "+.taobao.com", "+.aliyun.com",
+                // baidu: keep fake-ip so IP→domain mapping hits DOMAIN-SUFFIX,baidu.com,DIRECT
+                // (real-IP CDN hops like 117.34.x miss rules → MATCH,PROXY → broken QUIC).
+                "+.alicdn.com", "+.taobao.com", "+.aliyun.com",
                 "+.jd.com", "+.bilibili.com", "+.zhihu.com", "+.netease.com",
                 "+.apple.com", "+.icloud.com", "+.cdn-apple.com", "+.mzstatic.com",
                 "+.push.apple.com", "+.apple-cloudkit.com",
@@ -235,7 +259,8 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "default-nameserver": bootstrapNS,
             "proxy-server-nameserver": [
                 "https://223.5.5.5/dns-query",
-                "https://1.1.1.1/dns-query",
+                "https://doh.pub/dns-query",
+                "119.29.29.29",
             ],
             "nameserver": nameserver,
             "fallback": fallback,

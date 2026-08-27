@@ -18,7 +18,6 @@ struct MainView: View {
         case nodes = "节点"
         case subscriptions = "订阅"
         case monitor = "监控"
-        case external = "外置"
         case rules = "规则"
         var id: String { rawValue }
     }
@@ -309,36 +308,23 @@ struct MainView: View {
                     }
                 }
                 HStack(spacing: 6) {
-                    if state.isCoreVisiblyAlive || state.coreRunning {
-                        ActionChip(
-                            title: "停止",
-                            systemImage: "stop.fill",
-                            emphasized: true
-                        ) {
-                            state.stopCore(force: true)
+                    if !(state.isCoreVisiblyAlive || state.coreRunning) {
+                        if state.coreConnecting {
+                            ActionChip(
+                                title: "内核连接中…",
+                                systemImage: "arrow.triangle.2.circlepath",
+                                enabled: false,
+                                emphasized: false
+                            ) {}
+                        } else {
+                            ActionChip(
+                                title: "启动内核",
+                                systemImage: "play.fill",
+                                emphasized: true
+                            ) {
+                                Task { await state.ensureCoreRunning() }
+                            }
                         }
-                    } else if state.coreConnecting {
-                        ActionChip(
-                            title: "内核连接中…",
-                            systemImage: "arrow.triangle.2.circlepath",
-                            enabled: false,
-                            emphasized: false
-                        ) {}
-                    } else {
-                        ActionChip(
-                            title: "启动内核",
-                            systemImage: "play.fill",
-                            emphasized: true
-                        ) {
-                            Task { await state.ensureCoreRunning() }
-                        }
-                    }
-                    ActionChip(
-                        title: "修复内核",
-                        systemImage: "wrench.and.screwdriver",
-                        enabled: !state.isBusy && !state.coreConnecting
-                    ) {
-                        Task { await state.installOrRepairCore() }
                     }
                 }
             }
@@ -373,8 +359,6 @@ struct MainView: View {
                     )
                 )
             }
-
-            externalProxySidebarSection
 
             Spacer(minLength: 4)
 
@@ -452,44 +436,6 @@ struct MainView: View {
         .help(mode.subtitle)
     }
 
-    private var externalProxySidebarSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SidebarSectionHeader(title: "外置代理")
-            Text(state.externalProxyAddress)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .textSelection(.enabled)
-                .lineLimit(1)
-                .foregroundStyle(state.coreRunning ? .primary : BashXTheme.secondaryLabel(for: appearance))
-            HStack(spacing: 4) {
-                proxyCopyChip("地址") { state.copyExternalProxy(kind: .hostPort) }
-                proxyCopyChip("HTTP") { state.copyExternalProxy(kind: .http) }
-                proxyCopyChip("SOCKS") { state.copyExternalProxy(kind: .socks) }
-            }
-            toggleRow(
-                icon: "antenna.radiowaves.left.and.right",
-                title: "允许局域网",
-                subtitle: state.settings.allowLan ? state.externalProxyAddress : "仅本机 127.0.0.1",
-                isOn: Binding(
-                    get: { state.settings.allowLan },
-                    set: { v in Task { await state.setAllowLan(v) } }
-                )
-            )
-        }
-    }
-
-    private func proxyCopyChip(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .font(.caption2.weight(.medium))
-            .buttonStyle(.plain)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.primary.opacity(0.06))
-            )
-            .foregroundStyle(BashXTheme.accent(for: appearance))
-    }
-
     private func selectNodeFromPanel(_ name: String) {
         guard switchingNodeName != name else { return }
         switchingNodeName = name
@@ -534,7 +480,8 @@ struct MainView: View {
                 }
                 .buttonStyle(.plain)
                 MetricTile(label: "端口", value: "\(state.settings.mixedPort)")
-                    .onTapGesture { detailTab = .external }
+                    .onTapGesture { SettingsOpener.open(state: state) }
+                    .help("打开设置 · 外置代理")
             }
         }
         .padding(12)
@@ -829,8 +776,6 @@ struct MainView: View {
                             Task { await monitor.closeAllConnections() }
                         }
                     )
-                case .external:
-                    ExternalProxyPane()
                 case .rules:
                     RulesEditorPane()
                 }

@@ -81,21 +81,34 @@ struct HomeView: View {
 
     // MARK: - Hero (first viewport = one composition)
 
+    private var heroLogoMark: some View {
+        Group {
+            if UIImage(named: state.settings.logoStyle.iosPreviewImageName) != nil {
+                Image(state.settings.logoStyle.iosPreviewImageName)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else {
+                Image(systemName: "app.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(IOSTheme.accent)
+            }
+        }
+        .frame(width: 56, height: 56)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
+        )
+        .shadow(color: IOSTheme.accent.opacity(0.28), radius: 14, y: 6)
+        .animation(.easeInOut(duration: 0.2), value: state.settings.logoStyle)
+    }
+
     private var heroSection: some View {
         VStack(spacing: 20) {
             // Brand mark — hero-level, not nav chrome
             VStack(spacing: 10) {
-                // Always show brand markX in hero (home-screen icon may use alternate styles)
-                Image("LogoPreview-markX")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
-                    )
-                    .shadow(color: IOSTheme.accent.opacity(0.28), radius: 14, y: 6)
+                heroLogoMark
                     .scaleEffect(brandAppear ? 1 : 0.86)
                     .opacity(brandAppear ? 1 : 0)
 

@@ -19,6 +19,12 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,mzstatic.com,DIRECT",
         "DOMAIN-SUFFIX,apple-cloudkit.com,DIRECT",
         "DOMAIN-SUFFIX,apple-mapkit.com,DIRECT",
+        // iOS system DoH — must not hit GOOGLE url-test (logs: dns.google.com resolve timeout).
+        "DOMAIN,dns.google.com,DIRECT",
+        "DOMAIN-SUFFIX,dns.google,DIRECT",
+        // Apple CDN / Private Relay IPs (no SNI → otherwise MATCH,PROXY).
+        "IP-CIDR,17.248.0.0/16,DIRECT,no-resolve",
+        "IP-CIDR,17.249.0.0/16,DIRECT,no-resolve",
         "DOMAIN-SUFFIX,ess.apple.com,DIRECT",
         "DOMAIN-SUFFIX,gs.apple.com,DIRECT",
         "DOMAIN-SUFFIX,me.com,DIRECT",

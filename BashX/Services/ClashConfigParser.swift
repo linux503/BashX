@@ -61,6 +61,9 @@ enum ClashConfigParser {
             dict["type"] = node.type
             if !node.server.isEmpty { dict["server"] = node.server }
             if node.port > 0 { dict["port"] = node.port }
+            if forIOS {
+                normalizeProxyForIOS(&dict)
+            }
             return dict
         }
 
@@ -537,6 +540,17 @@ enum ClashConfigParser {
             return dict.mapValues { unwrap($0.value) }
         }
         return value
+    }
+
+    /// iOS Safari uses QUIC/UDP:443 heavily; vmess nodes from subscriptions often omit `udp: true`
+    /// so GOOGLE/PROXY groups report "UDP is not supported" and fall back to DIRECT + poisoned DNS.
+    private static func normalizeProxyForIOS(_ dict: inout [String: Any]) {
+        let type = (dict["type"] as? String)?.lowercased() ?? ""
+        let udpCapable = ["vmess", "vless", "trojan", "ss", "ssr", "hysteria", "hysteria2", "tuic"]
+        guard udpCapable.contains(type) else { return }
+        if dict["udp"] == nil {
+            dict["udp"] = true
+        }
     }
 }
 

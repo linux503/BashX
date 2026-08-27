@@ -100,22 +100,6 @@ private struct MenuBarFrozenContent: View, Equatable {
             Text("视频广告过滤")
         }
 
-        Menu("外置代理") {
-            Text(snap.externalProxyAddress)
-                .foregroundStyle(.secondary)
-            Button("复制 主机:端口") { state.copyExternalProxy(kind: .hostPort) }
-            Button("复制 HTTP") { state.copyExternalProxy(kind: .http) }
-            Button("复制 SOCKS5") { state.copyExternalProxy(kind: .socks) }
-            Button("复制环境变量") { state.copyExternalProxy(kind: .exportEnv) }
-            Divider()
-            Toggle(isOn: Binding(
-                get: { snap.allowLan },
-                set: { v in Task { await state.setAllowLan(v) } }
-            )) {
-                Text("允许局域网")
-            }
-        }
-
         Divider()
 
         subscriptionSection
@@ -128,17 +112,6 @@ private struct MenuBarFrozenContent: View, Equatable {
         Divider()
 
         settingsSection
-
-        Divider()
-
-        if snap.coreRunning {
-            Button("停止内核") { state.stopCore(force: true) }
-        }
-
-        Button("修复内核") {
-            Task { await state.installOrRepairCore() }
-        }
-        .disabled(snap.isBusy)
 
         Divider()
 
@@ -293,8 +266,6 @@ private struct MenuBarSnapshot: Equatable {
     var systemProxyOn: Bool
     var tunEnabled: Bool
     var videoAdBlockEnabled: Bool
-    var allowLan: Bool
-    var externalProxyAddress: String
     var subscriptions: [Subscription]
     var menuNodes: [ProxyNode]
     var totalNodeCount: Int
@@ -318,8 +289,6 @@ private struct MenuBarSnapshot: Equatable {
         systemProxyOn: false,
         tunEnabled: false,
         videoAdBlockEnabled: false,
-        allowLan: false,
-        externalProxyAddress: "",
         subscriptions: [],
         menuNodes: [],
         totalNodeCount: 0,
@@ -357,8 +326,6 @@ private struct MenuBarSnapshot: Equatable {
             systemProxyOn: state.systemProxyOn,
             tunEnabled: state.settings.tunEnabled,
             videoAdBlockEnabled: state.settings.videoAdBlockEnabled,
-            allowLan: state.settings.allowLan,
-            externalProxyAddress: state.externalProxyAddress,
             subscriptions: subs,
             menuNodes: state.menuNodes,
             totalNodeCount: state.nodes.count,

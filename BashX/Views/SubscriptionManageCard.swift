@@ -87,6 +87,9 @@ struct SubscriptionManageCard: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(sub.url, forType: .string)
             }
+            Button("在 Finder 中显示缓存") {
+                state.revealSubscriptionFile(id: subscriptionId)
+            }
             Button("删除", role: .destructive) {
                 state.removeSubscription(subscriptionId)
             }
@@ -158,6 +161,8 @@ struct SubscriptionManageCard: View {
                     .truncationMode(.middle)
                     .help(sub.url)
                     .textSelection(.enabled)
+
+                subscriptionCacheRow
             }
 
             Spacer(minLength: 8)
@@ -176,6 +181,31 @@ struct SubscriptionManageCard: View {
             return host
         }
         return sub.url
+    }
+
+    private var subscriptionCacheRow: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+            Text(state.subscriptionCacheExists(for: subscriptionId)
+                 ? state.subscriptionCachePathLabel(for: subscriptionId)
+                 : "尚未缓存 · \(Paths.shortPath(Paths.subscriptionsCacheDir))")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Button {
+                state.revealSubscriptionFile(id: subscriptionId)
+            } label: {
+                Text("打开目录")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(accent)
+            .help("在 Finder 中显示订阅缓存文件")
+        }
     }
 
     private var footer: some View {
@@ -200,6 +230,11 @@ struct SubscriptionManageCard: View {
                 NSPasteboard.general.setString(sub.url, forType: .string)
                 state.statusText = "已复制订阅链接"
             }
+
+            footerChip("目录", icon: "folder") {
+                state.revealSubscriptionFile(id: subscriptionId)
+            }
+            .help("在 Finder 中显示订阅缓存文件")
 
             Spacer(minLength: 0)
 

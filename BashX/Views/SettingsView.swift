@@ -21,7 +21,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
     @Environment(\.bashxAppearance) private var appearance
-    @StateObject private var updater = AppUpdateController()
+    @ObservedObject private var updater = AppUpdateController.shared
     @State private var tab: SettingsTab = .general
 
     var body: some View {
@@ -288,10 +288,27 @@ struct SettingsView: View {
 
     private var proxyTab: some View {
         Form {
+            Section("状态") {
+                LabeledContent("内核") {
+                    Text(state.coreRunning ? "运行中" : "未启动")
+                        .foregroundStyle(state.coreRunning ? BashXTheme.good(for: appearance) : .secondary)
+                }
+            }
+
             Section("端口") {
                 LabeledContent("地址") {
-                    Text("127.0.0.1:\(state.settings.mixedPort)")
+                    Text(state.externalProxyAddress)
                         .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                LabeledContent("HTTP") {
+                    Text(state.externalProxyHTTPURL)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                LabeledContent("SOCKS5") {
+                    Text(state.externalProxySOCKSURL)
+                        .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                 }
                 TextField("mixed-port", value: $state.settings.mixedPort, format: .number)
@@ -302,7 +319,7 @@ struct SettingsView: View {
                 Text("开启后 mixed-port 可被局域网访问；会自动确保 API secret，并把 external-controller 限制在 127.0.0.1。")
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Text("HTTP 与 SOCKS5 共用 mixed-port。本机填 127.0.0.1、端口 \(state.settings.mixedPort)。改端口后需重启内核。")
+                Text("HTTP 与 SOCKS5 共用 mixed-port。改端口后需重启内核。")
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
@@ -314,6 +331,15 @@ struct SettingsView: View {
                     Button("复制 SOCKS5") { state.copyExternalProxy(kind: .socks) }
                     Button("复制环境变量") { state.copyExternalProxy(kind: .exportEnv) }
                 }
+            }
+
+            Section("示例") {
+                Text("export https_proxy=\(state.externalProxyHTTPURL)")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                Text("curl -x \(state.externalProxyHTTPURL) https://www.google.com")
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
             }
         }
         .formStyle(.grouped)
@@ -346,10 +372,23 @@ struct SettingsView: View {
             }
 
             Section("维护") {
+                LabeledContent("状态") {
+                    Text(state.coreRunning ? "运行中" : (state.coreConnecting ? "连接中…" : "未启动"))
+                        .foregroundStyle(state.coreRunning ? BashXTheme.good(for: appearance) : .secondary)
+                }
                 Text("mihomo 已内置在 App 中，启动时自动安装并运行，无需手动下载。")
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Button("修复内置内核") {
+                if state.coreRunning || state.isCoreVisiblyAlive {
+                    Button("停止内核") {
+                        state.stopCore(force: true)
+                    }
+                } else if !state.coreConnecting {
+                    Button("启动内核") {
+                        Task { await state.ensureCoreRunning() }
+                    }
+                }
+                Button("修复内核") {
                     Task { await state.installOrRepairCore() }
                 }
                 .disabled(state.isBusy)
@@ -491,8 +530,11 @@ struct SettingsView: View {
             .padding(24)
         }
         .onAppear {
-            if case .idle = updater.phase {
-                Task { await updater.check(silent: true) }
+            Task {
+                let stale = updater.lastChecked.map { Date().timeIntervalSince($0) > 3600 } ?? true
+                if stale || updater.phase == .idle {
+                    await updater.check(silent: true)
+                }
             }
         }
     }
@@ -530,6 +572,12 @@ struct SettingsView: View {
                     .tint(BashXTheme.accent(for: appearance))
                     .disabled(isUpdaterBusy)
                 }
+
+                if case .failed = updater.phase {
+                    Button("打开发布页") {
+                        updater.openReleasesPage()
+                    }
+                }
             }
 
             Text("检查到新版本后可直接下载安装，完成后请重启 BashX。")
@@ -562,10 +610,16 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
-        case .upToDate:
-            Label("已是最新版本（\(AppVersion.display)）", systemImage: "checkmark.circle.fill")
+        case .upToDate(let remote):
+            Label("已是最新版本（当前 \(AppVersion.short)，GitHub \(remote)）", systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(BashXTheme.good)
+                .fixedSize(horizontal: false, vertical: true)
+        case .ahead(let remote):
+            Label("当前 \(AppVersion.short) 高于 GitHub 最新 \(remote)，无需更新", systemImage: "info.circle.fill")
+                .font(.caption)
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                .fixedSize(horizontal: false, vertical: true)
         case .available(let info):
             VStack(alignment: .leading, spacing: 4) {
                 Text("发现新版本 \(info.version)（当前 \(AppVersion.short)）")

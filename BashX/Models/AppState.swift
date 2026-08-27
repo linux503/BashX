@@ -2562,6 +2562,30 @@ final class AppState: ObservableObject {
         NSWorkspace.shared.open(Paths.supportDir)
     }
 
+    func subscriptionCacheURL(for id: UUID) -> URL {
+        Paths.subscriptionCacheURL(id: id)
+    }
+
+    func subscriptionCachePathLabel(for id: UUID) -> String {
+        Paths.shortPath(Paths.subscriptionCacheURL(id: id))
+    }
+
+    func subscriptionCacheExists(for id: UUID) -> Bool {
+        FileManager.default.fileExists(atPath: Paths.subscriptionCacheURL(id: id).path)
+    }
+
+    /// Reveal cached subscription payload in Finder (or open subs folder if not downloaded yet).
+    func revealSubscriptionFile(id: UUID) {
+        let url = Paths.subscriptionCacheURL(id: id)
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            statusText = "已在 Finder 中显示订阅文件"
+        } else {
+            NSWorkspace.shared.open(Paths.subscriptionsCacheDir)
+            statusText = "订阅尚未缓存，已打开 subs 目录"
+        }
+    }
+
     func copySelectedProxyLine() {
         guard let name = settings.selectedNodeName,
               let node = nodes.first(where: { $0.name == name }) else { return }

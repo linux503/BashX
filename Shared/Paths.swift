@@ -75,6 +75,18 @@ enum Paths {
         return dir
     }
 
+    /// User-facing path with `~` for home (menu / panel labels).
+    static func shortPath(_ url: URL) -> String {
+        let full = url.path
+        #if os(macOS)
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if full.hasPrefix(home + "/") {
+            return "~/" + full.dropFirst(home.count + 1)
+        }
+        #endif
+        return full
+    }
+
     /// Mihomo home inside the App Group (used by Packet Tunnel).
     static var mihomoHomeDir: URL {
         let dir = supportDir.appendingPathComponent("mihomo", isDirectory: true)
