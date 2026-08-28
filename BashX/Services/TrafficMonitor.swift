@@ -61,7 +61,7 @@ final class PanelRateStore: ObservableObject {
         if live, chartSamplesEnabled {
             var next = samples
             next.append(TrafficSample(up: up, down: down, at: Date()))
-            if next.count > 28 { next.removeFirst(next.count - 28) }
+            if next.count > 48 { next.removeFirst(next.count - 48) }
             samples = next
         }
     }

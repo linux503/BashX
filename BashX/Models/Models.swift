@@ -110,6 +110,36 @@ struct ProxyNode: Identifiable, Hashable, Codable {
     }
 }
 
+/// Mac per-app outbound routing (PROCESS-NAME / PROCESS-PATH rules).
+struct AppRoutingRule: Identifiable, Codable, Hashable {
+    var id: UUID
+    var enabled: Bool
+    /// Display name (usually app localized name).
+    var label: String
+    /// Process name for PROCESS-NAME rule (e.g. `Google Chrome`).
+    var processName: String
+    /// Optional bundle id (e.g. `com.google.Chrome`).
+    var bundleId: String
+    /// Proxy group or leaf node: PROXY, AUTO, DIRECT, GOOGLE, TELEGRAM, or a node name.
+    var proxyTarget: String
+
+    init(
+        id: UUID = UUID(),
+        enabled: Bool = true,
+        label: String = "",
+        processName: String = "",
+        bundleId: String = "",
+        proxyTarget: String = "PROXY"
+    ) {
+        self.id = id
+        self.enabled = enabled
+        self.label = label
+        self.processName = processName
+        self.bundleId = bundleId
+        self.proxyTarget = proxyTarget
+    }
+}
+
 struct Subscription: Identifiable, Codable, Hashable {
     var id: UUID
     var name: String
@@ -220,6 +250,8 @@ struct AppSettings: Codable {
     var iosDisguiseEnabled: Bool = true
     /// UI language: system / Chinese / English.
     var uiLanguage: AppLanguage = .system
+    /// Mac: route specific apps through different proxy lines.
+    var appRoutingRules: [AppRoutingRule] = []
 
     static let defaultRules: [String] = ChinaSmartRules.rules
 
@@ -231,6 +263,7 @@ struct AppSettings: Codable {
         case autoSpeedTestEnabled, autoSpeedTestIntervalMinutes, autoSelectFastest, turboMode, domainSniffing, dnsPreference
         case rules, rulesPrepend, rulesVersion, closeConnectionsOnSwitch, proxyMode
         case logoStyle, nodeDisplayMode, appearance, nodeDelayCache, iosDisguiseEnabled, uiLanguage
+        case appRoutingRules
     }
 
     init() {}
@@ -276,6 +309,7 @@ struct AppSettings: Codable {
         nodeDelayCache = try c.decodeIfPresent([String: Int].self, forKey: .nodeDelayCache) ?? [:]
         iosDisguiseEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosDisguiseEnabled) ?? true
         uiLanguage = try c.decodeIfPresent(AppLanguage.self, forKey: .uiLanguage) ?? .system
+        appRoutingRules = try c.decodeIfPresent([AppRoutingRule].self, forKey: .appRoutingRules) ?? []
         L10n.apply(uiLanguage)
     }
 }

@@ -7,6 +7,7 @@ struct MonitorPane: View {
     var coreAlive: Bool
     var lang: AppLanguage
     var onCloseAll: () -> Void
+    @Environment(\.bashxAppearance) private var appearance
 
     enum MonitorSegment: String, CaseIterable, Identifiable {
         case connections
@@ -24,11 +25,13 @@ struct MonitorPane: View {
     private func t(_ key: String) -> String { L10n.t(key, lang) }
 
     private var trafficLive: Bool { panel.isLive && coreAlive }
+    private var downTint: Color { BashXTheme.accent(for: appearance) }
+    private var upTint: Color { Color(red: 0.98, green: 0.58, blue: 0.28) }
 
     var body: some View {
         VStack(spacing: 0) {
             trafficHeader
-            Rectangle().fill(BashXTheme.hairline).frame(height: 1)
+            Rectangle().fill(BashXTheme.hairline(for: appearance)).frame(height: 1)
 
             HStack {
                 Picker("", selection: $segment) {
@@ -59,7 +62,7 @@ struct MonitorPane: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
-            Rectangle().fill(BashXTheme.hairline).frame(height: 1)
+            Rectangle().fill(BashXTheme.hairline(for: appearance)).frame(height: 1)
 
             Group {
                 switch segment {
@@ -75,84 +78,113 @@ struct MonitorPane: View {
 
     private var trafficHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text(t("mac.monitor.traffic"))
-                    .font(.subheadline.weight(.semibold))
-                Text(trafficLive ? t("mac.monitor.live") : t("mac.monitor.offline"))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.primary.opacity(0.06)))
-                Spacer()
-                Text("↓\(ByteFormat.size(panel.downTotal)) ↑\(ByteFormat.size(panel.upTotal))")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(downTint.opacity(appearance == .dark ? 0.24 : 0.14))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(downTint)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("mac.monitor.traffic"))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    Text(trafficLive ? t("mac.monitor.live") : t("mac.monitor.offline"))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(trafficLive ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
+                }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("↓ \(ByteFormat.size(panel.downTotal))")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(downTint)
+                        .monospacedDigit()
+                    Text("↑ \(ByteFormat.size(panel.upTotal))")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(upTint)
+                        .monospacedDigit()
+                }
             }
 
             HStack(spacing: 10) {
-                monitorRateChip(
+                monitorRateCard(
                     title: t("mac.monitor.down"),
                     symbol: "arrow.down.circle.fill",
                     value: panel.downMbps,
-                    tint: BashXTheme.accent
+                    tint: downTint
                 )
-                monitorRateChip(
+                monitorRateCard(
                     title: t("mac.monitor.up"),
                     symbol: "arrow.up.circle.fill",
                     value: panel.upMbps,
-                    tint: Color(red: 0.95, green: 0.55, blue: 0.18)
+                    tint: upTint
                 )
-                Spacer()
             }
 
-            TrafficSparkline(samples: panel.samples)
-                .frame(height: 128)
+            TrafficChartView(
+                samples: panel.samples,
+                downTint: downTint,
+                upTint: upTint,
+                appearance: appearance,
+                live: trafficLive,
+                style: .monitor,
+                lang: lang
+            )
+            .frame(height: 156)
         }
         .padding(16)
         .background {
-            LinearGradient(
-                colors: [
-                    BashXTheme.accent.opacity(0.06),
-                    BashXTheme.accentGlow.opacity(0.03),
-                    Color.clear,
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            RoundedRectangle(cornerRadius: 0, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            downTint.opacity(appearance == .dark ? 0.10 : 0.06),
+                            upTint.opacity(appearance == .dark ? 0.05 : 0.03),
+                            Color.clear,
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
         }
+        .transaction { $0.animation = nil }
     }
 
-    private func monitorRateChip(title: String, symbol: String, value: String, tint: Color) -> some View {
-        HStack(spacing: 8) {
+    private func monitorRateCard(title: String, symbol: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(tint)
                 .symbolRenderingMode(.hierarchical)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                Text("\(value)/s")
-                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                    .monospacedDigit()
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(value)
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                    Text("/s")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                }
             }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [tint.opacity(0.12), tint.opacity(0.05)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(tint.opacity(0.20), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(tint.opacity(0.22), lineWidth: 0.5)
                 )
         }
     }
@@ -206,7 +238,7 @@ struct MonitorPane: View {
                 }
                 Text(row.chain)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(BashXTheme.accent)
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
                     .lineLimit(1)
                 Spacer()
                 Text("↓\(ByteFormat.size(row.download)) ↑\(ByteFormat.size(row.upload))")
@@ -262,60 +294,5 @@ struct MonitorPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-    }
-}
-
-// MARK: - Sparkline
-
-private struct TrafficSparkline: View {
-    let samples: [TrafficSample]
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            if samples.count < 2 {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(0.04))
-                    .overlay {
-                        Text("—")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-            } else {
-                let maxVal = max(
-                    samples.map { Double($0.down + $0.up) }.max() ?? 1,
-                    1024
-                )
-                ZStack(alignment: .bottom) {
-                    sparkPath(samples: samples, w: w, h: h, maxVal: maxVal, keyPath: \.down)
-                        .stroke(BashXTheme.accent, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                    sparkPath(samples: samples, w: w, h: h, maxVal: maxVal, keyPath: \.up)
-                        .stroke(Color.orange.opacity(0.85), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
-                }
-            }
-        }
-    }
-
-    private func sparkPath(
-        samples: [TrafficSample],
-        w: CGFloat,
-        h: CGFloat,
-        maxVal: Double,
-        keyPath: KeyPath<TrafficSample, Int64>
-    ) -> Path {
-        var path = Path()
-        let count = samples.count
-        for (i, sample) in samples.enumerated() {
-            let x = w * CGFloat(i) / CGFloat(max(count - 1, 1))
-            let v = Double(sample[keyPath: keyPath])
-            let y = h - CGFloat(v / maxVal) * h * 0.92
-            if i == 0 {
-                path.move(to: CGPoint(x: x, y: y))
-            } else {
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-        }
-        return path
     }
 }

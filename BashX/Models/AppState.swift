@@ -31,6 +31,8 @@ final class AppState: ObservableObject {
     /// Current outbound IP via local proxy (updated after node switch).
     @Published var outboundIP: String = "—"
     @Published var outboundIPLoading = false
+    /// Resolved leaf proxy name from mihomo (e.g. actual node behind AUTO).
+    @Published var runtimeOutboundName: String?
     /// True while bootstrap / startCoreAsync is bringing mihomo up.
     @Published private(set) var coreConnecting = false
     /// Bumped when node list / filters change — isolated views subscribe instead of whole AppState.
@@ -42,6 +44,7 @@ final class AppState: ObservableObject {
 
     private var coreProcess: Process?
     private var outboundIPTask: Task<Void, Never>?
+    private var runtimeOutboundTask: Task<Void, Never>?
     private var coreStartInFlight = false
     private var userStoppedCore = false
     private var lastCoreRestartAttempt = Date.distantPast
@@ -1753,9 +1756,11 @@ final class AppState: ObservableObject {
             }
             statusText = "已切换：\(name)"
             scheduleOutboundIPRefresh()
+            scheduleRuntimeOutboundRefresh()
         } else {
             statusText = "已选择：\(name)"
             outboundIP = "—"
+            runtimeOutboundName = nil
         }
     }
 
@@ -1791,6 +1796,123 @@ final class AppState: ObservableObject {
         } else {
             outboundIP = "查询失败"
         }
+    }
+
+    func scheduleRuntimeOutboundRefresh(delay: TimeInterval = 0.5) {
+        runtimeOutboundTask?.cancel()
+        runtimeOutboundTask = Task { [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+            guard !Task.isCancelled else { return }
+            await self?.refreshRuntimeOutbound()
+        }
+    }
+
+    func refreshRuntimeOutbound() async {
+        guard coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) else {
+            runtimeOutboundName = nil
+            return
+        }
+        if settings.proxyMode == .direct {
+            runtimeOutboundName = "DIRECT"
+            bumpChromeRevision()
+            return
+        }
+        let group = settings.proxyMode == .global ? "GLOBAL" : "PROXY"
+        if let leaf = await resolveProxyLeaf(groupOrProxy: group) {
+            runtimeOutboundName = leaf
+            bumpChromeRevision()
+        }
+    }
+
+    private func resolveProxyLeaf(groupOrProxy: String, depth: Int = 0) async -> String? {
+        guard depth < 5 else { return groupOrProxy }
+        let name = groupOrProxy.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        if name == "DIRECT" || name == "REJECT" || name == "PASS" { return name }
+        if nodes.contains(where: { $0.name == name }) { return name }
+        guard let info = await ClashCore.fetchProxyGroup(
+            controller: settings.externalController,
+            secret: settings.secret,
+            group: name
+        ) else {
+            return name
+        }
+        let now = info.now.trimmingCharacters(in: .whitespacesAndNewlines)
+        if now.isEmpty || now == name { return name }
+        switch info.type.lowercased() {
+        case "select", "url-test", "fallback", "load-balance", "relay":
+            return await resolveProxyLeaf(groupOrProxy: now, depth: depth + 1)
+        default:
+            return now
+        }
+    }
+
+    func upsertAppRoutingRule(_ rule: AppRoutingRule) async {
+        if let idx = settings.appRoutingRules.firstIndex(where: { $0.id == rule.id }) {
+            settings.appRoutingRules[idx] = rule
+        } else if let idx = settings.appRoutingRules.firstIndex(where: { existing in
+            !rule.bundleId.isEmpty && !existing.bundleId.isEmpty && existing.bundleId == rule.bundleId
+                || existing.processName.caseInsensitiveCompare(rule.processName) == .orderedSame
+        }) {
+            var merged = rule
+            merged.id = settings.appRoutingRules[idx].id
+            settings.appRoutingRules[idx] = merged
+        } else {
+            settings.appRoutingRules.append(rule)
+        }
+        persist()
+        scheduleWriteConfig()
+        await applyConfig(reloadIfRunning: true)
+        bumpChromeRevision()
+        statusText = "应用分组已更新"
+    }
+
+    func addAppRoutingPreset(_ preset: AppRoutingRules.CommonAppPreset) async {
+        var rule = preset.asRule()
+        rule.label = preset.label(lang: settings.uiLanguage)
+        await upsertAppRoutingRule(rule)
+    }
+
+    @discardableResult
+    func addAllCommonAppRoutingPresets() async -> Int {
+        var added = 0
+        for preset in AppRoutingRules.commonPresets {
+            guard AppRoutingRules.existingIndex(of: preset, in: settings.appRoutingRules) == nil else { continue }
+            var rule = preset.asRule()
+            rule.label = preset.label(lang: settings.uiLanguage)
+            settings.appRoutingRules.append(rule)
+            added += 1
+        }
+        guard added > 0 else {
+            statusText = "常用应用分组已全部添加"
+            return 0
+        }
+        persist()
+        scheduleWriteConfig()
+        await applyConfig(reloadIfRunning: true)
+        bumpChromeRevision()
+        statusText = "已添加 \(added) 个常用应用分组"
+        return added
+    }
+
+    func removeAppRoutingRule(id: UUID) async {
+        settings.appRoutingRules.removeAll { $0.id == id }
+        persist()
+        scheduleWriteConfig()
+        await applyConfig(reloadIfRunning: true)
+        bumpChromeRevision()
+        statusText = "已删除应用分组"
+    }
+
+    func setAppRoutingRuleEnabled(id: UUID, enabled: Bool) async {
+        guard let idx = settings.appRoutingRules.firstIndex(where: { $0.id == id }) else { return }
+        settings.appRoutingRules[idx].enabled = enabled
+        persist()
+        scheduleWriteConfig()
+        await applyConfig(reloadIfRunning: true)
+        bumpChromeRevision()
     }
 
     func saveRulesFromEditor() async {
@@ -2196,6 +2318,7 @@ final class AppState: ObservableObject {
         RuntimeRules.effective(
             base: settings.rules,
             prepend: settings.rulesPrepend,
+            appRouting: settings.appRoutingRules,
             videoAdBlockEnabled: settings.videoAdBlockEnabled
         )
     }
@@ -2248,6 +2371,7 @@ final class AppState: ObservableObject {
             bumpChromeRevision()
         }
         statusText = "\(group) 已选：\(name)"
+        scheduleRuntimeOutboundRefresh()
     }
 
     func fetchMenuProxyGroups() async -> [ClashCore.ProxyGroupInfo] {
@@ -2498,6 +2622,7 @@ final class AppState: ObservableObject {
                 applyCoreRunning(true)
                 if nodes.isEmpty { reloadNodesFromDiskIfNeeded() }
                 scheduleOutboundIPRefresh()
+                scheduleRuntimeOutboundRefresh()
                 return
             }
         }
@@ -2724,6 +2849,7 @@ final class AppState: ObservableObject {
                     // Kick TELEGRAM url-test so Desktop doesn't sit on a dead leaf after restart.
                     Task { await self.healTelegramGroupOnly() }
                     scheduleOutboundIPRefresh()
+                    scheduleRuntimeOutboundRefresh()
                     await applyDefaultSystemProxyIfEnabled()
                     return
                 }

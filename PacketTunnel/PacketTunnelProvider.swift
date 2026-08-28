@@ -1,4 +1,5 @@
 import NetworkExtension
+import Network
 import os
 import Darwin
 
@@ -10,14 +11,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var proxyStarted = false
     private var gcTimer: DispatchSourceTimer?
     private var gcTickCount = 0
+    private var pathMonitor: NWPathMonitor?
+    private let pathQueue = DispatchQueue(label: "bashx.tunnel.path", qos: .utility)
     private var packetBridge: PacketFlowBridge?
     private var ownedTunFd: Int32 = -1
     private let log = OSLog(subsystem: "com.bashx.app.ios", category: "tunnel")
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        // Fresh log each connect — easier to diagnose "connected but no net".
-        try? FileManager.default.removeItem(at: Paths.tunnelLogURL)
-        writeLog("startTunnel begin")
+        // Keep prior session tail for diagnosing abrupt jetsam kills.
+        writeLog("——— session begin ———")
 
         #if canImport(MihomoCore)
         var logErr: NSError?
@@ -63,7 +65,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     #if canImport(MihomoCore)
     /// iOS 18+：必须 socketpair + packetFlow 桥；utun 直读收不到 App 包（Stash 新版用 Darwin Tun + 自有桥）。
     private func startEngine(_ completionHandler: @escaping (Error?) -> Void) {
-        BridgeUpdateLogLevel("info")
+        BridgeUpdateLogLevel("warning")
 
         let tunnelCapture = Self.loadTunnelCapture()
         let bindIF = TunnelInterface.preferredOutboundInterface() ?? ""
@@ -125,6 +127,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         writeLog("api secret=\(apiSecret.isEmpty ? "off" : "on")")
 
         proxyStarted = true
+        startNetworkMonitor()
         startMemoryManagement()
         selectSavedNodeWithRetry()
         let path: String = {
@@ -187,6 +190,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         gcTimer?.cancel()
         gcTimer = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
         packetBridge?.stop()
         packetBridge = nil
         #if canImport(MihomoCore)
@@ -446,16 +451,27 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            let bindIF = TunnelInterface.preferredOutboundInterface() ?? ""
+            BridgeSetOutboundInterface(bindIF)
+            self?.writeLog("path update bindIF=\(bindIF.isEmpty ? "(none)" : bindIF)")
+        }
+        monitor.start(queue: pathQueue)
+        pathMonitor = monitor
+    }
+
     private func startMemoryManagement() {
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + 12, repeating: 60)
+        timer.schedule(deadline: .now() + 30, repeating: 120)
         timer.setEventHandler { [weak self] in
             BridgeForceGC()
             guard let self else { return }
             self.gcTickCount += 1
-            let core = "up=\(BridgeGetUploadTraffic()) down=\(BridgeGetDownloadTraffic()) running=\(BridgeIsRunning())"
-            // Disk log at most every ~5 min; os_log every tick is enough for debugging.
-            if self.gcTickCount.isMultiple(of: 5) {
+            if self.gcTickCount.isMultiple(of: 3) {
+                let core = "up=\(BridgeGetUploadTraffic()) down=\(BridgeGetDownloadTraffic()) running=\(BridgeIsRunning())"
                 if let bridge = self.packetBridge {
                     self.writeLog(bridge.statsLine + " " + core)
                 } else {
@@ -463,13 +479,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
             }
             if self.proxyStarted, !BridgeIsRunning() {
-                self.writeLog("mihomo stopped unexpectedly — cancelling tunnel")
-                TunnelDiagnostics.recordFailure("核心异常退出（可能内存不足）")
-                self.cancelTunnelWithError(
-                    NSError(domain: "BashX", code: -10, userInfo: [
-                        NSLocalizedDescriptionKey: "核心异常退出，请重连"
-                    ])
-                )
+                self.writeLog("WARN mihomo running=false (unexpected)")
             }
         }
         timer.resume()

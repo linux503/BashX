@@ -109,6 +109,9 @@ enum L10n {
         // iOS Settings sections
         "ios.settings.nav": ["zh": "设置", "en": "Settings"],
         "ios.sec.privacy": ["zh": "隐私伪装", "en": "Privacy Camouflage"],
+        "ios.sec.general": ["zh": "通用", "en": "General"],
+        "ios.sec.network": ["zh": "网络", "en": "Network"],
+        "ios.sec.advanced": ["zh": "高级", "en": "Advanced"],
         "ios.sec.icon": ["zh": "App 图标", "en": "App Icon"],
         "ios.sec.connection": ["zh": "连接", "en": "Connection"],
         "ios.sec.speed": ["zh": "测速", "en": "Speed Test"],
@@ -122,8 +125,8 @@ enum L10n {
 
         "ios.disguise.toggle": ["zh": "启动伪装锁屏", "en": "Camouflage lock screen"],
         "ios.disguise.hint": [
-            "zh": "打开 App 先进入「色点消消乐」。切到后台会重新锁定。",
-            "en": "App opens into the camouflage game first. Backgrounding locks it again.",
+            "zh": "打开 App 先进入「水果保卫战」。切到后台会重新锁定。",
+            "en": "App opens into Fruit Defense first. Backgrounding locks it again.",
         ],
         "ios.disguise.lockNow": ["zh": "立即锁定", "en": "Lock now"],
         "ios.icon.hint": [
@@ -186,6 +189,10 @@ enum L10n {
         "ios.diag.log.empty": ["zh": "（无日志）", "en": "(no log)"],
         "ios.about.version": ["zh": "版本", "en": "Version"],
         "ios.about.footer": ["zh": "BashX for iOS · Network Extension + Mihomo", "en": "BashX for iOS · Network Extension + Mihomo"],
+        "ios.about.footerShort": [
+            "zh": "控制中心可添加 BashX VPN 快捷开关",
+            "en": "Add BashX VPN toggle in Control Center settings",
+        ],
 
         // iOS Home
         "home.addSubFirst": ["zh": "请先添加订阅", "en": "Add a subscription first"],
@@ -260,6 +267,23 @@ enum L10n {
             "en": "Supports Clash YAML and Base64 node lists.",
         ],
         "subs.paste": ["zh": "从剪贴板粘贴", "en": "Paste from clipboard"],
+        "subs.scan": ["zh": "扫码添加", "en": "Scan QR code"],
+        "subs.addManual": ["zh": "手动输入链接", "en": "Enter URL manually"],
+        "subs.scan.title": ["zh": "扫描订阅二维码", "en": "Scan subscription QR"],
+        "subs.scan.hint": [
+            "zh": "将订阅二维码放入取景框，识别后会自动填入链接",
+            "en": "Align the subscription QR code; the URL fills in automatically",
+        ],
+        "subs.scan.noCamera.title": ["zh": "无法使用相机", "en": "Camera unavailable"],
+        "subs.scan.noCamera.msg": [
+            "zh": "请在「设置 → BashX → 相机」中允许访问，或改用手动输入链接。",
+            "en": "Allow camera access in Settings → BashX → Camera, or enter the URL manually.",
+        ],
+        "subs.scan.unavailable.title": ["zh": "扫码不可用", "en": "Scanning unavailable"],
+        "subs.scan.unavailable.msg": [
+            "zh": "当前设备不支持二维码扫描，请改用手动输入或粘贴链接。",
+            "en": "QR scanning isn’t supported on this device. Paste or type the URL instead.",
+        ],
         "subs.addTitle": ["zh": "添加订阅", "en": "Add subscription"],
 
         // Traffic chart
@@ -302,6 +326,7 @@ enum L10n {
             "en": "Scan with Camera, Clash, or BashX to add the subscription",
         ],
         "qr.share": ["zh": "分享", "en": "Share"],
+        "qr.copyImage": ["zh": "复制二维码", "en": "Copy QR"],
 
         // Status / toast
         "status.ready": ["zh": "就绪", "en": "Ready"],
@@ -426,12 +451,53 @@ enum L10n {
 
         // Mac panel
         "mac.panel.nodes": ["zh": "节点", "en": "Nodes"],
+        "mac.nodes.smart": ["zh": "智能", "en": "Smart"],
+        "mac.nodes.smartNeedNodes": ["zh": "需先有节点", "en": "Add nodes first"],
+        "mac.nodes.autoSpeed": ["zh": "自动测速", "en": "Auto test"],
+        "mac.nodes.autoSpeed.sub": ["zh": "更新订阅后自动测速", "en": "Test after sub update"],
+        "mac.nodes.autoFastest": ["zh": "跟最快", "en": "Fastest"],
+        "mac.nodes.autoFastest.sub": ["zh": "自动切到延迟最低", "en": "Switch to lowest latency"],
+        "mac.nodes.adblock": ["zh": "去广告", "en": "Ad block"],
+        "mac.nodes.adblock.sub": ["zh": "视频/电商跳转拦截", "en": "Block video & ad redirects"],
+        "mac.panel.apps": ["zh": "应用", "en": "Apps"],
         "mac.panel.subscriptions": ["zh": "订阅", "en": "Subs"],
         "mac.panel.monitor": ["zh": "监控", "en": "Monitor"],
         "mac.panel.rules": ["zh": "规则", "en": "Rules"],
 
+        "mac.currentNode.title": ["zh": "当前节点", "en": "Current node"],
+        "mac.currentNode.auto": ["zh": "未选择（AUTO）", "en": "Not selected (AUTO)"],
+        "mac.currentNode.selected": ["zh": "选用：%@", "en": "Selected: %@"],
+
+        "mac.apps.title": ["zh": "应用分组", "en": "App routing"],
+        "mac.apps.subtitle": [
+            "zh": "按应用指定线路（需 TUN 或系统代理 + 进程匹配）",
+            "en": "Route apps via PROCESS-NAME rules (TUN or system proxy + process match)",
+        ],
+        "mac.apps.add": ["zh": "添加应用", "en": "Add app"],
+        "mac.apps.empty": ["zh": "还没有应用分组", "en": "No app routes yet"],
+        "mac.apps.emptyHint": [
+            "zh": "例如让 Chrome 走美国节点、Telegram 走香港节点。",
+            "en": "e.g. Chrome via US node, Telegram via HK node.",
+        ],
+        "mac.apps.pick": ["zh": "选择运行中的应用", "en": "Pick a running app"],
+        "mac.apps.routeTo": ["zh": "走线路", "en": "Route via"],
+        "mac.apps.search": ["zh": "搜索应用", "en": "Search apps"],
+        "mac.apps.added": ["zh": "已添加", "en": "Added"],
+        "mac.apps.presets": ["zh": "常用应用", "en": "Common apps"],
+        "mac.apps.presetsHint": ["zh": "点击添加，已添加显示 ✓", "en": "Tap to add · ✓ = added"],
+        "mac.apps.addAll": ["zh": "添加全部", "en": "Add all"],
+        "mac.apps.addPreset": ["zh": "添加 %@", "en": "Add %@"],
+        "mac.apps.custom": ["zh": "已配置", "en": "Configured"],
+        "mac.apps.cat.im": ["zh": "即时通讯", "en": "Messaging"],
+        "mac.apps.cat.browser": ["zh": "浏览器", "en": "Browsers"],
+        "mac.apps.cat.domestic": ["zh": "国内应用", "en": "Domestic"],
+        "mac.apps.cat.streaming": ["zh": "流媒体 / 会议", "en": "Streaming"],
+        "mac.apps.cat.dev": ["zh": "开发工具", "en": "Developer"],
+        "mac.apps.probeHint": ["zh": "验证各线路可达性", "en": "Check route reachability"],
+
         // Mac monitor
         "mac.monitor.traffic": ["zh": "流量", "en": "Traffic"],
+        "mac.monitor.peak": ["zh": "峰 %1 / %2", "en": "Peak %1 / %2"],
         "mac.monitor.live": ["zh": "实时", "en": "Live"],
         "mac.monitor.offline": ["zh": "离线", "en": "Offline"],
         "mac.monitor.down": ["zh": "下载", "en": "Download"],
@@ -492,6 +558,7 @@ enum L10n {
         ],
         "mac.sec.launch": ["zh": "启动", "en": "Launch"],
         "mac.launchAtLogin": ["zh": "开机自动启动", "en": "Launch at login"],
+        "mac.launchAtLogin.sub": ["zh": "登录后自动运行", "en": "Run when you log in"],
         "mac.launchAtLogin.hint": [
             "zh": "开启后登录 Mac 会自动运行 BashX（菜单栏）。若提示需批准，请到「系统设置 → 通用 → 登录项」。",
             "en": "Runs BashX in the menu bar at login. Approve in System Settings → General → Login Items if prompted.",

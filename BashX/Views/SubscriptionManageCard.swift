@@ -10,7 +10,10 @@ struct SubscriptionManageCard: View {
 
     @State private var isEditingName = false
     @State private var draftName = ""
+    @State private var showQRShare = false
     @FocusState private var nameFocused: Bool
+
+    private var lang: AppLanguage { state.settings.uiLanguage }
 
     private var sub: Subscription {
         state.settings.subscriptions.first(where: { $0.id == subscriptionId })
@@ -59,6 +62,9 @@ struct SubscriptionManageCard: View {
         .opacity(sub.enabled ? 1 : 0.72)
         .transaction { $0.animation = nil }
         .contextMenu { contextActions }
+        .sheet(isPresented: $showQRShare) {
+            SubscriptionQRShareSheet(name: sub.name, url: sub.url, lang: lang)
+        }
         .onValueChange(isEditingName) { editing in
             if editing { DispatchQueue.main.async { nameFocused = true } }
         }
@@ -178,6 +184,17 @@ struct SubscriptionManageCard: View {
             .foregroundStyle(accent)
             .disabled(state.isBusy)
 
+            Text("·").foregroundStyle(.quaternary)
+
+            Button {
+                showQRShare = true
+            } label: {
+                Label(L10n.t("subs.qrShare", lang), systemImage: "qrcode")
+                    .font(.caption.weight(.medium))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+
             Spacer(minLength: 0)
 
             Menu {
@@ -212,6 +229,9 @@ struct SubscriptionManageCard: View {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(sub.url, forType: .string)
             state.statusText = "已复制订阅链接"
+        }
+        Button(L10n.t("subs.qrShare", lang)) {
+            showQRShare = true
         }
         Button("打开缓存目录") {
             state.revealSubscriptionFile(id: subscriptionId)

@@ -6,13 +6,19 @@ enum RuntimeRules {
     static func effective(
         base: [String],
         prepend: [String] = [],
+        appRouting: [AppRoutingRule] = [],
         videoAdBlockEnabled: Bool
     ) -> [String] {
+        #if os(macOS)
+        let appRules = AppRoutingRules.clashRules(from: appRouting)
+        #else
+        let appRules: [String] = []
+        #endif
         let cleanedPrepend = prepend
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && !$0.hasPrefix("#") }
             .filter { !$0.uppercased().hasPrefix("MATCH,") }
-        let withPrepend = cleanedPrepend + base
+        let withPrepend = appRules + cleanedPrepend + base
         let merged = VideoAdBlock.merge(into: withPrepend, enabled: videoAdBlockEnabled)
         #if os(iOS)
         return GeoSiteRules.sanitize(insertIosProxyRules(into: adaptForPlatform(merged)))

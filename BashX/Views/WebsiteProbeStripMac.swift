@@ -28,20 +28,22 @@ struct WebsiteProbeStripMac: View {
                 testButton
             }
 
-            HStack(spacing: 4) {
+            HStack(spacing: compact ? 4 : 6) {
                 ForEach(WebsiteProbe.defaults) { target in
                     probeChip(target)
                 }
             }
         }
-        .padding(compact ? 6 : 8)
+        .padding(compact ? 6 : 0)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(BashXTheme.card(for: appearance))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
-                )
+            if compact {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(BashXTheme.card(for: appearance))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                    )
+            }
         }
     }
 
@@ -73,24 +75,24 @@ struct WebsiteProbeStripMac: View {
         return Button {
             Task { await runOne(target) }
         } label: {
-            VStack(spacing: 2) {
+            VStack(spacing: compact ? 2 : 4) {
                 Image(systemName: target.systemImage)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: compact ? 10 : 12, weight: .semibold))
                     .foregroundStyle(chipColor(status))
                 Text(target.localizedTitle)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: compact ? 9 : 10, weight: .semibold))
                     .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(status.label)
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .font(.system(size: compact ? 8 : 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(chipColor(status))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 5)
-            .padding(.horizontal, 2)
+            .padding(.vertical, compact ? 5 : 8)
+            .padding(.horizontal, compact ? 2 : 4)
             .background {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(chipBackground(status))

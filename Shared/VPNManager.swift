@@ -23,6 +23,8 @@ final class VPNManager: ObservableObject {
     private var statusObserver: NSObjectProtocol?
     private var trafficTask: Task<Void, Never>?
     private var connectWatchTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+    private var userInitiatedDisconnect = false
     private var lastTrafficTotals: (up: Int64, down: Int64, at: Date)?
 
     init() {
@@ -48,6 +50,10 @@ final class VPNManager: ObservableObject {
                        let hint = TunnelDiagnostics.lastFailureMessage(), !hint.isEmpty {
                         self?.lastError = hint
                     }
+                    if self?.userInitiatedDisconnect == false {
+                        self?.scheduleAutoReconnect()
+                    }
+                    self?.userInitiatedDisconnect = false
                 }
                 if conn.status == .connected {
                     self?.lastError = nil
@@ -133,6 +139,8 @@ final class VPNManager: ObservableObject {
 
     func connect() async {
         lastError = nil
+        userInitiatedDisconnect = false
+        reconnectTask?.cancel()
         conflictVPNHint = nil
         do {
             if let issue = MihomoConfigCheck.preflight() {
@@ -295,6 +303,8 @@ final class VPNManager: ObservableObject {
     }
 
     func disconnect() {
+        userInitiatedDisconnect = true
+        reconnectTask?.cancel()
         connectWatchTask?.cancel()
         connectWatchTask = nil
         manager?.connection.stopVPNTunnel()
@@ -405,6 +415,16 @@ final class VPNManager: ObservableObject {
         disconnect()
         try? await Task.sleep(nanoseconds: 600_000_000)
         await connect()
+    }
+
+    private func scheduleAutoReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard let self, !Task.isCancelled else { return }
+            guard !self.userInitiatedDisconnect, !self.isConnected, !self.isBusyConnecting else { return }
+            await self.connect()
+        }
     }
 
     private func syncTrafficPolling() {

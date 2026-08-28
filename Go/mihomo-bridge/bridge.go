@@ -57,6 +57,10 @@ func SetLogFile(path string) error {
 		sub := log.Subscribe()
 		go func() {
 			for event := range sub {
+				// NE budget: skip info/debug disk I/O (still visible via os_log from Swift).
+				if event.LogLevel <= log.INFO {
+					continue
+				}
 				logFileMu.Lock()
 				if logFile != nil {
 					fmt.Fprintf(logFile, "[Mihomo/%s] %s\n", event.LogLevel, event.Payload)
@@ -77,7 +81,7 @@ func SetOutboundInterface(name string) {
 }
 
 func init() {
-	debug.SetGCPercent(12)
+	debug.SetGCPercent(30)
 	// Network Extension jetsam is typically ~50MB. Stay under it but leave room
 	// for gVisor + a few concurrent connections (24MB was too tight → silent kills).
 	debug.SetMemoryLimit(45 * 1024 * 1024)

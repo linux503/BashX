@@ -12,16 +12,16 @@ struct MainView: View {
     @State private var renameTarget: Subscription?
     @State private var renameDraft = ""
     @State private var switchingNodeName: String?
-    @State private var websiteProbeExpanded = true
     /// Instant chip highlight before chromeRevision lands.
     @State private var pendingProxyMode: ProxyMode?
 
     private enum DetailTab: CaseIterable, Identifiable {
-        case nodes, subscriptions, monitor, rules
+        case nodes, apps, subscriptions, monitor, rules
         var id: String { String(describing: self) }
         func title(lang: AppLanguage) -> String {
             switch self {
             case .nodes: return L10n.t("mac.panel.nodes", lang)
+            case .apps: return L10n.t("mac.panel.apps", lang)
             case .subscriptions: return L10n.t("mac.panel.subscriptions", lang)
             case .monitor: return L10n.t("mac.panel.monitor", lang)
             case .rules: return L10n.t("mac.panel.rules", lang)
@@ -211,6 +211,9 @@ struct MainView: View {
                     if state.settings.tunEnabled {
                         StatusPill(title: "TUN", active: true)
                     }
+                    if let nodePill = currentNodePillTitle {
+                        StatusPill(title: nodePill, active: state.isCoreVisiblyAlive)
+                    }
                 }
             }
             .frame(maxWidth: 280)
@@ -263,6 +266,7 @@ struct MainView: View {
                     detailTab = .monitor
                 }
 
+                selectedNodeCard
                 proxyModeSection
                 sidebarSubsSummary
                 sidebarSettingsCard
@@ -306,48 +310,14 @@ struct MainView: View {
                         set: { v in Task { await state.setTUN(v) } }
                     )
                 )
-            }
-
-            Rectangle()
-                .fill(BashXTheme.hairline(for: appearance))
-                .frame(height: 1)
-                .padding(.vertical, 2)
-
-            Text("智能")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-
-            VStack(spacing: 6) {
                 sidebarToggleTile(
-                    icon: "gauge.with.dots.needle.67percent",
-                    tint: Color(red: 0.95, green: 0.62, blue: 0.22),
-                    title: "自动测速",
-                    subtitle: "更新订阅后自动测速",
+                    icon: "power.circle.fill",
+                    tint: Color(red: 0.52, green: 0.78, blue: 0.42),
+                    title: L10n.t("mac.launchAtLogin", lang),
+                    subtitle: L10n.t("mac.launchAtLogin.sub", lang),
                     isOn: Binding(
-                        get: { state.settings.autoSpeedTestEnabled },
-                        set: { state.setAutoSpeedTestEnabled($0) }
-                    ),
-                    disabled: state.nodes.isEmpty
-                )
-                sidebarToggleTile(
-                    icon: "bolt.fill",
-                    tint: Color(red: 0.98, green: 0.72, blue: 0.20),
-                    title: "跟最快节点",
-                    subtitle: "自动切换到延迟最低",
-                    isOn: Binding(
-                        get: { state.settings.autoSelectFastest },
-                        set: { state.setAutoSelectFastest($0) }
-                    ),
-                    disabled: state.nodes.isEmpty
-                )
-                sidebarToggleTile(
-                    icon: "play.slash.fill",
-                    tint: Color(red: 0.92, green: 0.42, blue: 0.48),
-                    title: "去广告",
-                    subtitle: "视频/电商跳转 · 规则模式",
-                    isOn: Binding(
-                        get: { state.settings.videoAdBlockEnabled },
-                        set: { v in Task { await state.setVideoAdBlock(v) } }
+                        get: { state.settings.launchAtLoginEnabled },
+                        set: { state.setLaunchAtLogin($0) }
                     )
                 )
             }
@@ -567,17 +537,30 @@ struct MainView: View {
         }
     }
 
+    private var currentNodePillTitle: String? {
+        guard state.isCoreVisiblyAlive || state.coreRunning else { return nil }
+        if let runtime = state.runtimeOutboundName, !runtime.isEmpty {
+            let short = runtime.count > 14 ? String(runtime.prefix(13)) + "…" : runtime
+            return short
+        }
+        if let selected = state.settings.selectedNodeName, !selected.isEmpty {
+            let short = selected.count > 14 ? String(selected.prefix(13)) + "…" : selected
+            return short
+        }
+        return "AUTO"
+    }
+
     private var selectedNodeCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("当前节点", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
+                Label(L10n.t("mac.currentNode.title", lang), systemImage: "point.topleft.down.curvedto.point.bottomright.up")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 Spacer()
-                if let name = state.settings.selectedNodeName,
+                if let name = effectiveNodeDelayName,
                    let node = state.nodes.first(where: { $0.name == name }),
                    let ms = node.delayMs {
-                    Text(ms < 0 ? "超时" : "\(ms) ms")
+                    Text(ms < 0 ? L10n.t("probe.timeout", lang) : "\(ms) ms")
                         .font(.caption2.monospaced().weight(.semibold))
                         .foregroundStyle(BashXTheme.delayColor(ms, appearance: appearance))
                         .padding(.horizontal, 6)
@@ -588,12 +571,26 @@ struct MainView: View {
                         )
                 }
             }
-            Text(state.settings.selectedNodeName ?? "未选择（AUTO）")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .lineLimit(2)
-                .minimumScaleFactor(0.85)
 
-            PanelOutboundIP(state: state)
+            if let runtime = state.runtimeOutboundName, !runtime.isEmpty {
+                Text(runtime)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                let selected = state.settings.selectedNodeName ?? "AUTO"
+                if selected != runtime {
+                    Text(L10n.t("mac.currentNode.selected", lang)
+                        .replacingOccurrences(of: "%@", with: selected))
+                        .font(.caption2)
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                        .lineLimit(1)
+                }
+            } else {
+                Text(state.settings.selectedNodeName ?? L10n.t("mac.currentNode.auto", lang))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+            }
         }
         .padding(12)
         .background {
@@ -621,21 +618,33 @@ struct MainView: View {
                 )
                 .shadow(color: state.coreRunning ? BashXTheme.accent(for: appearance).opacity(0.08) : .clear, radius: 6, y: 2)
         }
-        .task(id: state.settings.selectedNodeName) {
+        .task(id: "\(state.settings.selectedNodeName ?? "")|\(state.coreRunning)") {
             guard state.coreRunning else { return }
-            await state.refreshOutboundIP()
+            await state.refreshRuntimeOutbound()
             while !Task.isCancelled, state.coreRunning {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
-                await state.refreshOutboundIP()
+                await state.refreshRuntimeOutbound()
             }
         }
         .onValueChange(state.coreRunning) { running in
             if running {
-                state.scheduleOutboundIPRefresh()
+                state.scheduleRuntimeOutboundRefresh()
             } else {
-                state.outboundIP = "—"
+                state.runtimeOutboundName = nil
             }
         }
+    }
+
+    private var effectiveNodeDelayName: String? {
+        if let runtime = state.runtimeOutboundName,
+           state.nodes.contains(where: { $0.name == runtime }) {
+            return runtime
+        }
+        if let selected = state.settings.selectedNodeName,
+           state.nodes.contains(where: { $0.name == selected }) {
+            return selected
+        }
+        return nil
     }
 
     private var sidebarSubsSummary: some View {
@@ -782,6 +791,8 @@ struct MainView: View {
                 switch detailTab {
                 case .nodes:
                     nodesPane
+                case .apps:
+                    AppRoutingPane(state: state)
                 case .subscriptions:
                     subscriptionsPane
                 case .monitor:
@@ -863,40 +874,10 @@ struct MainView: View {
 
     private var nodesPaneContent: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        websiteProbeExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: websiteProbeExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                            .frame(width: 14)
-                        Image(systemName: "globe")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(BashXTheme.accent(for: appearance))
-                        Text(L10n.t("probe.title", state.settings.uiLanguage))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                }
-                .buttonStyle(.plain)
-
-                if websiteProbeExpanded {
-                    WebsiteProbeStripMac(state: state, compact: true, showTitle: false)
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 8)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-            .background(BashXTheme.card(for: appearance).opacity(0.55))
+            nodesSmartSection
+            Rectangle()
+                .fill(BashXTheme.hairline(for: appearance))
+                .frame(height: 1)
 
             categoryBar
             Rectangle()
@@ -916,6 +897,121 @@ struct MainView: View {
                 )
             }
         }
+    }
+
+    private var nodesSmartSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "wand.and.stars")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+                Text(L10n.t("mac.nodes.smart", lang))
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+                if state.nodes.isEmpty {
+                    Text(L10n.t("mac.nodes.smartNeedNodes", lang))
+                        .font(.caption2)
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                }
+            }
+
+            HStack(spacing: 8) {
+                nodesSmartCard(
+                    icon: "gauge.with.dots.needle.67percent",
+                    tint: Color(red: 0.95, green: 0.62, blue: 0.22),
+                    title: L10n.t("mac.nodes.autoSpeed", lang),
+                    subtitle: L10n.t("mac.nodes.autoSpeed.sub", lang),
+                    isOn: Binding(
+                        get: { state.settings.autoSpeedTestEnabled },
+                        set: { state.setAutoSpeedTestEnabled($0) }
+                    ),
+                    disabled: state.nodes.isEmpty
+                )
+                nodesSmartCard(
+                    icon: "bolt.fill",
+                    tint: Color(red: 0.98, green: 0.72, blue: 0.20),
+                    title: L10n.t("mac.nodes.autoFastest", lang),
+                    subtitle: L10n.t("mac.nodes.autoFastest.sub", lang),
+                    isOn: Binding(
+                        get: { state.settings.autoSelectFastest },
+                        set: { state.setAutoSelectFastest($0) }
+                    ),
+                    disabled: state.nodes.isEmpty
+                )
+                nodesSmartCard(
+                    icon: "play.slash.fill",
+                    tint: Color(red: 0.92, green: 0.42, blue: 0.48),
+                    title: L10n.t("mac.nodes.adblock", lang),
+                    subtitle: L10n.t("mac.nodes.adblock.sub", lang),
+                    isOn: Binding(
+                        get: { state.settings.videoAdBlockEnabled },
+                        set: { v in Task { await state.setVideoAdBlock(v) } }
+                    )
+                )
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(BashXTheme.card(for: appearance).opacity(0.55))
+    }
+
+    private func nodesSmartCard(
+        icon: String,
+        tint: Color,
+        title: String,
+        subtitle: String,
+        isOn: Binding<Bool>,
+        disabled: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(tint.opacity(appearance == .dark ? 0.24 : 0.16))
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(tint)
+                }
+                .frame(width: 30, height: 30)
+
+                Spacer(minLength: 0)
+
+                Toggle("", isOn: isOn)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(disabled)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(disabled ? BashXTheme.tertiaryLabel(for: appearance) : .primary)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isOn.wrappedValue
+                      ? tint.opacity(appearance == .dark ? 0.12 : 0.08)
+                      : BashXTheme.secondaryFill(for: appearance).opacity(0.65))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(
+                            isOn.wrappedValue ? tint.opacity(0.35) : BashXTheme.separator(for: appearance),
+                            lineWidth: isOn.wrappedValue ? 1 : 0.5
+                        )
+                )
+        }
+        .opacity(disabled ? 0.55 : 1)
+        .transaction { $0.animation = nil }
     }
 
     private var nodesEmptyState: some View {
@@ -1473,12 +1569,13 @@ private struct PanelSidebarTraffic: View {
             .padding(.top, 12)
             .padding(.bottom, 10)
 
-            SidebarTrafficChart(
+            TrafficChartView(
                 samples: panel.samples,
                 downTint: downTint,
                 upTint: upTint,
                 appearance: appearance,
-                live: live
+                live: live,
+                style: .compact
             )
             .frame(height: 88)
             .padding(.horizontal, 10)
@@ -1523,186 +1620,6 @@ private struct PanelSidebarTraffic: View {
         .onTapGesture(perform: onOpenMonitor)
         .help("点击查看流量监控")
         .transaction { $0.animation = nil }
-    }
-}
-
-/// Compact dual-series area chart for the sidebar.
-private struct SidebarTrafficChart: View {
-    let samples: [TrafficSample]
-    let downTint: Color
-    let upTint: Color
-    let appearance: AppAppearance
-    let live: Bool
-
-    var body: some View {
-        GeometryReader { geo in
-            let downs = samples.map(\.down)
-            let ups = samples.map(\.up)
-            let maxV = max(downs.max() ?? 0, ups.max() ?? 0, 1024)
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                downTint.opacity(appearance == .dark ? 0.16 : 0.10),
-                                upTint.opacity(appearance == .dark ? 0.08 : 0.04),
-                                BashXTheme.secondaryFill(for: appearance).opacity(0.25),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(appearance == .dark ? 0.10 : 0.05), lineWidth: 0.5)
-                    )
-
-                // Soft grid
-                VStack(spacing: 0) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        Spacer()
-                        Rectangle()
-                            .fill(Color.primary.opacity(appearance == .dark ? 0.06 : 0.04))
-                            .frame(height: 0.5)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                if live, samples.count > 1 {
-                    chartPath(values: downs, maxV: maxV, size: geo.size, closed: true)
-                        .fill(
-                            LinearGradient(
-                                colors: [downTint.opacity(0.42), downTint.opacity(0.02)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                    chartPath(values: downs, maxV: maxV, size: geo.size, closed: false)
-                        .stroke(downTint, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
-                        .shadow(color: downTint.opacity(0.35), radius: 3, y: 1)
-                    chartPath(values: ups, maxV: maxV, size: geo.size, closed: false)
-                        .stroke(upTint, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
-                        .shadow(color: upTint.opacity(0.25), radius: 2, y: 1)
-                } else {
-                    Text(live ? "采集中…" : "等待流量数据")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-        }
-    }
-
-    private func chartPath(values: [Int64], maxV: Int64, size: CGSize, closed: Bool) -> Path {
-        Path { p in
-            guard values.count > 1 else { return }
-            let padX: CGFloat = 8
-            let padY: CGFloat = 8
-            let w = size.width - padX * 2
-            let h = size.height - padY * 2
-            let step = w / CGFloat(max(values.count - 1, 1))
-
-            func point(at i: Int) -> CGPoint {
-                let x = padX + CGFloat(i) * step
-                let y = padY + h - CGFloat(Double(values[i]) / Double(maxV)) * h
-                return CGPoint(x: x, y: y)
-            }
-
-            p.move(to: point(at: 0))
-            for i in 1..<values.count {
-                let prev = point(at: i - 1)
-                let curr = point(at: i)
-                let mid = CGPoint(x: (prev.x + curr.x) / 2, y: (prev.y + curr.y) / 2)
-                p.addQuadCurve(to: mid, control: prev)
-                if i == values.count - 1 {
-                    p.addQuadCurve(to: curr, control: curr)
-                }
-            }
-
-            if closed {
-                p.addLine(to: CGPoint(x: padX + CGFloat(values.count - 1) * step, y: padY + h))
-                p.addLine(to: CGPoint(x: padX, y: padY + h))
-                p.closeSubpath()
-            }
-        }
-    }
-}
-
-/// Polls outbound IP fields so sidebar chrome doesn't rebuild on every probe tick.
-private struct PanelOutboundIP: View {
-    let state: AppState
-    @Environment(\.bashxAppearance) private var appearance
-    @State private var ip = "—"
-    @State private var loading = false
-    @State private var coreUp = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "globe")
-                .font(.caption2)
-                .foregroundStyle(BashXTheme.accent(for: appearance))
-            Text("出口 IP")
-                .font(.caption2)
-                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-            Spacer(minLength: 4)
-            if loading {
-                ProgressView()
-                    .controlSize(.mini)
-                    .frame(width: 12, height: 12)
-            } else {
-                Text(statusLabel)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(coreUp ? .primary : BashXTheme.secondaryLabel(for: appearance))
-                    .lineLimit(1)
-                    .textSelection(.enabled)
-            }
-            Button {
-                state.scheduleOutboundIPRefresh(delay: 0)
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.caption2)
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-            }
-            .buttonStyle(.plain)
-            .disabled(!coreUp || loading)
-            .help("刷新出口 IP")
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(BashXTheme.accentSoft(for: appearance).opacity(0.45))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(BashXTheme.accent(for: appearance).opacity(0.15), lineWidth: 0.5)
-                )
-        }
-        .onAppear { syncFromState() }
-        .onReceive(state.$outboundIP.receive(on: RunLoop.main)) { _ in syncFromState() }
-        .onReceive(state.$outboundIPLoading.receive(on: RunLoop.main)) { _ in syncFromState() }
-        .onReceive(state.$chromeRevision.receive(on: RunLoop.main)) { _ in syncFromState() }
-        .transaction { $0.animation = nil }
-    }
-
-    private var statusLabel: String {
-        if coreUp {
-            return ip.isEmpty ? "—" : ip
-        }
-        if state.coreConnecting { return "连接中…" }
-        return "内核未启动"
-    }
-
-    private func syncFromState() {
-        let nextCore = state.isCoreVisiblyAlive
-        let nextLoading = state.outboundIPLoading
-        let nextIP = state.outboundIP
-        if nextCore != coreUp { coreUp = nextCore }
-        if nextLoading != loading { loading = nextLoading }
-        if nextIP != ip { ip = nextIP }
     }
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate bashx.mark SF Symbol for Control Center (large X + hub)."""
+"""Regenerate bashx.mark SF Symbol — BashX brand badge (Control Center)."""
 import json
 import math
 import os
@@ -24,14 +24,51 @@ def capsule(cx, cy, half_len, thick, angle):
     )
 
 
-def mark_path(cx=64.0, cy=64.0, half=42.0, thick=15.0, hub=6.5):
+def rounded_rect(cx, cy, half, corner):
+    h, c = half, corner
+    return (
+        f"M{cx - h + c:.3f},{cy - h:.3f} "
+        f"H{cx + h - c:.3f} "
+        f"A{c:.3f},{c:.3f} 0 0 1 {cx + h:.3f},{cy - h + c:.3f} "
+        f"V{cy + h - c:.3f} "
+        f"A{c:.3f},{c:.3f} 0 0 1 {cx + h - c:.3f},{cy + h:.3f} "
+        f"H{cx - h + c:.3f} "
+        f"A{c:.3f},{c:.3f} 0 0 1 {cx - h:.3f},{cy + h - c:.3f} "
+        f"V{cy - h + c:.3f} "
+        f"A{c:.3f},{c:.3f} 0 0 1 {cx - h + c:.3f},{cy - h:.3f} Z"
+    )
+
+
+def circle(cx, cy, r):
+    return (
+        f"M{cx - r:.3f},{cy:.3f} "
+        f"A{r:.3f},{r:.3f} 0 1,0 {cx + r:.3f},{cy:.3f} "
+        f"A{r:.3f},{r:.3f} 0 1,0 {cx - r:.3f},{cy:.3f} Z"
+    )
+
+
+def mark_paths(cx=64.0, cy=64.0, scale=1.0):
+    """
+    BashX mark for Control Center — matches app icon structure:
+    rounded badge frame + bold round-cap X + center hub.
+    """
+    s = scale
+    half = 45.8 * s
+    corner = 13.6 * s
+    frame = 8.6 * s
+    inner_half = half - frame
+    inner_corner = max(7.2 * s, corner - frame * 0.52)
+
+    x_len = 25.8 * s
+    x_thick = 13.8 * s
+    hub = 3.6 * s
+
     return " ".join([
-        capsule(cx, cy, half, thick, math.pi / 4),
-        capsule(cx, cy, half, thick, -math.pi / 4),
-        (
-            f"M{cx + hub:.3f},{cy:.3f} A{hub:.3f},{hub:.3f} 0 1 1 "
-            f"{cx - hub:.3f},{cy:.3f} A{hub:.3f},{hub:.3f} 0 1 1 {cx + hub:.3f},{cy:.3f} Z"
-        ),
+        rounded_rect(cx, cy, half, corner),
+        rounded_rect(cx, cy, inner_half, inner_corner),
+        capsule(cx, cy, x_len, x_thick, math.pi / 4),
+        capsule(cx, cy, x_len, x_thick, -math.pi / 4),
+        circle(cx, cy, hub),
     ])
 
 
@@ -44,7 +81,15 @@ def guides(suffix, baseline, capline, left, right):
 
 
 def main():
-    path = mark_path()
+    scales = {"S": 0.98, "M": 1.06, "L": 1.15}
+    groups = []
+    for suffix, sc in scales.items():
+        path = mark_paths(scale=sc)
+        groups.append(
+            f'    <g id="Regular-{suffix}">'
+            f'<path d="{path}" fill="#000000" fill-rule="evenodd"/></g>'
+        )
+
     svg = f"""<?xml version="1.0" encoding="UTF-8"?>
 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <g id="Notes"></g>
@@ -54,9 +99,7 @@ def main():
     {guides("L", 100, 24, 10, 118)}
   </g>
   <g id="Symbols">
-    <g id="Regular-S"><path d="{path}" fill="#000000"/></g>
-    <g id="Regular-M"><path d="{path}" fill="#000000"/></g>
-    <g id="Regular-L"><path d="{path}" fill="#000000"/></g>
+{chr(10).join(groups)}
   </g>
 </svg>
 """

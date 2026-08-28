@@ -30,6 +30,7 @@ final class IOSAppState: ObservableObject {
     private let tester = SpeedTester()
     private var persistTask: Task<Void, Never>?
     private var configWriteTask: Task<Void, Never>?
+    private var pendingConfigWrite = false
     private var outboundIPTask: Task<Void, Never>?
     private var proxyGroupsTask: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -69,6 +70,10 @@ final class IOSAppState: ObservableObject {
                     self.outboundIP = "—"
                     self.outboundIPLoading = false
                     self.proxyGroups = []
+                    if self.pendingConfigWrite {
+                        self.pendingConfigWrite = false
+                        self.writeConfig()
+                    }
                 }
             }
             .store(in: &cancellables)
@@ -450,6 +455,15 @@ final class IOSAppState: ObservableObject {
     }
 
     func writeConfig() {
+        if vpn.isConnected {
+            pendingConfigWrite = true
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set(settings.secret, forKey: "apiSecret")
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set(settings.proxyMode.rawValue, forKey: "proxyMode")
+            return
+        }
+        pendingConfigWrite = false
         UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
             .set(settings.secret, forKey: "apiSecret")
         UserDefaults(suiteName: AppConstants.appGroupIdentifier)?

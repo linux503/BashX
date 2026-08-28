@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Camouflage space-shooter with levels, titans, and upgrading ship.
+/// Camouflage fruit-defense arcade (orchard theme).
 /// Unlock: tap the tip card above Start 5 times.
 struct DisguiseGalleryView: View {
     var onUnlocked: () -> Void
@@ -25,6 +25,7 @@ struct DisguiseGalleryView: View {
     @State private var isPlaying = false
     @State private var showSettings = false
     @State private var hapticsOn = true
+    @State private var soundOn = UserDefaults.standard.object(forKey: Keys.sound) as? Bool ?? true
     @State private var shipX: CGFloat = 0
     @State private var shipReady = false
     @State private var spawnTask: Task<Void, Never>?
@@ -48,6 +49,25 @@ struct DisguiseGalleryView: View {
     private enum Keys {
         static let broken = "disguise.colorPop.brokenTotal"
         static let high = "disguise.colorPop.high"
+        static let sound = "disguise.game.soundOn"
+    }
+
+    /// Unified casual-arcade palette for the disguise mini-game.
+    private enum GameTheme {
+        static let skyTop = Color(red: 0.42, green: 0.62, blue: 0.98)
+        static let skyMid = Color(red: 0.78, green: 0.58, blue: 0.96)
+        static let skyBottom = Color(red: 1.0, green: 0.82, blue: 0.58)
+        static let horizon = Color(red: 0.38, green: 0.72, blue: 0.42)
+        static let ground = Color(red: 0.22, green: 0.48, blue: 0.28)
+        static let hudGlass = Color.white.opacity(0.16)
+        static let hudStroke = Color.white.opacity(0.28)
+        static let accent = Color(red: 1.0, green: 0.58, blue: 0.22)
+        static let accentDeep = Color(red: 0.92, green: 0.38, blue: 0.18)
+        static let beam = Color(red: 0.35, green: 0.88, blue: 0.48)
+        static let beamHot = Color(red: 1.0, green: 0.78, blue: 0.28)
+        static let shipBody = Color(red: 0.98, green: 0.72, blue: 0.28)
+        static let shipWing = Color(red: 0.42, green: 0.78, blue: 0.38)
+        static let shipCockpit = Color(red: 0.55, green: 0.88, blue: 0.98)
     }
 
     private var shipY: CGFloat {
@@ -66,14 +86,14 @@ struct DisguiseGalleryView: View {
 
     private var shipTitle: String {
         switch shipLevel {
-        case 0: return "原型机"
-        case 1: return "侦察机"
-        case 2: return "突击舰"
-        case 3: return "双联炮"
-        case 4: return "星际驱逐"
-        case 5...9: return "战列舰"
-        case 10...19: return "星际要塞"
-        default: return "超维旗舰"
+        case 0: return "护果新手"
+        case 1: return "果园哨兵"
+        case 2: return "果汁炮手"
+        case 3: return "双管护卫"
+        case 4: return "丰收守卫"
+        case 5...9: return "果园队长"
+        case 10...19: return "果王卫士"
+        default: return "传奇护果官"
         }
     }
 
@@ -84,13 +104,16 @@ struct DisguiseGalleryView: View {
 
     var body: some View {
         ZStack {
-            spaceBackdrop.ignoresSafeArea()
+            gameBackdrop.ignoresSafeArea()
 
             GeometryReader { geo in
                 ZStack {
+                    orchardSilhouette(in: geo.size)
+                        .allowsHitTesting(false)
+
                     ForEach(stars) { star in
                         Circle()
-                            .fill(Color.white.opacity(star.opacity))
+                            .fill(star.tint.opacity(star.opacity))
                             .frame(width: star.size, height: star.size)
                             .position(star.position)
                             .allowsHitTesting(false)
@@ -147,7 +170,7 @@ struct DisguiseGalleryView: View {
                     }
 
                     if levelFlash {
-                        Color.white.opacity(0.12).ignoresSafeArea().allowsHitTesting(false)
+                        GameTheme.beamHot.opacity(0.18).ignoresSafeArea().allowsHitTesting(false)
                     }
 
                     // Drag only in the play band — never cover HUD / bottom controls
@@ -188,9 +211,15 @@ struct DisguiseGalleryView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                topHUD
-                    .padding(.horizontal, 16)
-                    .padding(.top, 6)
+                Group {
+                    if isPlaying {
+                        playTopHUD
+                    } else {
+                        topHUD
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
 
                 Spacer(minLength: 0)
                     .allowsHitTesting(false)
@@ -232,6 +261,9 @@ struct DisguiseGalleryView: View {
                 startPulse = true
             }
         }
+        .onChange(of: soundOn) { on in
+            UserDefaults.standard.set(on, forKey: Keys.sound)
+        }
         .onChange(of: scenePhase) { phase in
             if phase != .active {
                 pausedByBackground = isPlaying
@@ -259,7 +291,7 @@ struct DisguiseGalleryView: View {
     private func updatePlayfield(_ size: CGSize) {
         playSize = size
         let insets = keyWindowSafeInsets()
-        playTop = insets.top + 92
+        playTop = insets.top + (isPlaying ? 36 : 92)
         playBottom = max(insets.bottom, 12) + (isPlaying ? 58 : 118)
         if !shipReady {
             shipX = size.width * 0.5
@@ -276,132 +308,221 @@ struct DisguiseGalleryView: View {
 
     // MARK: - Visuals
 
-    private var spaceBackdrop: some View {
-        // Static black-glass — animated TimelineView + multi-blur was a major heat source.
+    private var gameBackdrop: some View {
         ZStack {
-            Color(red: 0.015, green: 0.016, blue: 0.022)
-
             LinearGradient(
-                colors: [
-                    Color.white.opacity(0.045),
-                    Color.clear,
-                    Color.black.opacity(0.5),
-                ],
+                colors: [GameTheme.skyTop, GameTheme.skyMid, GameTheme.skyBottom],
                 startPoint: .top,
                 endPoint: .bottom
             )
 
             RadialGradient(
-                colors: [Color.white.opacity(0.05), Color.clear],
-                center: UnitPoint(x: 0.35, y: 0.22),
-                startRadius: 4,
-                endRadius: 280
+                colors: [Color.white.opacity(0.22), Color.clear],
+                center: UnitPoint(x: 0.72, y: 0.12),
+                startRadius: 8,
+                endRadius: 220
             )
 
             RadialGradient(
-                colors: [Color.clear, Color.black.opacity(0.55)],
-                center: .center,
-                startRadius: 120,
-                endRadius: 520
+                colors: [GameTheme.accent.opacity(0.14), Color.clear],
+                center: UnitPoint(x: 0.18, y: 0.78),
+                startRadius: 12,
+                endRadius: 260
+            )
+
+            LinearGradient(
+                colors: [Color.clear, GameTheme.horizon.opacity(0.35), GameTheme.ground.opacity(0.55)],
+                startPoint: UnitPoint(x: 0.5, y: 0.62),
+                endPoint: .bottom
             )
         }
     }
 
+    private func orchardSilhouette(in size: CGSize) -> some View {
+        let groundY = size.height * 0.88
+        return ZStack {
+            Ellipse()
+                .fill(GameTheme.ground.opacity(0.28))
+                .frame(width: size.width * 1.15, height: size.height * 0.22)
+                .position(x: size.width * 0.5, y: groundY + size.height * 0.04)
+
+            HStack(alignment: .bottom, spacing: size.width * 0.06) {
+                bush(height: 54, width: 72)
+                bush(height: 38, width: 56)
+                bush(height: 62, width: 84)
+                bush(height: 42, width: 60)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.horizontal, 18)
+            .padding(.bottom, max(12, size.height * 0.06))
+            .opacity(0.42)
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func bush(height: CGFloat, width: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            Capsule()
+                .fill(GameTheme.ground.opacity(0.85))
+                .frame(width: width * 0.18, height: height * 0.42)
+            Circle()
+                .fill(GameTheme.horizon.opacity(0.9))
+                .frame(width: width * 0.42, height: width * 0.42)
+                .offset(x: -width * 0.18, y: -height * 0.18)
+            Circle()
+                .fill(GameTheme.horizon.opacity(0.95))
+                .frame(width: width * 0.5, height: width * 0.5)
+                .offset(y: -height * 0.24)
+            Circle()
+                .fill(GameTheme.horizon.opacity(0.88))
+                .frame(width: width * 0.4, height: width * 0.4)
+                .offset(x: width * 0.2, y: -height * 0.16)
+        }
+        .frame(width: width, height: height, alignment: .bottom)
+    }
+
     private func fruitView(_ bubble: GameBubble) -> some View {
         let hpRatio = CGFloat(bubble.hp) / CGFloat(max(1, bubble.maxHp))
-        let emojiSize = bubble.size * (bubble.kind == .titan ? 0.62 : 0.68)
+        let emojiSize = bubble.size * (bubble.kind == .titan ? 0.58 : 0.64)
         return ZStack {
             Circle()
-                .fill(bubble.fruit.accent.opacity(0.22))
-                .frame(width: bubble.size * 1.05, height: bubble.size * 1.05)
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            bubble.fruit.accent.opacity(0.95),
+                            bubble.fruit.accent.opacity(0.55),
+                            bubble.fruit.accent.opacity(0.28),
+                        ],
+                        center: UnitPoint(x: 0.32, y: 0.28),
+                        startRadius: 2,
+                        endRadius: bubble.size * 0.62
+                    )
+                )
+                .frame(width: bubble.size * 1.08, height: bubble.size * 1.08)
                 .overlay(
                     Circle()
-                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
+                        .strokeBorder(Color.white.opacity(0.45), lineWidth: 1.2)
                 )
+                .overlay(alignment: .topLeading) {
+                    Circle()
+                        .fill(Color.white.opacity(0.42))
+                        .frame(width: bubble.size * 0.22, height: bubble.size * 0.22)
+                        .offset(x: bubble.size * 0.16, y: bubble.size * 0.14)
+                }
 
             Text(bubble.fruit.emoji)
                 .font(.system(size: emojiSize))
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
+                .shadow(color: .black.opacity(0.12), radius: 1, y: 1)
 
             if bubble.maxHp > 1 {
                 Circle()
                     .trim(from: 0, to: hpRatio)
-                    .stroke(bubble.fruit.accent.opacity(0.9), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .frame(width: bubble.size * 1.12, height: bubble.size * 1.12)
+                    .stroke(Color.white.opacity(0.95), style: StrokeStyle(lineWidth: 2.8, lineCap: .round))
+                    .frame(width: bubble.size * 1.16, height: bubble.size * 1.16)
                     .rotationEffect(.degrees(-90))
+                    .shadow(color: bubble.fruit.accent.opacity(0.35), radius: 2)
             }
 
             if bubble.kind == .titan {
                 Circle()
-                    .strokeBorder(Color.white.opacity(0.35), lineWidth: 2)
-                    .frame(width: bubble.size * 1.18, height: bubble.size * 1.18)
+                    .strokeBorder(Color.white.opacity(0.55), lineWidth: 2.5)
+                    .frame(width: bubble.size * 1.22, height: bubble.size * 1.22)
             }
         }
-        .frame(width: bubble.size * 1.25, height: bubble.size * 1.25)
+        .frame(width: bubble.size * 1.28, height: bubble.size * 1.28)
         .scaleEffect(bubble.scale)
-        .shadow(color: bubble.fruit.accent.opacity(0.4), radius: 5, y: 2)
+        .shadow(color: bubble.fruit.accent.opacity(0.35), radius: 8, y: 4)
     }
 
     private var shipView: some View {
-        let accent: Color = {
-            let hues: [Double] = [0.55, 0.48, 0.62, 0.78, 0.12, 0.08]
-            let h = hues[min(shipLevel, hues.count - 1)]
-            if shipLevel >= 10 {
-                return Color(hue: (0.12 + Double(shipLevel % 7) * 0.08).truncatingRemainder(dividingBy: 1), saturation: 0.85, brightness: 1.0)
-            }
-            return Color(hue: h, saturation: 0.75, brightness: 0.98)
-        }()
-        let metal = Color(red: 0.72, green: 0.8, blue: 0.92)
-        let scale: CGFloat = 0.9 + shipVisualLevel * 0.035
+        let accent = GameTheme.shipBody
+        let wing = GameTheme.shipWing
+        let scale: CGFloat = 0.92 + shipVisualLevel * 0.03
 
         return ZStack {
             Ellipse()
-                .fill(accent.opacity(0.5))
-                .frame(width: 10, height: 20)
-                .offset(y: 30)
+                .fill(
+                    LinearGradient(
+                        colors: [GameTheme.beamHot, GameTheme.accentDeep],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 12, height: 22)
+                .offset(y: 32)
+                .opacity(0.85)
 
             Path { path in
-                let wing = 16 + shipVisualLevel * 1.8
-                path.move(to: CGPoint(x: 32, y: 16))
-                path.addLine(to: CGPoint(x: 32 - wing, y: 32))
-                path.addLine(to: CGPoint(x: 32 - wing * 0.35, y: 26))
-                path.addLine(to: CGPoint(x: 28, y: 20))
+                let wingSpan = 15 + shipVisualLevel * 1.5
+                path.move(to: CGPoint(x: 32, y: 18))
+                path.addLine(to: CGPoint(x: 32 - wingSpan, y: 34))
+                path.addLine(to: CGPoint(x: 32 - wingSpan * 0.35, y: 28))
+                path.addLine(to: CGPoint(x: 28, y: 22))
                 path.closeSubpath()
-                path.move(to: CGPoint(x: 32, y: 16))
-                path.addLine(to: CGPoint(x: 32 + wing, y: 32))
-                path.addLine(to: CGPoint(x: 32 + wing * 0.35, y: 26))
-                path.addLine(to: CGPoint(x: 36, y: 20))
+                path.move(to: CGPoint(x: 32, y: 18))
+                path.addLine(to: CGPoint(x: 32 + wingSpan, y: 34))
+                path.addLine(to: CGPoint(x: 32 + wingSpan * 0.35, y: 28))
+                path.addLine(to: CGPoint(x: 36, y: 22))
                 path.closeSubpath()
             }
-            .fill(metal.opacity(0.88))
+            .fill(wing.opacity(0.92))
             .frame(width: 64, height: 48)
+            .shadow(color: wing.opacity(0.35), radius: 4, y: 2)
 
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(LinearGradient(colors: [Color.white.opacity(0.95), accent, metal], startPoint: .top, endPoint: .bottom))
-                .frame(width: 18 + shipVisualLevel * 0.4, height: 30 + shipVisualLevel * 0.6)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.95), accent, GameTheme.accentDeep],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 20 + shipVisualLevel * 0.35, height: 32 + shipVisualLevel * 0.5)
                 .overlay(
                     Capsule()
-                        .fill(Color.white.opacity(0.55))
-                        .frame(width: 5, height: 10)
-                        .offset(y: -5)
+                        .fill(GameTheme.shipCockpit.opacity(0.9))
+                        .frame(width: 10, height: 14)
+                        .offset(y: -6)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
                 )
         }
-        .frame(width: 78, height: 70)
+        .frame(width: 78, height: 72)
         .scaleEffect(scale)
+        .shadow(color: GameTheme.accentDeep.opacity(0.28), radius: 8, y: 4)
     }
 
     private var topHUD: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("水果保卫战")
-                        .font(.system(size: 16, weight: .heavy, design: .rounded))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
-                    Text(isPlaying ? "守住防线 · 优先快果" : "拖动飞船射击水果")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.58))
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [GameTheme.accent, GameTheme.accentDeep],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 40, height: 40)
+                            .shadow(color: GameTheme.accentDeep.opacity(0.35), radius: 6, y: 3)
+                        Text("🍎")
+                            .font(.system(size: 22))
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("水果保卫战")
+                            .font(.system(size: 17, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color(red: 0.28, green: 0.22, blue: 0.18))
+                        Text(isPlaying ? "守住果园 · 优先击破大果" : "拖动护果机，击落来袭水果")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(red: 0.35, green: 0.28, blue: 0.24).opacity(0.72))
+                    }
                 }
 
                 Spacer(minLength: 8)
@@ -411,12 +532,12 @@ struct DisguiseGalleryView: View {
                 } label: {
                     Image(systemName: "gearshape.fill")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(Color(red: 0.32, green: 0.26, blue: 0.22))
                         .frame(width: 36, height: 36)
                         .background(
                             Circle()
-                                .fill(Color.white.opacity(0.12))
-                                .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8))
+                                .fill(GameTheme.hudGlass)
+                                .overlay(Circle().strokeBorder(GameTheme.hudStroke, lineWidth: 0.8))
                         )
                 }
                 .buttonStyle(.plain)
@@ -435,28 +556,117 @@ struct DisguiseGalleryView: View {
                 Spacer(minLength: 0)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.42))
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.55), lineWidth: 0.8)
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 10, y: 4)
+        )
         .padding(.horizontal, 4)
-        .padding(.vertical, 2)
+    }
+
+    /// Minimal transparent stats while playing — does not block falling fruit.
+    private var playTopHUD: some View {
+        HStack(spacing: 8) {
+            playStatPill(icon: "star.fill", text: "\(score)", tint: GameTheme.accentDeep)
+            playStatPill(icon: "arrow.up.circle.fill", text: "Lv.\(shipLevel)", tint: GameTheme.beam)
+            playLivesPill
+            if combo > 1 {
+                playStatPill(icon: "flame.fill", text: "×\(combo)", tint: GameTheme.accent)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .allowsHitTesting(false)
+        .overlay(alignment: .trailing) {
+            playSettingsButton
+                .padding(.trailing, 4)
+        }
+    }
+
+    private func playStatPill(icon: String, text: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+            Text(text)
+                .font(.system(size: 12, weight: .heavy, design: .rounded).monospacedDigit())
+        }
+        .foregroundStyle(.white)
+        .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(tint.opacity(0.22))
+                .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6))
+        )
+    }
+
+    private var playLivesPill: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<maxLives, id: \.self) { i in
+                Image(systemName: i < lives ? "heart.fill" : "heart")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(i < lives ? Color(red: 0.98, green: 0.35, blue: 0.42) : .white.opacity(0.35))
+            }
+        }
+        .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.black.opacity(0.12))
+                .overlay(Capsule(style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 0.6))
+        )
+        .accessibilityLabel("生命 \(lives)")
+    }
+
+    private var playSettingsButton: some View {
+        Button {
+            showSettings = true
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+                .frame(width: 32, height: 32)
+                .background(
+                    Circle()
+                        .fill(Color.black.opacity(0.18))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.6))
+                )
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
     }
 
     private var scoreChip: some View {
         HStack(spacing: 6) {
-            Image(systemName: "flame.fill")
+            Image(systemName: "star.fill")
                 .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(Color(red: 0.45, green: 0.92, blue: 1.0))
+                .foregroundStyle(GameTheme.accentDeep)
             VStack(alignment: .leading, spacing: 0) {
                 Text("分数")
                     .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(Color(red: 0.35, green: 0.28, blue: 0.24).opacity(0.55))
                 Text("\(score)")
                     .font(.system(size: 15, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color(red: 0.24, green: 0.18, blue: 0.14))
                     .contentTransition(.numericText())
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(chipBackground(tint: Color(red: 0.35, green: 0.85, blue: 1.0)))
+        .background(chipBackground(tint: GameTheme.accent))
     }
 
     private var levelChip: some View {
@@ -467,23 +677,20 @@ struct DisguiseGalleryView: View {
                 HStack(spacing: 4) {
                     Text("Lv.\(shipLevel)")
                         .font(.system(size: 14, weight: .heavy, design: .rounded).monospacedDigit())
-                        .foregroundStyle(Color(red: 1.0, green: 0.86, blue: 0.42))
+                        .foregroundStyle(GameTheme.accentDeep)
                     Text(shipTitle)
                         .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(Color(red: 0.35, green: 0.28, blue: 0.24).opacity(0.62))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.12))
+                        Capsule().fill(Color.black.opacity(0.08))
                         Capsule()
                             .fill(
                                 LinearGradient(
-                                    colors: [
-                                        Color(red: 1.0, green: 0.78, blue: 0.28),
-                                        Color(red: 1.0, green: 0.55, blue: 0.25),
-                                    ],
+                                    colors: [GameTheme.beamHot, GameTheme.accent],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
@@ -496,67 +703,65 @@ struct DisguiseGalleryView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(chipBackground(tint: Color(red: 1.0, green: 0.78, blue: 0.35)))
+        .background(chipBackground(tint: GameTheme.beam))
     }
 
     private var livesChip: some View {
         HStack(spacing: 3) {
             ForEach(0..<maxLives, id: \.self) { i in
-                Circle()
-                    .fill(i < lives ? Color(red: 1.0, green: 0.42, blue: 0.48) : Color.white.opacity(0.15))
-                    .frame(width: 7, height: 7)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(Color.white.opacity(i < lives ? 0.35 : 0.12), lineWidth: 0.6)
-                    )
+                Image(systemName: i < lives ? "heart.fill" : "heart")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(i < lives ? Color(red: 0.98, green: 0.35, blue: 0.42) : Color.black.opacity(0.12))
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 11)
-        .background(chipBackground(tint: Color(red: 1.0, green: 0.42, blue: 0.48)))
+        .padding(.vertical, 9)
+        .background(chipBackground(tint: Color(red: 0.98, green: 0.35, blue: 0.42)))
         .accessibilityLabel("防线 \(lives)")
     }
 
     private var comboChip: some View {
         Text("×\(combo)")
             .font(.system(size: 13, weight: .heavy, design: .rounded).monospacedDigit())
-            .foregroundStyle(Color(red: 0.9, green: 0.75, blue: 1.0))
+            .foregroundStyle(GameTheme.accentDeep)
             .padding(.horizontal, 10)
             .padding(.vertical, 11)
-            .background(chipBackground(tint: Color(red: 0.85, green: 0.7, blue: 1.0)))
+            .background(chipBackground(tint: GameTheme.accent))
     }
 
     private func chipBackground(tint: Color) -> some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.black.opacity(0.45))
+            .fill(Color.white.opacity(0.55))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(tint.opacity(0.08))
+                    .fill(tint.opacity(0.12))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.7)
+                    .strokeBorder(Color.white.opacity(0.65), lineWidth: 0.7)
             )
     }
 
     private var homeCard: some View {
-        VStack(spacing: 3) {
-            Text("星际护航")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.62))
-            Text("5 点防线 · 优先清快果")
-                .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.32))
+        VStack(spacing: 4) {
+            Text("🍊 果园防线")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(Color(red: 0.28, green: 0.22, blue: 0.18))
+            Text("5 点生命 · 优先清快果与大果")
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(Color(red: 0.35, green: 0.28, blue: 0.24).opacity(0.68))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
         .background(
             Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.32))
+                .fill(Color.white.opacity(0.5))
+                .background(Capsule(style: .continuous).fill(.ultraThinMaterial))
                 .overlay(
                     Capsule(style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
+                        .strokeBorder(Color.white.opacity(0.65), lineWidth: 0.8)
                 )
+                .shadow(color: Color.black.opacity(0.08), radius: 8, y: 3)
         )
     }
 
@@ -575,70 +780,37 @@ struct DisguiseGalleryView: View {
             ZStack {
                 if !isPlaying {
                     Capsule(style: .continuous)
-                        .fill(Color.white.opacity(startPulse ? 0.12 : 0.04))
-                        .scaleEffect(startPulse ? 1.06 : 1.0)
+                        .fill(GameTheme.accent.opacity(startPulse ? 0.28 : 0.14))
+                        .scaleEffect(startPulse ? 1.08 : 1.0)
                         .allowsHitTesting(false)
                 }
 
                 Capsule(style: .continuous)
-                    .fill(Color.black.opacity(isPlaying ? 0.58 : 0.5))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: isPlaying
-                                        ? [
-                                            Color.white.opacity(0.10),
-                                            Color(red: 1.0, green: 0.42, blue: 0.48).opacity(0.12),
-                                            Color.clear,
-                                        ]
-                                        : [
-                                            Color.white.opacity(0.16),
-                                            Color(red: 0.45, green: 0.78, blue: 1.0).opacity(0.10),
-                                            Color.clear,
-                                        ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                    .fill(
+                        LinearGradient(
+                            colors: isPlaying
+                                ? [Color(red: 0.92, green: 0.32, blue: 0.38), Color(red: 0.78, green: 0.22, blue: 0.32)]
+                                : [GameTheme.accent, GameTheme.accentDeep],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
                     .overlay(
                         Capsule(style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: isPlaying
-                                        ? [
-                                            Color.white.opacity(0.28),
-                                            Color(red: 1.0, green: 0.45, blue: 0.5).opacity(0.35),
-                                            Color.white.opacity(0.08),
-                                        ]
-                                        : [
-                                            Color.white.opacity(0.42),
-                                            Color(red: 0.55, green: 0.85, blue: 1.0).opacity(0.45),
-                                            Color.white.opacity(0.12),
-                                        ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 0.85
-                            )
+                            .strokeBorder(Color.white.opacity(0.45), lineWidth: 1)
                     )
-                    .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
+                    .shadow(color: GameTheme.accentDeep.opacity(isPlaying ? 0.22 : 0.38), radius: 10, y: 4)
 
                 HStack(spacing: 6) {
-                    Image(systemName: isPlaying ? "stop.fill" : "bolt.fill")
+                    Image(systemName: isPlaying ? "stop.fill" : "play.fill")
                         .font(.system(size: isPlaying ? 9 : 11, weight: .bold))
-                        .foregroundStyle(
-                            isPlaying
-                                ? Color(red: 1.0, green: 0.55, blue: 0.58)
-                                : Color(red: 0.7, green: 0.92, blue: 1.0)
-                        )
+                        .foregroundStyle(.white)
                     Text(isPlaying ? "结束" : "开始游戏")
                         .font(.system(size: isPlaying ? 12 : 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.92))
+                        .foregroundStyle(.white)
                 }
             }
-            .frame(width: isPlaying ? 84 : 132, height: isPlaying ? 32 : 38)
+            .frame(width: isPlaying ? 88 : 140, height: isPlaying ? 34 : 40)
             .compositingGroup()
         }
         .buttonStyle(.plain)
@@ -648,23 +820,24 @@ struct DisguiseGalleryView: View {
         NavigationStack {
             Form {
                 Section {
+                    Toggle("游戏音效", isOn: $soundOn)
                     Toggle("破碎震感", isOn: $hapticsOn)
                 } header: {
                     Text("手感")
                 }
 
                 Section {
-                    LabeledContent("飞船等级", value: "Lv.\(shipLevel)")
+                    LabeledContent("护果机等级", value: "Lv.\(shipLevel)")
                     LabeledContent("升级经验", value: "\(shipXP)/\(xpToAdvance(from: shipLevel))")
-                    LabeledContent("本局阶段", value: "第 \(waveStage + 1) 波")
-                    LabeledContent("防线", value: "\(lives)/\(maxLives)")
+                    LabeledContent("本局波次", value: "第 \(waveStage + 1) 波")
+                    LabeledContent("生命", value: "\(lives)/\(maxLives)")
                     LabeledContent("本局分数", value: "\(score)")
                     LabeledContent("累计击破", value: "\(brokenTotal)")
                     LabeledContent("历史最高", value: "\(highScore)")
                 } header: {
                     Text("战绩")
                 } footer: {
-                    Text("等级靠经验慢慢涨，无上限。漏掉水果会掉防线；防线归零本局结束。新种类会随击破逐步出现。")
+                    Text("升级靠经验慢慢涨。漏掉水果会扣生命，生命归零本局结束。新水果种类会随波次逐步出现。")
                 }
 
                 Section {
@@ -673,7 +846,7 @@ struct DisguiseGalleryView: View {
                         shipXP = 0
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                     } label: {
-                        Label("重置飞船等级为 0", systemImage: "arrow.counterclockwise.circle")
+                        Label("重置护果机等级", systemImage: "arrow.counterclockwise.circle")
                     }
                     Button {
                         score = 0
@@ -699,7 +872,7 @@ struct DisguiseGalleryView: View {
                     Text("重置")
                 }
             }
-            .navigationTitle("游戏设置")
+            .navigationTitle("水果保卫战")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -712,6 +885,10 @@ struct DisguiseGalleryView: View {
     }
 
     // MARK: - Loops
+
+    private func playSFX(_ event: GameSFX.Event) {
+        GameSFX.shared.play(event, enabled: soundOn)
+    }
 
     private func startMotionLoop() {
         motionTask?.cancel()
@@ -827,8 +1004,11 @@ struct DisguiseGalleryView: View {
                 if bubbles[bIdx].hp <= 0 {
                     let dead = bubbles.remove(at: bIdx)
                     destroyOrb(dead, fromShot: true)
-                } else if isPlaying, hapticsOn {
-                    UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.4)
+                } else if isPlaying {
+                    playSFX(.hit)
+                    if hapticsOn {
+                        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.4)
+                    }
                 }
             }
         }
@@ -867,7 +1047,8 @@ struct DisguiseGalleryView: View {
         for _ in 0..<4 {
             spawnBubble(animated: true, prefer: .normal)
         }
-        spawnFloatText("防守开始", at: CGPoint(x: playSize.width * 0.5, y: shipY - 80), color: .white, size: 15)
+        spawnFloatText("果园开战", at: CGPoint(x: playSize.width * 0.5, y: shipY - 80), color: GameTheme.accentDeep, size: 15)
+        playSFX(.start)
 
         spawnTask = Task { @MainActor in
             while !Task.isCancelled {
@@ -959,7 +1140,8 @@ struct DisguiseGalleryView: View {
         combo = 0
         score = max(0, score - 8)
         fireJammedUntil = Date().addingTimeInterval(0.32)
-        spawnFloatText("漏防 −1", at: CGPoint(x: shipX, y: shipY - 56), color: Color(red: 1.0, green: 0.45, blue: 0.45), size: 14)
+        spawnFloatText("漏果 −1", at: CGPoint(x: shipX, y: shipY - 56), color: Color(red: 0.98, green: 0.35, blue: 0.42), size: 14)
+        playSFX(.leak)
         withAnimation(.easeOut(duration: 0.08)) { leakFlash = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             withAnimation(.easeOut(duration: 0.25)) { leakFlash = false }
@@ -973,7 +1155,8 @@ struct DisguiseGalleryView: View {
     }
 
     private func defenseFailed() {
-        spawnFloatText("防线失守", at: CGPoint(x: playSize.width * 0.5, y: playSize.height * 0.42), color: Color(red: 1.0, green: 0.4, blue: 0.45), size: 20)
+        spawnFloatText("果园失守", at: CGPoint(x: playSize.width * 0.5, y: playSize.height * 0.42), color: Color(red: 0.98, green: 0.35, blue: 0.42), size: 20)
+        playSFX(.gameOver)
         if hapticsOn {
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
@@ -1002,16 +1185,24 @@ struct DisguiseGalleryView: View {
     }
 
     private func seedStars(in size: CGSize) {
-        stars = (0..<16).map { _ in
+        let sparkles: [Color] = [
+            .white,
+            GameTheme.beamHot,
+            GameTheme.accent,
+            GameTheme.beam,
+            Color(red: 1.0, green: 0.92, blue: 0.72),
+        ]
+        stars = (0..<18).map { _ in
             StarDust(
                 id: UUID(),
                 position: CGPoint(
                     x: CGFloat.random(in: 0...size.width),
                     y: CGFloat.random(in: 0...size.height)
                 ),
-                size: CGFloat.random(in: 1.2...2.6),
-                opacity: Double.random(in: 0.28...0.7),
-                speed: CGFloat.random(in: 22...70)
+                size: CGFloat.random(in: 1.4...3.2),
+                opacity: Double.random(in: 0.22...0.62),
+                speed: CGFloat.random(in: 18...52),
+                tint: sparkles.randomElement() ?? .white
             )
         }
     }
@@ -1161,12 +1352,12 @@ struct DisguiseGalleryView: View {
                     vx: vx,
                     damage: shotDmg,
                     glow: hot
-                        ? Color(red: 1.0, green: 0.85, blue: 0.3).opacity(0.9)
-                        : Color(red: 0.3, green: 0.8, blue: 1.0).opacity(0.85),
+                        ? GameTheme.beamHot.opacity(0.9)
+                        : GameTheme.beam.opacity(0.88),
                     gradient: LinearGradient(
                         colors: hot
-                            ? [Color.white, Color(red: 1.0, green: 0.85, blue: 0.35), Color.orange.opacity(0.2)]
-                            : [Color.white, Color(red: 0.35, green: 0.85, blue: 1.0), Color.blue.opacity(0.15)],
+                            ? [Color.white, GameTheme.beamHot, GameTheme.accent.opacity(0.35)]
+                            : [Color.white, GameTheme.beam, GameTheme.shipWing.opacity(0.35)],
                         startPoint: .bottom,
                         endPoint: .top
                     )
@@ -1176,6 +1367,7 @@ struct DisguiseGalleryView: View {
         if shots.count > 18 {
             shots.removeFirst(shots.count - 18)
         }
+        playSFX(.shoot)
     }
 
     private func destroyOrb(_ bubble: GameBubble, fromShot: Bool) {
@@ -1183,6 +1375,7 @@ struct DisguiseGalleryView: View {
         emitRipple(from: bubble)
 
         guard isPlaying else {
+            playSFX(.pop)
             if hapticsOn {
                 UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.5)
             }
@@ -1191,9 +1384,12 @@ struct DisguiseGalleryView: View {
         }
         guard fromShot else { return }
 
+        let heavy = bubble.kind == .titan || bubble.kind == .elite
+        playSFX(heavy ? .bigPop : .pop)
+
         brokenTotal += 1
         UserDefaults.standard.set(brokenTotal, forKey: Keys.broken)
-        shatterHaptic(heavy: bubble.kind == .titan || bubble.kind == .elite)
+        shatterHaptic(heavy: heavy)
         combo += 1
         killsThisRun += 1
 
@@ -1254,6 +1450,7 @@ struct DisguiseGalleryView: View {
             }
         }()
         spawnFloatText(tip, at: CGPoint(x: playSize.width * 0.5, y: playSize.height * 0.28), color: Color(red: 1.0, green: 0.9, blue: 0.5), size: 15)
+        playSFX(.wave)
         if hapticsOn {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.8)
         }
@@ -1268,6 +1465,7 @@ struct DisguiseGalleryView: View {
         }
         guard leveled else { return }
         spawnFloatText("升级 Lv.\(shipLevel)", at: CGPoint(x: shipX, y: shipY - 50), color: Color(red: 1.0, green: 0.85, blue: 0.35), size: 14)
+        playSFX(.levelUp)
         withAnimation(.easeOut(duration: 0.12)) { levelFlash = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             withAnimation { levelFlash = false }
@@ -1520,6 +1718,7 @@ private struct StarDust: Identifiable {
     let size: CGFloat
     let opacity: Double
     let speed: CGFloat
+    let tint: Color
 }
 
 private struct FloatText: Identifiable {

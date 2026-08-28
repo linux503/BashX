@@ -90,22 +90,60 @@ enum ClashConfigParser {
         // Prefer Asia hubs for TELEGRAM/GOOGLE url-test; cap so health checks finish.
         // iOS NE has a tight RAM budget: keep pools small or jetsam kills the tunnel.
         let urlTestLimit = forIOS ? 12 : 36
+        // iOS NE: no url-test health checks — periodic batch dials spike RAM and trigger jetsam.
+        let iosPickerLimit = 8
         let telegramProxies: [String] = {
             if names.isEmpty { return ["DIRECT"] }
+            if forIOS {
+                return Self.urlTestPool(from: names, selected: selected, limit: iosPickerLimit)
+            }
             return Self.urlTestPool(from: names, selected: selected, limit: urlTestLimit)
         }()
 
         let googleProxies: [String] = {
             if names.isEmpty { return ["DIRECT"] }
+            if forIOS {
+                return Self.urlTestPool(from: names, selected: selected, limit: iosPickerLimit)
+            }
             return Self.urlTestPool(from: names, selected: selected, limit: urlTestLimit)
         }()
 
         let autoProxies: [String] = {
             if names.isEmpty { return ["DIRECT"] }
             if forIOS {
-                return Self.urlTestPool(from: names, selected: selected, limit: 16)
+                return Self.urlTestPool(from: names, selected: selected, limit: iosPickerLimit)
             }
             return names
+        }()
+
+        let auxiliaryGroups: [[String: Any]] = {
+            if forIOS {
+                return [
+                    Self.iosSelectGroup(name: "AUTO", proxies: autoProxies),
+                    Self.iosSelectGroup(name: "GOOGLE", proxies: googleProxies),
+                ] + Self.telegramGroups(proxies: telegramProxies, forIOS: true)
+            }
+            return [
+                [
+                    "name": "AUTO",
+                    "type": "url-test",
+                    "proxies": autoProxies,
+                    "url": "https://www.gstatic.com/generate_204",
+                    "interval": turboMode ? 600 : 300,
+                    "tolerance": turboMode ? 80 : 50,
+                    "lazy": true
+                ],
+                [
+                    "name": "GOOGLE",
+                    "type": "url-test",
+                    "proxies": googleProxies,
+                    "url": GoogleReliability.probeURL,
+                    "interval": 180,
+                    "tolerance": 50,
+                    "lazy": false,
+                    "expected-status": "200/204"
+                ],
+            ] + Self.telegramGroups(proxies: telegramProxies, forIOS: false)
         }()
 
         let iosMixedPort = forIOS && !tunEnabled ? mixedPort : (forIOS ? 0 : mixedPort)
@@ -137,36 +175,12 @@ enum ClashConfigParser {
                     "type": "select",
                     "proxies": proxyGroupList
                 ],
-                // Explicit GLOBAL — mihomo global mode uses this group; without it the
-                // built-in GLOBAL often stays on DIRECT and 「全局」看起来像没生效。
                 [
                     "name": "GLOBAL",
                     "type": "select",
                     "proxies": proxyGroupList
                 ],
-                [
-                    "name": "AUTO",
-                    "type": "url-test",
-                    "proxies": autoProxies,
-                    "url": "https://www.gstatic.com/generate_204",
-                    "interval": forIOS ? 900 : (turboMode ? 600 : 300),
-                    "tolerance": turboMode ? 80 : 50,
-                    "lazy": true
-                ],
-                [
-                    "name": "GOOGLE",
-                    "type": "url-test",
-                    "proxies": googleProxies,
-                    "url": GoogleReliability.probeURL,
-                    "interval": forIOS ? 600 : 180,
-                    "tolerance": 50,
-                    "lazy": forIOS ? true : false,
-                    "expected-status": "200/204"
-                ],
-            ] + Self.telegramGroups(
-                proxies: telegramProxies,
-                forIOS: forIOS
-            ),
+            ] + auxiliaryGroups,
             "rules": finalRules
         ]
 
@@ -201,8 +215,7 @@ enum ClashConfigParser {
         } else {
             root["find-process-mode"] = "off"
             root["tcp-concurrent"] = true
-            // Light sniffer: map IP→domain for rule match; never override destination (breaks WeChat).
-            root["sniffer"] = iosSnifferBlock
+            // Sniffer off on iOS NE — TLS/DNS sniffing adds CPU/RAM under real traffic.
         }
 
         if tunEnabled {
@@ -264,20 +277,28 @@ enum ClashConfigParser {
         ]
     ]
 
+    /// iOS NE: manual select only — url-test batch health checks exhaust the ~50MB jetsam budget.
+    private static func iosSelectGroup(name: String, proxies: [String]) -> [String: Any] {
+        let list = proxies.isEmpty ? ["DIRECT"] : proxies
+        return ["name": name, "type": "select", "proxies": list]
+    }
+
     /// Clash Verge style: Mac uses select(TELEGRAM) → url-test(TELEGRAM-AUTO);
-    /// iOS keeps a single url-test named TELEGRAM (NE has no menu pin).
+    /// iOS uses select(TELEGRAM) only (no background url-test).
     private static func telegramGroups(proxies: [String], forIOS: Bool) -> [[String: Any]] {
+        if forIOS {
+            return [iosSelectGroup(name: "TELEGRAM", proxies: proxies)]
+        }
         let auto: [String: Any] = [
-            "name": forIOS ? "TELEGRAM" : "TELEGRAM-AUTO",
+            "name": "TELEGRAM-AUTO",
             "type": "url-test",
             "proxies": proxies,
             "url": "https://api.telegram.org",
-            "interval": forIOS ? 600 : 60,
+            "interval": 60,
             "tolerance": 80,
-            "lazy": forIOS ? true : false,
+            "lazy": false,
             "expected-status": "200/301/302/404"
         ]
-        if forIOS { return [auto] }
         let selectMembers = ["TELEGRAM-AUTO"] + proxies.filter { $0 != "DIRECT" }
         return [
             auto,

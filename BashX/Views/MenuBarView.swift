@@ -345,6 +345,7 @@ private struct MenuBarSnapshot: Equatable {
     var menuNodeLimit: Int
     var totalNodeCount: Int
     var selectedNodeName: String?
+    var runtimeOutboundName: String?
     var launchAtLoginEnabled: Bool
     var showMenuBarTraffic: Bool
     var autoSpeedTestEnabled: Bool
@@ -372,6 +373,7 @@ private struct MenuBarSnapshot: Equatable {
         menuNodeLimit: 10,
         totalNodeCount: 0,
         selectedNodeName: nil,
+        runtimeOutboundName: nil,
         launchAtLoginEnabled: false,
         showMenuBarTraffic: false,
         autoSpeedTestEnabled: false,
@@ -394,6 +396,9 @@ private struct MenuBarSnapshot: Equatable {
             return L10n.t("mac.menu.subsEnabled", lang).replacingOccurrences(of: "%@", with: "\(enabledCount)")
         }()
         let hint: String = {
+            if let runtime = state.runtimeOutboundName, !runtime.isEmpty {
+                return " · \(shortName(runtime, 10))"
+            }
             guard let name = state.settings.selectedNodeName else { return "" }
             return " · \(shortName(name, 10))"
         }()
@@ -416,6 +421,7 @@ private struct MenuBarSnapshot: Equatable {
             menuNodeLimit: min(500, max(5, state.settings.menuNodeLimit)),
             totalNodeCount: state.nodes.count,
             selectedNodeName: state.settings.selectedNodeName,
+            runtimeOutboundName: state.runtimeOutboundName,
             launchAtLoginEnabled: state.settings.launchAtLoginEnabled,
             showMenuBarTraffic: state.settings.showMenuBarTraffic,
             autoSpeedTestEnabled: state.settings.autoSpeedTestEnabled,

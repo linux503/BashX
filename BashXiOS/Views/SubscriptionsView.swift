@@ -4,6 +4,8 @@ import UIKit
 struct SubscriptionsView: View {
     @EnvironmentObject private var state: IOSAppState
     @State private var showAdd = false
+    @State private var showScan = false
+    @State private var pendingScanURL: String?
     @State private var name = ""
     @State private var url = ""
     @State private var qrShareSub: Subscription?
@@ -15,12 +17,22 @@ struct SubscriptionsView: View {
         NavigationStack {
             Group {
                 if state.settings.subscriptions.isEmpty {
-                    IOSEmptyState(
-                        systemImage: "tray.full",
-                        title: t("subs.empty.title"),
-                        message: t("subs.empty.msg"),
-                        actionTitle: t("subs.add")
-                    ) { showAdd = true }
+                    VStack(spacing: 0) {
+                        IOSEmptyState(
+                            systemImage: "tray.full",
+                            title: t("subs.empty.title"),
+                            message: t("subs.empty.msg"),
+                            actionTitle: t("subs.add")
+                        ) { showAdd = true }
+                        Button {
+                            showScan = true
+                        } label: {
+                            Label(t("subs.scan"), systemImage: "qrcode.viewfinder")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .padding(.top, -36)
+                        .padding(.bottom, 40)
+                    }
                 } else {
                     List {
                         Section {
@@ -53,13 +65,36 @@ struct SubscriptionsView: View {
                         .disabled(state.settings.subscriptions.isEmpty)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAdd = true } label: {
+                    Menu {
+                        Button {
+                            showAdd = true
+                        } label: {
+                            Label(t("subs.addManual"), systemImage: "link")
+                        }
+                        Button {
+                            showScan = true
+                        } label: {
+                            Label(t("subs.scan"), systemImage: "qrcode.viewfinder")
+                        }
+                    } label: {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel(t("subs.add"))
                 }
             }
             .sheet(isPresented: $showAdd) { addSheet }
+            .sheet(isPresented: $showScan, onDismiss: {
+                if let scanned = pendingScanURL {
+                    url = scanned
+                    pendingScanURL = nil
+                    showAdd = true
+                }
+            }) {
+                SubscriptionQRScannerSheet { scanned in
+                    pendingScanURL = scanned
+                }
+                .environmentObject(state)
+            }
             .sheet(item: $qrShareSub) { sub in
                 SubscriptionQRShareSheet(name: sub.name, url: sub.url)
             }
@@ -160,6 +195,24 @@ struct SubscriptionsView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(state.isBusy)
+
+            HStack(spacing: 10) {
+                Button {
+                    qrShareSub = sub
+                } label: {
+                    Label(t("subs.qrShare"), systemImage: "qrcode")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                ShareLink(item: sub.url) {
+                    Label(t("subs.shareLink"), systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
         .padding(.vertical, 4)
         .contextMenu {
@@ -194,10 +247,18 @@ struct SubscriptionsView: View {
                 }
                 Section {
                     Button {
+                        showAdd = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showScan = true
+                        }
+                    } label: {
+                        Label(t("subs.scan"), systemImage: "qrcode.viewfinder")
+                    }
+                    Button {
                         if let clip = UIPasteboard.general.string?
                             .trimmingCharacters(in: .whitespacesAndNewlines),
-                           clip.lowercased().hasPrefix("http") {
-                            url = clip
+                           let parsed = SubscriptionURLParser.extract(from: clip) {
+                            url = parsed
                         }
                     } label: {
                         Label(t("subs.paste"), systemImage: "doc.on.clipboard")
