@@ -312,6 +312,7 @@ final class AppState: ObservableObject {
         // App launch always hosts mihomo — ignore prior manual stop from last session.
         userStoppedCore = false
         runtimeTunInConfig = false
+        Paths.trimSupportLogs()
 
         // Always rebuild from every enabled subscription cache before writing config / starting core.
         // (Avoids "only ~15 nodes" from lastSubscriptionURL overwriting the merged pool.)
@@ -549,10 +550,11 @@ final class AppState: ObservableObject {
         guard await coreIsHealthy() else { return }
         if await CoreHealth.telegramReachable(port: port) { return }
 
-        let cooldown: TimeInterval = 45
+        let cooldown: TimeInterval = 60
         guard Date().timeIntervalSince(lastTelegramNodeProbe) >= cooldown else { return }
         lastTelegramNodeProbe = Date()
-        await ensureUsableProxy(forceProbe: true, verifyTelegram: true)
+        // Only retune TELEGRAM url-test — never selectNode / closeAllConnections (that kills MTProto).
+        await healTelegramGroupOnly()
     }
 
     private func ensureTelegramConnectivity(forceNodeProbe: Bool) async {
@@ -564,7 +566,7 @@ final class AppState: ObservableObject {
         let port = settings.mixedPort
         let telegramOK = await CoreHealth.telegramReachable(port: port)
         if forceNodeProbe || !telegramOK {
-            await ensureUsableProxy(forceProbe: true, verifyTelegram: true)
+            await healTelegramGroupOnly()
         }
     }
 
@@ -1406,7 +1408,7 @@ final class AppState: ObservableObject {
     func setShowMenuBarTraffic(_ enabled: Bool) {
         settings.showMenuBarTraffic = enabled
         persist()
-        objectWillChange.send()
+        bumpChromeRevision()
         statusText = enabled ? "菜单栏显示网速" : "菜单栏隐藏网速"
     }
 
@@ -1689,30 +1691,9 @@ final class AppState: ObservableObject {
         persist()
         let ranked = results.filter { $0.delayMs > 0 }.sorted { $0.delayMs < $1.delayMs }
         if verifyTelegram {
-            // Retest TELEGRAM url-test group against api.telegram.org first.
-            _ = await ClashCore.retestProxyGroup(
-                controller: settings.externalController,
-                secret: settings.secret,
-                group: "TELEGRAM",
-                url: TelegramReliability.probeURL,
-                timeoutMs: 5000
-            )
-            if await CoreHealth.telegramReachable(port: settings.mixedPort) {
-                statusText = "Telegram 线路已优化"
-                return
-            }
-            for candidate in ranked.prefix(6) {
-                try? await ClashCore.selectProxy(
-                    controller: settings.externalController,
-                    secret: settings.secret,
-                    group: "TELEGRAM",
-                    name: candidate.name
-                )
-                if await CoreHealth.telegramReachable(port: settings.mixedPort) {
-                    statusText = "已自动选择（Telegram 可用）：\(candidate.name)（\(candidate.delayMs) ms）"
-                    return
-                }
-            }
+            // Retest TELEGRAM url-test only — never fall through to selectNode (closes MTProto).
+            await healTelegramGroupOnly()
+            if !verifyGoogle { return }
         }
         if verifyGoogle {
             _ = await ClashCore.retestProxyGroup(
@@ -2032,18 +2013,72 @@ final class AppState: ObservableObject {
         bumpChromeRevision()
     }
 
-    /// Keep PROXY + GLOBAL + TELEGRAM/GOOGLE on the same outbound when possible.
-    /// Telegram traffic uses the TELEGRAM url-test group — syncing stops the common
-    /// “PROXY looks fine but Telegram keeps spinning on another dead hub” case.
+    /// Keep PROXY + GLOBAL selectors on the selected leaf.
+    /// Never pin TELEGRAM / GOOGLE — they are url-test groups and must pick healthy
+    /// nodes independently (pinning them to PROXY is why Telegram spins while browsers work).
     func syncSelectedOutbound() async {
         let target = activeProxyTarget()
-        for group in ["PROXY", "GLOBAL", "TELEGRAM", "GOOGLE"] {
+        for group in ["PROXY", "GLOBAL"] {
             try? await ClashCore.selectProxy(
                 controller: settings.externalController,
                 secret: settings.secret,
                 group: group,
                 name: target
             )
+        }
+    }
+
+    /// Heal TELEGRAM path only — no PROXY switch, no closeAllConnections.
+    private func healTelegramGroupOnly() async {
+        guard coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) else { return }
+        // Prefer Verge-style nested AUTO; fall back to TELEGRAM itself.
+        let autoGroup = "TELEGRAM-AUTO"
+        _ = await ClashCore.retestProxyGroup(
+            controller: settings.externalController,
+            secret: settings.secret,
+            group: autoGroup,
+            url: TelegramReliability.probeURL,
+            timeoutMs: 8000
+        )
+        try? await ClashCore.selectProxy(
+            controller: settings.externalController,
+            secret: settings.secret,
+            group: "TELEGRAM",
+            name: autoGroup
+        )
+        if await CoreHealth.telegramReachable(port: settings.mixedPort) {
+            statusText = "Telegram 线路已优化"
+            return
+        }
+        let keywords = ["香港", "HK", "日本", "JP", "新加坡", "SG", "台湾", "TW", "美国", "US"]
+        var candidates: [ProxyNode] = []
+        var used = Set<String>()
+        for key in keywords {
+            for node in nodes where !used.contains(node.name)
+                && node.name.localizedCaseInsensitiveContains(key)
+                && (node.delayMs ?? -1) > 0 {
+                used.insert(node.name)
+                candidates.append(node)
+                if candidates.count >= 8 { break }
+            }
+            if candidates.count >= 8 { break }
+        }
+        if candidates.isEmpty {
+            candidates = nodes.filter { ($0.delayMs ?? -1) > 0 }.sorted(by: delaySort).prefix(8).map { $0 }
+        } else {
+            candidates.sort(by: delaySort)
+        }
+        for candidate in candidates.prefix(6) {
+            try? await ClashCore.selectProxy(
+                controller: settings.externalController,
+                secret: settings.secret,
+                group: "TELEGRAM",
+                name: candidate.name
+            )
+            if await CoreHealth.telegramReachable(port: settings.mixedPort) {
+                statusText = "Telegram 已切：\(candidate.name)（\(candidate.delayMs ?? 0) ms）"
+                return
+            }
         }
     }
 
@@ -2563,10 +2598,19 @@ final class AppState: ObservableObject {
 
             var attempt = 0
             var lastFailDetail = ""
-            let wantTUN = settings.tunEnabled && requestElevatedCoreStart
+            // Clash Verge style: if user wants TUN and helper is ready, always elevate + write tun.
+            // Bug was: requestElevatedCoreStart only set on toggle → restart dropped TUN from yaml
+            // while UI still showed TUN on → Telegram MTProto UDP bypassed SOCKS and spun forever.
+            if settings.tunEnabled, TunPrivilege.isReady {
+                requestElevatedCoreStart = true
+                runtimeTunInConfig = true
+            }
+            let wantTUN = settings.tunEnabled && (requestElevatedCoreStart || TunPrivilege.isReady)
             var useRoot = wantTUN
             if settings.tunEnabled, !useRoot {
                 runtimeTunInConfig = false
+            } else if wantTUN {
+                runtimeTunInConfig = true
             }
             var didElevate = false
             while attempt < 3 {
@@ -2677,6 +2721,8 @@ final class AppState: ObservableObject {
                     if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
                         await ensureUsableProxy(forceProbe: true, verifyGoogle: true)
                     }
+                    // Kick TELEGRAM url-test so Desktop doesn't sit on a dead leaf after restart.
+                    Task { await self.healTelegramGroupOnly() }
                     scheduleOutboundIPRefresh()
                     await applyDefaultSystemProxyIfEnabled()
                     return

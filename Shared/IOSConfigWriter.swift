@@ -32,7 +32,6 @@ enum IOSConfigWriter {
         let patched = tunnelCapture ? patchForPacketTunnel(yaml) : patchForProxyOnly(yaml)
         do {
             try patched.write(to: Paths.mihomoConfigURL, atomically: true, encoding: .utf8)
-            try? patched.write(to: Paths.configURL, atomically: true, encoding: .utf8)
             UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
                 .set(tunnelCapture, forKey: AppConstants.iosTunnelCaptureKey)
             return true

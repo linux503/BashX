@@ -32,9 +32,14 @@ DOMAIN-SUFFIX,pool.ntp.org,DIRECT
 DOMAIN-SUFFIX,cn.pool.ntp.org,DIRECT
 
 # ========== Telegram（优先：进程 / DC IP / 域名 → TELEGRAM 组） ==========
+# Clash Verge: PROCESS + DC CIDR + DOMAIN → dedicated group; Desktop needs TUN for MTProto UDP
 PROCESS-NAME,Telegram,TELEGRAM
 PROCESS-NAME,org.telegram.desktop,TELEGRAM
 PROCESS-NAME,Telegram Desktop,TELEGRAM
+PROCESS-PATH,Telegram,TELEGRAM
+PROCESS-PATH,Telegra2,TELEGRAM
+PROCESS-PATH,*Telegram.app/Contents/MacOS/Telegram,TELEGRAM
+PROCESS-PATH,*Telegra2.app/Contents/MacOS/Telegram,TELEGRAM
 # Official DC / CDN IPv4 ranges (91.108.0.0/16 covers all published DC blocks)
 IP-CIDR,149.154.160.0/20,TELEGRAM,no-resolve
 IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve
@@ -239,8 +244,6 @@ DOMAIN-SUFFIX,xbox.com,PROXY
 DOMAIN-SUFFIX,nintendo.com,PROXY
 GEOSITE,category-public-tracker,REJECT
 GEOSITE,category-companies,PROXY
-GEOSITE,category-education-!cn,PROXY
-GEOSITE,category-ecommerce-!cn,PROXY
 
 # ========== GFW / 非中国 IP 段 ==========
 GEOSITE,gfw,PROXY

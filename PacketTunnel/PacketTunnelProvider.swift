@@ -9,6 +9,7 @@ import MihomoCore
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var proxyStarted = false
     private var gcTimer: DispatchSourceTimer?
+    private var gcTickCount = 0
     private var packetBridge: PacketFlowBridge?
     private var ownedTunFd: Int32 = -1
     private let log = OSLog(subsystem: "com.bashx.app.ios", category: "tunnel")
@@ -198,8 +199,33 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             close(ownedTunFd)
             ownedTunFd = -1
         }
-        writeLog("stopTunnel reason=\(reason.rawValue)")
+        let reasonText = Self.stopReasonLabel(reason)
+        writeLog("stopTunnel reason=\(reason.rawValue) (\(reasonText))")
+        TunnelDiagnostics.recordStop(reason: reason.rawValue, label: reasonText)
         completionHandler()
+    }
+
+    private static func stopReasonLabel(_ reason: NEProviderStopReason) -> String {
+        switch reason {
+        case .none: return "none"
+        case .userInitiated: return "user"
+        case .providerFailed: return "providerFailed"
+        case .noNetworkAvailable: return "noNetwork"
+        case .unrecoverableNetworkChange: return "networkChange"
+        case .providerDisabled: return "disabled"
+        case .authenticationCanceled: return "authCanceled"
+        case .configurationFailed: return "configFailed"
+        case .idleTimeout: return "idleTimeout"
+        case .configurationDisabled: return "configDisabled"
+        case .configurationRemoved: return "configRemoved"
+        case .superceded: return "superceded"
+        case .userLogout: return "logout"
+        case .userSwitch: return "userSwitch"
+        case .connectionFailed: return "connectionFailed"
+        case .sleep: return "sleep"
+        case .appUpdate: return "appUpdate"
+        @unknown default: return "unknown(\(reason.rawValue))"
+        }
     }
 
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
@@ -422,15 +448,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func startMemoryManagement() {
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + 3, repeating: 5)
+        timer.schedule(deadline: .now() + 12, repeating: 60)
         timer.setEventHandler { [weak self] in
             BridgeForceGC()
             guard let self else { return }
-            let core = "up=\(BridgeGetUploadTraffic()) down=\(BridgeGetDownloadTraffic())"
-            if let bridge = self.packetBridge {
-                self.writeLog(bridge.statsLine + " " + core)
-            } else {
-                self.writeLog("utun-direct " + core)
+            self.gcTickCount += 1
+            let core = "up=\(BridgeGetUploadTraffic()) down=\(BridgeGetDownloadTraffic()) running=\(BridgeIsRunning())"
+            // Disk log at most every ~5 min; os_log every tick is enough for debugging.
+            if self.gcTickCount.isMultiple(of: 5) {
+                if let bridge = self.packetBridge {
+                    self.writeLog(bridge.statsLine + " " + core)
+                } else {
+                    self.writeLog("proxy-only " + core)
+                }
+            }
+            if self.proxyStarted, !BridgeIsRunning() {
+                self.writeLog("mihomo stopped unexpectedly — cancelling tunnel")
+                TunnelDiagnostics.recordFailure("核心异常退出（可能内存不足）")
+                self.cancelTunnelWithError(
+                    NSError(domain: "BashX", code: -10, userInfo: [
+                        NSLocalizedDescriptionKey: "核心异常退出，请重连"
+                    ])
+                )
             }
         }
         timer.resume()
@@ -438,7 +477,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func selectSavedNodeWithRetry(_ override: String? = nil) {
-        let delays: [TimeInterval] = [0, 0.5, 1.2, 2.5]
+        let delays: [TimeInterval] = [0, 1.2]
         for delay in delays {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.selectSavedNode(override)
@@ -649,7 +688,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         defer { try? handle.close() }
         _ = try? handle.seekToEnd()
         try? handle.write(contentsOf: data)
-        try? handle.synchronize()
     }
 
     private static func logStamp() -> String {

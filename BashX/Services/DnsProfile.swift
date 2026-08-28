@@ -156,7 +156,7 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
                 "+.local",
                 "geosite:cn",
                 "geosite:private",
-            ] + telegramFakeIPFilters + googleFakeIPFilters + [
+            ] + googleFakeIPFilters + [
                 "localhost.ptlogin2.qq.com",
                 "+.stun.*.*",
                 "lens.l.google.com",

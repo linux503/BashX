@@ -66,7 +66,8 @@ struct WebsiteProbeStrip: View {
         .onChange(of: vpn.isConnected) { connected in
             guard connected else { return }
             Task {
-                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard vpn.isConnected else { return }
                 await runAll()
             }
         }

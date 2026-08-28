@@ -89,9 +89,11 @@ struct ProxyNode: Identifiable, Hashable, Codable {
         "\(server.lowercased()):\(port)|\(type.lowercased())"
     }
 
-    var delayText: String {
+    var delayText: String { delayText(lang: .current) }
+
+    func delayText(lang: AppLanguage) -> String {
         guard let delayMs else { return "—" }
-        if delayMs < 0 { return "超时" }
+        if delayMs < 0 { return L10n.t("probe.timeout", lang) }
         return "\(delayMs) ms"
     }
 

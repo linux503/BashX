@@ -97,4 +97,27 @@ enum Paths {
     static var mihomoConfigURL: URL {
         mihomoHomeDir.appendingPathComponent("config.yaml")
     }
+
+    /// Keep support files from growing without bound (core.log, tunnel.log).
+    static func trimLogIfNeeded(_ url: URL, maxBytes: Int = 2 * 1024 * 1024) {
+        guard maxBytes > 0,
+              let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? NSNumber,
+              size.intValue > maxBytes else { return }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        let keep = min(maxBytes, 512 * 1024)
+        try? handle.seek(toOffset: UInt64(max(0, size.intValue - keep)))
+        let tail = handle.readDataToEndOfFile()
+        try? Data().write(to: url)
+        if let out = try? FileHandle(forWritingTo: url) {
+            defer { try? out.close() }
+            out.write(tail)
+        }
+    }
+
+    static func trimSupportLogs() {
+        trimLogIfNeeded(supportDir.appendingPathComponent("core.log"))
+        trimLogIfNeeded(supportDir.appendingPathComponent("tunnel.log"), maxBytes: 1024 * 1024)
+    }
 }

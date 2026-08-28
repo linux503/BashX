@@ -87,16 +87,25 @@ enum ClashConfigParser {
             return list
         }()
 
-        // Prefer selected node first, then full pool — region-only lists often leave
-        // Telegram spinning on a dead hub while PROXY looks fine.
+        // Prefer Asia hubs for TELEGRAM/GOOGLE url-test; cap so health checks finish.
+        // iOS NE has a tight RAM budget: keep pools small or jetsam kills the tunnel.
+        let urlTestLimit = forIOS ? 12 : 36
         let telegramProxies: [String] = {
             if names.isEmpty { return ["DIRECT"] }
-            return Self.groupProxiesPreferringSelected(names: names, selected: selected)
+            return Self.urlTestPool(from: names, selected: selected, limit: urlTestLimit)
         }()
 
         let googleProxies: [String] = {
             if names.isEmpty { return ["DIRECT"] }
-            return Self.groupProxiesPreferringSelected(names: names, selected: selected)
+            return Self.urlTestPool(from: names, selected: selected, limit: urlTestLimit)
+        }()
+
+        let autoProxies: [String] = {
+            if names.isEmpty { return ["DIRECT"] }
+            if forIOS {
+                return Self.urlTestPool(from: names, selected: selected, limit: 16)
+            }
+            return names
         }()
 
         let iosMixedPort = forIOS && !tunEnabled ? mixedPort : (forIOS ? 0 : mixedPort)
@@ -112,7 +121,7 @@ enum ClashConfigParser {
             "allow-lan": allowLan,
             "bind-address": bindAddress,
             "mode": mode.rawValue,
-            "log-level": forIOS ? "info" : "warning",
+            "log-level": forIOS ? "warning" : "warning",
             "external-controller": controller,
             "secret": secret,
             "ipv6": false,
@@ -138,33 +147,26 @@ enum ClashConfigParser {
                 [
                     "name": "AUTO",
                     "type": "url-test",
-                    "proxies": names.isEmpty ? ["DIRECT"] : names,
+                    "proxies": autoProxies,
                     "url": "https://www.gstatic.com/generate_204",
-                    "interval": turboMode ? 600 : 300,
+                    "interval": forIOS ? 900 : (turboMode ? 600 : 300),
                     "tolerance": turboMode ? 80 : 50,
-                    "lazy": turboMode
+                    "lazy": true
                 ],
                 [
                     "name": "GOOGLE",
                     "type": "url-test",
                     "proxies": googleProxies,
                     "url": GoogleReliability.probeURL,
-                    "interval": 180,
+                    "interval": forIOS ? 600 : 180,
                     "tolerance": 50,
-                    "lazy": false,
+                    "lazy": forIOS ? true : false,
                     "expected-status": "200/204"
                 ],
-                [
-                    "name": "TELEGRAM",
-                    "type": "url-test",
-                    "proxies": telegramProxies,
-                    "url": "https://api.telegram.org",
-                    "interval": 120,
-                    "tolerance": 50,
-                    "lazy": false,
-                    "expected-status": "200/301/302/404"
-                ]
-            ],
+            ] + Self.telegramGroups(
+                proxies: telegramProxies,
+                forIOS: forIOS
+            ),
             "rules": finalRules
         ]
 
@@ -191,8 +193,8 @@ enum ClashConfigParser {
         if !forIOS {
             root["tcp-concurrent"] = true
             root["keep-alive-interval"] = 15
-            // Always match process names so Telegram.app hits TELEGRAM even without TUN.
-            root["find-process-mode"] = "strict"
+            // `always` so PROCESS-NAME,Telegram matches under system proxy (strict often skips).
+            root["find-process-mode"] = "always"
             if domainSniffing {
                 root["sniffer"] = snifferBlock
             }
@@ -262,6 +264,31 @@ enum ClashConfigParser {
         ]
     ]
 
+    /// Clash Verge style: Mac uses select(TELEGRAM) → url-test(TELEGRAM-AUTO);
+    /// iOS keeps a single url-test named TELEGRAM (NE has no menu pin).
+    private static func telegramGroups(proxies: [String], forIOS: Bool) -> [[String: Any]] {
+        let auto: [String: Any] = [
+            "name": forIOS ? "TELEGRAM" : "TELEGRAM-AUTO",
+            "type": "url-test",
+            "proxies": proxies,
+            "url": "https://api.telegram.org",
+            "interval": forIOS ? 600 : 60,
+            "tolerance": 80,
+            "lazy": forIOS ? true : false,
+            "expected-status": "200/301/302/404"
+        ]
+        if forIOS { return [auto] }
+        let selectMembers = ["TELEGRAM-AUTO"] + proxies.filter { $0 != "DIRECT" }
+        return [
+            auto,
+            [
+                "name": "TELEGRAM",
+                "type": "select",
+                "proxies": selectMembers.isEmpty ? ["TELEGRAM-AUTO", "DIRECT"] : selectMembers
+            ]
+        ]
+    }
+
     /// Prefer low-latency hubs for url-test groups (Telegram / Google / AUTO fallback).
     static func preferredRegionNodes(from names: [String]) -> [String] {
         let keys = [
@@ -289,6 +316,24 @@ enum ClashConfigParser {
         var list = names.filter { $0 != selected }
         list.insert(selected, at: 0)
         return list
+    }
+
+    /// Compact url-test pool: Asia hubs first, capped so TELEGRAM health checks finish quickly.
+    static func urlTestPool(from names: [String], selected: String?, limit: Int) -> [String] {
+        let preferred = preferredRegionNodes(from: names)
+        let pool = preferred.isEmpty ? names : preferred
+        let priorityKeys = ["香港", "HK", "Hong Kong", "新加坡", "SG", "Singapore", "日本", "JP", "Japan", "台湾", "TW", "Taiwan"]
+        var top = pool.filter { name in
+            priorityKeys.contains { name.localizedCaseInsensitiveContains($0) }
+        }
+        if top.count < 8 { top = pool }
+        var limited = Array(top.prefix(max(8, limit)))
+        if let selected, pool.contains(selected) {
+            limited.removeAll { $0 == selected }
+            limited.insert(selected, at: 0)
+            if limited.count > limit { limited = Array(limited.prefix(limit)) }
+        }
+        return limited.isEmpty ? names : limited
     }
 
     /// Route Google / YouTube traffic through GOOGLE url-test (not dead AUTO nodes).
@@ -379,6 +424,8 @@ enum ClashConfigParser {
             let inject = [
                 "PROCESS-NAME,Telegram,TELEGRAM",
                 "PROCESS-NAME,org.telegram.desktop,TELEGRAM",
+                "PROCESS-PATH,*Telegra2.app/Contents/MacOS/Telegram,TELEGRAM",
+                "PROCESS-PATH,*Telegram.app/Contents/MacOS/Telegram,TELEGRAM",
                 "IP-CIDR,149.154.160.0/20,TELEGRAM,no-resolve",
                 "IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve",
                 "IP-CIDR,91.105.192.0/23,TELEGRAM,no-resolve",

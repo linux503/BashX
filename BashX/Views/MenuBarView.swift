@@ -35,6 +35,8 @@ private struct MenuBarFrozenContent: View, Equatable {
         lhs.snap == rhs.snap
     }
 
+    private func t(_ key: String) -> String { L10n.t(key, snap.lang) }
+
     var body: some View {
         Text(snap.status)
             .foregroundStyle(.secondary)
@@ -44,14 +46,14 @@ private struct MenuBarFrozenContent: View, Equatable {
 
         Divider()
 
-        Button("打开面板") {
+        Button(t("mac.menu.openPanel")) {
             PanelPresenter.shared.open(state: state)
         }
         .keyboardShortcut("o")
 
         Divider()
 
-        Menu("代理模式：\(snap.proxyModeTitle)") {
+        Menu(t("mac.menu.proxyMode").replacingOccurrences(of: "%@", with: snap.proxyModeTitle)) {
             ForEach(ProxyMode.allCases) { mode in
                 Button {
                     Task {
@@ -59,7 +61,7 @@ private struct MenuBarFrozenContent: View, Equatable {
                         snap = MenuBarSnapshot.capture(from: state)
                     }
                 } label: {
-                    menuCheckRow(mode.title, on: snap.proxyMode == mode)
+                    menuCheckRow(mode.title(lang: snap.lang), on: snap.proxyMode == mode)
                 }
             }
         }
@@ -74,7 +76,7 @@ private struct MenuBarFrozenContent: View, Equatable {
             get: { snap.systemProxyOn },
             set: { v in Task { await state.setSystemProxy(v) } }
         )) {
-            Text("系统代理")
+            Text(t("mac.menu.systemProxy"))
         }
 
         Toggle(isOn: Binding(
@@ -84,14 +86,14 @@ private struct MenuBarFrozenContent: View, Equatable {
                 snap = MenuBarSnapshot.capture(from: state)
             }
         )) {
-            Text("切节点关闭连接")
+            Text(t("mac.menu.closeOnSwitch"))
         }
 
         Toggle(isOn: Binding(
             get: { snap.launchAtLoginEnabled },
             set: { state.setLaunchAtLogin($0) }
         )) {
-            Text("开机自动启动")
+            Text(t("mac.menu.launchAtLogin"))
         }
 
         Toggle(isOn: Binding(
@@ -101,28 +103,28 @@ private struct MenuBarFrozenContent: View, Equatable {
                 snap = MenuBarSnapshot.capture(from: state)
             }
         )) {
-            Text("显示网速")
+            Text(t("mac.menu.showTraffic"))
         }
 
         Toggle(isOn: Binding(
             get: { snap.tunEnabled },
             set: { v in Task { await state.setTUN(v) } }
         )) {
-            Text("TUN 模式")
+            Text(t("mac.menu.tun"))
         }
 
         Toggle(isOn: Binding(
             get: { snap.videoAdBlockEnabled },
             set: { v in Task { await state.setVideoAdBlock(v) } }
         )) {
-            Text("去广告")
+            Text(t("mac.menu.adblock"))
         }
 
         Divider()
 
         subscriptionSection
 
-        Button(snap.isTesting ? "测速中…" : "一键测速") {
+        Button(snap.isTesting ? t("mac.menu.speedTesting") : t("mac.menu.speedTest")) {
             Task { await state.runSpeedTest() }
         }
         .disabled(snap.isTesting || snap.menuNodes.isEmpty)
@@ -133,14 +135,14 @@ private struct MenuBarFrozenContent: View, Equatable {
 
         Divider()
 
-        Button("复制终端代理环境变量") {
+        Button(t("mac.menu.copyEnv")) {
             state.copyExternalProxy(kind: .exportEnv)
         }
         .keyboardShortcut("c", modifiers: [.command, .option])
 
         Divider()
 
-        Button("退出 BashX") {
+        Button(t("mac.menu.quit")) {
             state.quitApp()
         }
         .keyboardShortcut("q")
@@ -166,7 +168,7 @@ private struct MenuBarFrozenContent: View, Equatable {
                         }
                     }
                     if group.all.count > 40 {
-                        Text("…共 \(group.all.count) 个")
+                        Text(t("mac.menu.groupMore").replacingOccurrences(of: "%@", with: "\(group.all.count)"))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -177,23 +179,27 @@ private struct MenuBarFrozenContent: View, Equatable {
     @ViewBuilder
     private var nodePickerSection: some View {
         if snap.menuNodes.isEmpty {
-            Text("暂无节点")
+            Text(t("mac.menu.noNodes"))
                 .foregroundStyle(.secondary)
         } else {
-            Menu("节点\(snap.selectedHint) · 最快\(snap.menuNodeLimit)") {
+            Menu(
+                t("mac.menu.nodes")
+                    .replacingOccurrences(of: "%1", with: snap.selectedHint)
+                    .replacingOccurrences(of: "%2", with: "\(snap.menuNodeLimit)")
+            ) {
                 ForEach(snap.menuNodes) { node in
                     Button {
                         Task { await state.selectNode(node.name) }
                     } label: {
                         menuCheckRow(
-                            "\(snap.shortName(node.name, 18))  \(node.delayText)",
+                            "\(snap.shortName(node.name, 18))  \(node.delayText(lang: snap.lang))",
                             on: node.name == snap.selectedNodeName
                         )
                     }
                 }
                 if snap.totalNodeCount > snap.menuNodes.count {
                     Divider()
-                    Button("全部节点…") {
+                    Button(t("mac.menu.allNodes")) {
                         PanelPresenter.shared.open(state: state)
                     }
                 }
@@ -205,7 +211,7 @@ private struct MenuBarFrozenContent: View, Equatable {
     private var subscriptionSection: some View {
         Menu(snap.subscriptionMenuTitle) {
             if snap.subscriptions.isEmpty {
-                Text("暂无订阅")
+                Text(t("mac.menu.subsNone"))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(snap.subscriptions) { sub in
@@ -219,19 +225,19 @@ private struct MenuBarFrozenContent: View, Equatable {
                 Divider()
             }
 
-            Button("添加订阅…") {
+            Button(t("mac.menu.addSub")) {
                 PanelPresenter.shared.open(state: state, intent: .addSubscription)
             }
-            Button("从剪贴板添加") {
+            Button(t("mac.menu.pasteSub")) {
                 addSubscriptionFromPasteboard()
             }
-            Button(snap.isBusy ? "更新中…" : "更新全部") {
+            Button(snap.isBusy ? t("mac.menu.updating") : t("mac.menu.updateAll")) {
                 Task { await state.updateAllSubscriptions() }
             }
             .disabled(snap.isBusy || snap.subscriptions.isEmpty)
 
             if !snap.subscriptions.isEmpty {
-                Button("管理订阅…") {
+                Button(t("mac.menu.manageSubs")) {
                     PanelPresenter.shared.open(state: state, intent: .subscriptions)
                 }
             }
@@ -240,12 +246,12 @@ private struct MenuBarFrozenContent: View, Equatable {
 
     @ViewBuilder
     private var settingsSection: some View {
-        Menu("设置") {
+        Menu(t("mac.menu.settings")) {
             Toggle(isOn: Binding(
                 get: { snap.autoSpeedTestEnabled },
                 set: { state.setAutoSpeedTestEnabled($0) }
             )) {
-                Text("自动测速")
+                Text(t("mac.menu.autoSpeed"))
             }
             .disabled(snap.menuNodes.isEmpty)
 
@@ -253,11 +259,11 @@ private struct MenuBarFrozenContent: View, Equatable {
                 get: { snap.autoSelectFastest },
                 set: { state.setAutoSelectFastest($0) }
             )) {
-                Text("跟最快节点")
+                Text(t("mac.menu.autoFastest"))
             }
             .disabled(snap.menuNodes.isEmpty)
 
-            Menu("Logo：\(snap.logoStyleTitle)") {
+            Menu(t("mac.menu.logo").replacingOccurrences(of: "%@", with: snap.logoStyleTitle)) {
                 ForEach(LogoStyle.allCases) { style in
                     Button {
                         state.setLogoStyle(style)
@@ -273,11 +279,11 @@ private struct MenuBarFrozenContent: View, Equatable {
 
             Divider()
 
-            Button("打开配置目录") {
+            Button(t("mac.menu.openConfig")) {
                 state.openConfigFolder()
             }
 
-            Button("更多设置…") {
+            Button(t("mac.menu.moreSettings")) {
                 SettingsOpener.open(state: state, fromMenuBar: true)
             }
             .keyboardShortcut(",")
@@ -288,7 +294,7 @@ private struct MenuBarFrozenContent: View, Equatable {
         let raw = NSPasteboard.general.string(forType: .string)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard raw.lowercased().hasPrefix("http://") || raw.lowercased().hasPrefix("https://") else {
-            state.statusText = "剪贴板没有订阅链接，已打开面板添加"
+            state.statusText = t("mac.menu.pasteNoUrl")
             PanelPresenter.shared.open(state: state, intent: .addSubscription)
             return
         }
@@ -323,6 +329,7 @@ private struct MenuProxyGroupSnapshot: Equatable, Identifiable {
 }
 
 private struct MenuBarSnapshot: Equatable {
+    var lang: AppLanguage
     var status: String
     var coreRunning: Bool
     var isBusy: Bool
@@ -349,6 +356,7 @@ private struct MenuBarSnapshot: Equatable {
     var proxyGroups: [MenuProxyGroupSnapshot]
 
     static let empty = MenuBarSnapshot(
+        lang: .system,
         status: "",
         coreRunning: false,
         isBusy: false,
@@ -370,31 +378,35 @@ private struct MenuBarSnapshot: Equatable {
         autoSelectFastest: false,
         logoStyle: .ring,
         logoStyleTitle: LogoStyle.ring.title,
-        subscriptionMenuTitle: "订阅",
+        subscriptionMenuTitle: "Subscriptions",
         selectedHint: "",
         proxyGroups: []
     )
 
     @MainActor
     static func capture(from state: AppState) -> MenuBarSnapshot {
+        let lang = state.settings.uiLanguage
         let subs = state.settings.subscriptions
         let enabledCount = subs.filter(\.enabled).count
         let subTitle: String = {
-            if subs.isEmpty { return "订阅" }
-            if enabledCount == 0 { return "订阅 · 未启用" }
-            return "订阅 · \(enabledCount) 个启用"
+            if subs.isEmpty { return L10n.t("mac.menu.subs", lang) }
+            if enabledCount == 0 { return L10n.t("mac.menu.subsDisabled", lang) }
+            return L10n.t("mac.menu.subsEnabled", lang).replacingOccurrences(of: "%@", with: "\(enabledCount)")
         }()
         let hint: String = {
             guard let name = state.settings.selectedNodeName else { return "" }
             return " · \(shortName(name, 10))"
         }()
         return MenuBarSnapshot(
-            status: state.coreRunning ? "内核运行中" : "内核未启动",
+            lang: lang,
+            status: state.coreRunning
+                ? L10n.t("mac.menu.coreRunning", lang)
+                : L10n.t("mac.menu.coreStopped", lang),
             coreRunning: state.coreRunning,
             isBusy: state.isBusy,
             isTesting: state.isTesting,
             proxyMode: state.settings.proxyMode,
-            proxyModeTitle: state.settings.proxyMode.title,
+            proxyModeTitle: state.settings.proxyMode.title(lang: lang),
             systemProxyOn: state.systemProxyOn,
             tunEnabled: state.settings.tunEnabled,
             videoAdBlockEnabled: state.settings.videoAdBlockEnabled,
@@ -447,7 +459,6 @@ private struct MenuBarRefreshHook: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            // Refresh snapshot once when the menu appears — not on every layout pass.
             if window != nil {
                 if !didPresent {
                     didPresent = true

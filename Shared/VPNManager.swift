@@ -33,12 +33,24 @@ final class VPNManager: ObservableObject {
         ) { [weak self] note in
             guard let conn = note.object as? NEVPNConnection else { return }
             Task { @MainActor in
+                let previous = self?.status
                 self?.status = conn.status
                 self?.updateConnectedSince(for: conn.status)
                 self?.syncTrafficPolling()
                 if conn.status == .connected || conn.status == .disconnected || conn.status == .invalid {
                     self?.connectWatchTask?.cancel()
                     self?.connectWatchTask = nil
+                }
+                // Unexpected drop after a successful connect — surface tunnel stop reason.
+                if previous == .connected,
+                   conn.status == .disconnected || conn.status == .invalid {
+                    if self?.lastError == nil,
+                       let hint = TunnelDiagnostics.lastFailureMessage(), !hint.isEmpty {
+                        self?.lastError = hint
+                    }
+                }
+                if conn.status == .connected {
+                    self?.lastError = nil
                 }
                 VPNQuickControl.reloadControlWidget()
             }
@@ -213,6 +225,7 @@ final class VPNManager: ObservableObject {
     private static func applyExclusiveProtocolOptions(_ proto: NETunnelProviderProtocol) {
         proto.serverAddress = "BashX"
         proto.providerBundleIdentifier = AppConstants.tunnelBundleIdentifier
+        proto.disconnectOnSleep = false
         // Do NOT set includeAllNetworks — it re-captures mihomo DIRECT/DoH dials into utun
         // (baidu DIAG jumped from ~50ms to 4.5s; core down≈0). Default IPv4 default-route is enough.
         if #available(iOS 14.2, *) {
@@ -403,7 +416,16 @@ final class VPNManager: ObservableObject {
         trafficTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshTraffic()
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let interval: UInt64 = {
+                    #if os(iOS)
+                    return UIApplication.shared.applicationState == .active
+                        ? 1_000_000_000
+                        : 3_000_000_000
+                    #else
+                    return 1_000_000_000
+                    #endif
+                }()
+                try? await Task.sleep(nanoseconds: interval)
             }
         }
     }

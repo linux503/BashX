@@ -163,7 +163,7 @@ final class PacketFlowBridge {
     }
 
     private func bumpSocketBuffers(_ fd: Int32) {
-        var size: Int32 = 2 * 1024 * 1024
+        var size: Int32 = 512 * 1024
         setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))
     }
@@ -178,7 +178,7 @@ enum TunnelSocketPair {
     static func make() -> Pair? {
         var fds: [Int32] = [0, 0]
         guard socketpair(AF_UNIX, SOCK_DGRAM, 0, &fds) == 0 else { return nil }
-        var size: Int32 = 2 * 1024 * 1024
+        var size: Int32 = 512 * 1024
         for fd in fds {
             setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size))
             setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size))

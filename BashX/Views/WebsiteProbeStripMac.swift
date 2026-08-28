@@ -11,14 +11,8 @@ struct WebsiteProbeStripMac: View {
     @State private var isRunning = false
     @State private var lastRun: Date?
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 6),
-        GridItem(.flexible(), spacing: 6),
-        GridItem(.flexible(), spacing: 6),
-    ]
-
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+        VStack(alignment: .leading, spacing: compact ? 4 : 6) {
             HStack(spacing: 8) {
                 if showTitle {
                     Text(L10n.t("probe.title", state.settings.uiLanguage))
@@ -34,13 +28,13 @@ struct WebsiteProbeStripMac: View {
                 testButton
             }
 
-            LazyVGrid(columns: columns, spacing: 6) {
+            HStack(spacing: 4) {
                 ForEach(WebsiteProbe.defaults) { target in
                     probeChip(target)
                 }
             }
         }
-        .padding(compact ? 8 : 10)
+        .padding(compact ? 6 : 8)
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
@@ -79,27 +73,29 @@ struct WebsiteProbeStripMac: View {
         return Button {
             Task { await runOne(target) }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 Image(systemName: target.systemImage)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(chipColor(status))
                 Text(target.localizedTitle)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.7)
                 Text(status.label)
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundStyle(chipColor(status))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .padding(.vertical, 5)
+            .padding(.horizontal, 2)
             .background {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(chipBackground(status))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
                             .strokeBorder(chipColor(status).opacity(status == .idle ? 0 : 0.3), lineWidth: 0.8)
                     )
             }

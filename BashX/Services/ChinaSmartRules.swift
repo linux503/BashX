@@ -2,7 +2,7 @@ import Foundation
 
 enum ChinaSmartRules {
     /// Bump when bundled rule set changes so existing installs auto-upgrade.
-    static let version = 16
+    static let version = 18
 
     /// Published rules list (also shipped at Resources/rules/bashx-smart-rules.txt).
     static let rules: [String] = loadBundledRules()
@@ -81,6 +81,11 @@ enum ChinaSmartRules {
         if !rules.contains(where: { $0.contains("translate-pa.googleapis.com") }) { return true }
         // v16: full Telegram DC block 91.108.0.0/16 (partial /22 lists miss DCs → spinning)
         if !rules.contains(where: { $0.contains("91.108.0.0/16") }) { return true }
+        // v17: drop GeoSite tags missing from MetaCubeX dat (core restart loop)
+        if rules.contains(where: { $0.contains("category-education-!cn") }) { return true }
+        if rules.contains(where: { $0.contains("category-ecommerce-!cn") }) { return true }
+        // v18: Telegra2.app PROCESS-PATH (masqueraded Telegram installs)
+        if !rules.contains(where: { $0.contains("Telegra2") }) { return true }
         return false
     }
 

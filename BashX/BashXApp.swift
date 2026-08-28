@@ -17,20 +17,25 @@ final class TrafficRoot {
     let menuRates = MenuBarRateStore()
     let chrome = MenuBarChrome()
     private var watchdog: Timer?
+    private var didAttach = false
 
     init() {
         monitor.menuBarRates = menuRates
     }
 
-    /// Late-bind state after AppHub creates both.
-    func attach(state: AppState) {
-        chrome.bind(rates: menuRates, state: state)
+    /// Idempotent — safe to call from launch, syncTraffic, and label onAppear.
+    func attachIfNeeded(state: AppState) {
+        if !didAttach {
+            didAttach = true
+            menuRates.onRatesUpdated = { [weak chrome] in chrome?.refresh(force: false) }
+            chrome.bind(rates: menuRates, state: state)
+        }
         chrome.refresh(force: true)
     }
 
     func startWatchdog(sync: @escaping () -> Void) {
         watchdog?.invalidate()
-        watchdog = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { _ in
+        watchdog = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { _ in
             Task { @MainActor in sync() }
         }
     }
@@ -53,9 +58,25 @@ final class MenuBarChrome: ObservableObject {
         self.rates = rates
         if let state { self.state = state }
         cancellables.removeAll()
-        rates.objectWillChange
+        Publishers.CombineLatest(rates.$menuDown, rates.$menuUp)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in self?.refresh(force: false) }
+            .store(in: &cancellables)
+        rates.$coreRunning
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.refresh(force: false) }
+            .store(in: &cancellables)
+        state?.$settings
+            .map(\.showMenuBarTraffic)
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh(force: true) }
+            .store(in: &cancellables)
+        state?.$settings
+            .map(\.logoStyle)
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refresh(force: true) }
             .store(in: &cancellables)
         state?.$chromeRevision
             .receive(on: RunLoop.main)
@@ -91,7 +112,7 @@ final class MenuBarChrome: ObservableObject {
         let down = rates.menuDown
         let up = rates.menuUp
         let alive = rates.coreRunning
-        let dimmed = show && !alive && down == "0.0K" && up == "0.0K"
+        let dimmed = show && !alive && isZeroRate(down) && isZeroRate(up)
         let key = "\(style.rawValue)|\(show)|\(down)|\(up)|\(dimmed)"
         guard force || key != lastKey else { return }
         lastKey = key
@@ -103,6 +124,10 @@ final class MenuBarChrome: ObservableObject {
             dimmed: dimmed
         )
         help = alive ? rates.help : "BashX · 未连接"
+    }
+
+    private func isZeroRate(_ rate: String) -> Bool {
+        rate == "0.0K" || rate == "0B" || rate == "0"
     }
 }
 
@@ -128,8 +153,8 @@ struct BashXApp: App {
             // SwiftUI template Image — NSImageView templates often render invisible in the menu bar.
             MenuBarStatusLabel(chrome: hub.trafficRoot.chrome)
                 .onAppear {
-                    hub.trafficRoot.attach(state: state)
-                    appDelegate.bind(state, syncTraffic: syncTraffic)
+                    hub.trafficRoot.attachIfNeeded(state: state)
+                    appDelegate.bind(state, trafficRoot: hub.trafficRoot, syncTraffic: syncTraffic)
                     state.refreshLaunchAtLogin()
                     syncTraffic()
                     hub.trafficRoot.startWatchdog(sync: syncTraffic)
@@ -147,6 +172,7 @@ struct BashXApp: App {
     }
 
     private func syncTraffic() {
+        hub.trafficRoot.attachIfNeeded(state: state)
         traffic.menuBarRates = menuRates
         traffic.configure(
             controller: state.settings.externalController,
@@ -201,7 +227,7 @@ private struct MenuBarExtraContent: View, Equatable {
             ))
             .onAppear {
                 chrome.setMenuOpen(true)
-                appDelegate.bind(state, syncTraffic: syncTraffic)
+                appDelegate.bind(state, trafficRoot: nil, syncTraffic: syncTraffic)
                 state.refreshLaunchAtLogin()
                 syncTraffic()
                 Task { _ = await state.ensureCoreRunning() }
@@ -350,11 +376,13 @@ enum MenuBarStatusImage {
                 .font: font,
                 .foregroundColor: color,
             ]
+            // Bitmap origin is bottom-left: higher Y = visually higher in the menu bar.
             let downLine = "↓\(sanitize(down))" as NSString
             let upLine = "↑\(sanitize(up))" as NSString
             let rateX = iconPt + gap
-            downLine.draw(at: NSPoint(x: rateX, y: heightPt / 2 + 0.5), withAttributes: attrs)
-            upLine.draw(at: NSPoint(x: rateX, y: 0.5), withAttributes: attrs)
+            let lineGap: CGFloat = 11
+            downLine.draw(at: NSPoint(x: rateX, y: heightPt - lineGap), withAttributes: attrs)
+            upLine.draw(at: NSPoint(x: rateX, y: heightPt - lineGap * 2), withAttributes: attrs)
         }
 
         let image = NSImage(size: NSSize(width: widthPt, height: heightPt))
@@ -392,12 +420,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Strong hold so quit cleanup always works (weak was often nil).
     private(set) var state: AppState?
     var traffic: TrafficMonitor?
+    private weak var trafficRoot: TrafficRoot?
     private var syncTraffic: (() -> Void)?
     private var didCleanup = false
     private var stateCancellables = Set<AnyCancellable>()
 
-    func bind(_ state: AppState, syncTraffic: (() -> Void)? = nil) {
+    func bind(_ state: AppState, trafficRoot: TrafficRoot? = nil, syncTraffic: (() -> Void)? = nil) {
         self.state = state
+        if let trafficRoot { self.trafficRoot = trafficRoot }
         if let syncTraffic {
             self.syncTraffic = syncTraffic
             stateCancellables.removeAll()
@@ -431,10 +461,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppActivation.applyPolicy()
         IconManager.applyAppIcon(style: state?.settings.logoStyle ?? .default)
         LogoRenderer.warmCache()
-        // Force a fresh status-item bitmap after the menu bar is up (avoids first-frame blank icon).
+        if let state {
+            trafficRoot?.attachIfNeeded(state: state)
+        }
+        // Force status-item redraw after menu bar is up (cold start often skips label onAppear).
         DispatchQueue.main.async { [weak self] in
-            self?.syncTraffic?()
+            guard let self, let state = self.state else { return }
+            self.trafficRoot?.attachIfNeeded(state: state)
+            self.syncTraffic?()
             NotificationCenter.default.post(name: .bashxMenuBarChromeNeedsRefresh, object: nil)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, let state = self.state else { return }
+            self.trafficRoot?.attachIfNeeded(state: state)
+            self.syncTraffic?()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+            guard let self, let state = self.state else { return }
+            self.trafficRoot?.attachIfNeeded(state: state)
+            self.syncTraffic?()
         }
     }
 

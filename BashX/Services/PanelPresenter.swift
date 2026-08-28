@@ -290,8 +290,10 @@ final class PanelPresenter {
             applyPanelChrome(win, appearance: state.settings.appearance)
             let delegate = BashXWindowDelegate { [weak self] in
                 guard let self else { return }
+                self.traffic?.panelChartEnabled = false
                 self.traffic?.chartSamplesEnabled = false
                 self.traffic?.stopConnectionsAndLogs()
+                self.menuRates?.panel.clear()
                 AddSubscriptionPresenter.shared.close()
                 self.window?.orderOut(nil)
                 AppActivation.refreshAfterWindowClosed()
@@ -316,6 +318,7 @@ final class PanelPresenter {
 
         AppActivation.closeDuplicateWindows(withID: AppActivation.panelID, keeping: window)
         AppActivation.promoteForWindow()
+        monitor.panelChartEnabled = true
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
 

@@ -6,7 +6,9 @@ import UIKit
 struct DisguiseGalleryView: View {
     var onUnlocked: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var bubbles: [GameBubble] = []
+    @State private var motionFrame = 0
     @State private var shots: [LaserShot] = []
     @State private var shards: [ShatterShard] = []
     @State private var ripples: [PopRipple] = []
@@ -40,18 +42,8 @@ struct DisguiseGalleryView: View {
     @State private var leakFlash = false
     @State private var fireJammedUntil: Date = .distantPast
     @State private var startPulse = false
+    @State private var pausedByBackground = false
     private let maxLives = 5
-
-    private let colorfulPalette: [Color] = [
-        Color(red: 0.98, green: 0.28, blue: 0.40),
-        Color(red: 0.98, green: 0.55, blue: 0.16),
-        Color(red: 1.0, green: 0.86, blue: 0.18),
-        Color(red: 0.22, green: 0.90, blue: 0.55),
-        Color(red: 0.20, green: 0.72, blue: 0.98),
-        Color(red: 0.58, green: 0.38, blue: 0.98),
-        Color(red: 0.98, green: 0.38, blue: 0.78),
-        Color(red: 0.45, green: 0.92, blue: 0.95),
-    ]
 
     private enum Keys {
         static let broken = "disguise.colorPop.brokenTotal"
@@ -101,7 +93,6 @@ struct DisguiseGalleryView: View {
                             .fill(Color.white.opacity(star.opacity))
                             .frame(width: star.size, height: star.size)
                             .position(star.position)
-                            .blur(radius: star.size > 2.2 ? 0.5 : 0)
                             .allowsHitTesting(false)
                     }
 
@@ -115,23 +106,16 @@ struct DisguiseGalleryView: View {
 
                     ForEach(shards) { shard in
                         Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [.white.opacity(0.95), shard.color],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
+                            .fill(shard.color)
                             .frame(width: shard.width, height: shard.height)
                             .rotationEffect(.degrees(shard.rotation))
                             .opacity(shard.opacity)
                             .position(shard.position)
-                            .blur(radius: shard.blur)
                             .allowsHitTesting(false)
                     }
 
                     ForEach(bubbles) { bubble in
-                        orbView(bubble)
+                        fruitView(bubble)
                             .position(bubble.position)
                             .zIndex(Double(bubble.size))
                             .allowsHitTesting(false)
@@ -198,7 +182,7 @@ struct DisguiseGalleryView: View {
                 }
                 .onChange(of: geo.size) { newSize in
                     updatePlayfield(newSize)
-                    if stars.count < 40 { seedStars(in: newSize) }
+                    if stars.count < 12 { seedStars(in: newSize) }
                 }
             }
             .ignoresSafeArea()
@@ -212,16 +196,20 @@ struct DisguiseGalleryView: View {
                     .allowsHitTesting(false)
 
                 if !isPlaying {
-                    homeCard
-                        .padding(.bottom, 10)
-                        .onTapGesture { handleUnlockTap() }
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    VStack(spacing: 12) {
+                        homeCard
+                            .onTapGesture { handleUnlockTap() }
+                        bottomBar
+                    }
+                    .padding(.bottom, 96)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else {
+                    bottomBar
+                        .padding(.bottom, 26)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
                 }
-
-                bottomBar
-                    .padding(.bottom, isPlaying ? 52 : 40)
-                    .animation(.spring(response: 0.42, dampingFraction: 0.82), value: isPlaying)
             }
+            .animation(.spring(response: 0.42, dampingFraction: 0.82), value: isPlaying)
             .zIndex(20)
 
             if leakFlash {
@@ -240,8 +228,30 @@ struct DisguiseGalleryView: View {
         }
         .sheet(isPresented: $showSettings) { settingsSheet }
         .onAppear {
-            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 startPulse = true
+            }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                pausedByBackground = isPlaying
+                // Drop FX when backgrounded so the NE / CPU cools down.
+                shards.removeAll()
+                ripples.removeAll()
+                floatTexts.removeAll()
+                shots.removeAll()
+                motionTask?.cancel()
+                motionTask = nil
+                spawnTask?.cancel()
+                spawnTask = nil
+                fireTask?.cancel()
+                fireTask = nil
+            } else {
+                startMotionLoop()
+                if pausedByBackground, isPlaying {
+                    resumePlayingLoops()
+                }
+                pausedByBackground = false
             }
         }
     }
@@ -250,7 +260,7 @@ struct DisguiseGalleryView: View {
         playSize = size
         let insets = keyWindowSafeInsets()
         playTop = insets.top + 92
-        playBottom = max(insets.bottom, 16) + (isPlaying ? 96 : 108)
+        playBottom = max(insets.bottom, 12) + (isPlaying ? 58 : 118)
         if !shipReady {
             shipX = size.width * 0.5
             shipReady = true
@@ -267,264 +277,70 @@ struct DisguiseGalleryView: View {
     // MARK: - Visuals
 
     private var spaceBackdrop: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            ZStack {
-                // Cinematic deep space — indigo → violet → teal
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.04, green: 0.05, blue: 0.14),
-                        Color(
-                            hue: (0.68 + 0.04 * sin(t * 0.08)).truncatingRemainder(dividingBy: 1),
-                            saturation: 0.62,
-                            brightness: 0.16
-                        ),
-                        Color(
-                            hue: (0.78 + 0.05 * cos(t * 0.07)).truncatingRemainder(dividingBy: 1),
-                            saturation: 0.48,
-                            brightness: 0.12
-                        ),
-                        Color(red: 0.03, green: 0.08, blue: 0.12),
-                    ],
-                    startPoint: UnitPoint(x: 0.2 + 0.1 * sin(t * 0.04), y: 0),
-                    endPoint: UnitPoint(x: 0.8 + 0.08 * cos(t * 0.05), y: 1)
-                )
+        // Static black-glass — animated TimelineView + multi-blur was a major heat source.
+        ZStack {
+            Color(red: 0.015, green: 0.016, blue: 0.022)
 
-                // Soft aurora ribbons
-                AngularGradient(
-                    colors: [
-                        Color(red: 0.35, green: 0.55, blue: 1.0).opacity(0.22),
-                        Color(red: 0.55, green: 0.28, blue: 0.95).opacity(0.18),
-                        Color(red: 0.15, green: 0.82, blue: 0.78).opacity(0.14),
-                        Color(red: 0.95, green: 0.45, blue: 0.70).opacity(0.10),
-                        Color(red: 0.35, green: 0.55, blue: 1.0).opacity(0.22),
-                    ],
-                    center: UnitPoint(
-                        x: 0.48 + 0.18 * cos(t * 0.12),
-                        y: 0.32 + 0.14 * sin(t * 0.10)
-                    ),
-                    angle: .degrees(t * 8)
-                )
-                .blur(radius: 48)
-                .opacity(0.9)
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.045),
+                    Color.clear,
+                    Color.black.opacity(0.5),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
 
-                // Horizon glow
-                LinearGradient(
-                    colors: [
-                        Color.clear,
-                        Color(red: 0.25, green: 0.55, blue: 0.95).opacity(0.12),
-                        Color(red: 0.55, green: 0.25, blue: 0.85).opacity(0.08),
-                        Color.clear,
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(height: 220)
-                .offset(y: 180 + 30 * sin(t * 0.09))
-                .blur(radius: 24)
+            RadialGradient(
+                colors: [Color.white.opacity(0.05), Color.clear],
+                center: UnitPoint(x: 0.35, y: 0.22),
+                startRadius: 4,
+                endRadius: 280
+            )
 
-                // Moving light wells
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color(red: 0.45, green: 0.75, blue: 1.0).opacity(0.32),
-                                Color(red: 0.30, green: 0.45, blue: 0.95).opacity(0.08),
-                                .clear,
-                            ],
-                            center: .center,
-                            startRadius: 2,
-                            endRadius: 240
-                        )
-                    )
-                    .frame(width: 480, height: 480)
-                    .offset(x: 100 * cos(t * 0.11), y: -60 + 60 * sin(t * 0.09))
-                    .blur(radius: 12)
-
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color(red: 0.90, green: 0.40, blue: 0.95).opacity(0.20),
-                                Color(red: 0.40, green: 0.20, blue: 0.70).opacity(0.06),
-                                .clear,
-                            ],
-                            center: .center,
-                            startRadius: 1,
-                            endRadius: 190
-                        )
-                    )
-                    .frame(width: 380, height: 380)
-                    .offset(x: -110 * sin(t * 0.10), y: 140 + 45 * cos(t * 0.08))
-                    .blur(radius: 14)
-
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color(red: 0.20, green: 0.90, blue: 0.80).opacity(0.12),
-                                .clear,
-                            ],
-                            center: .center,
-                            startRadius: 1,
-                            endRadius: 140
-                        )
-                    )
-                    .frame(width: 280, height: 280)
-                    .offset(x: 40 * sin(t * 0.15), y: -160 + 40 * cos(t * 0.12))
-                    .blur(radius: 10)
-
-                // Film vignette
-                RadialGradient(
-                    colors: [.clear, Color.black.opacity(0.42)],
-                    center: .center,
-                    startRadius: 100,
-                    endRadius: 560
-                )
-            }
+            RadialGradient(
+                colors: [Color.clear, Color.black.opacity(0.55)],
+                center: .center,
+                startRadius: 120,
+                endRadius: 520
+            )
         }
     }
 
-    private func orbView(_ bubble: GameBubble) -> some View {
-        let pulse = 1 + 0.035 * sin(bubble.phase)
+    private func fruitView(_ bubble: GameBubble) -> some View {
         let hpRatio = CGFloat(bubble.hp) / CGFloat(max(1, bubble.maxHp))
-        let rim = [
-            Color.white.opacity(0.85),
-            bubble.color.opacity(0.9),
-            Color.white.opacity(0.15),
-        ]
+        let emojiSize = bubble.size * (bubble.kind == .titan ? 0.62 : 0.68)
         return ZStack {
-            // Outer chromatic bloom
             Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            bubble.color.opacity(0.55),
-                            bubble.color.opacity(0.18),
-                            bubble.color.opacity(0.04),
-                            .clear,
-                        ],
-                        center: .center,
-                        startRadius: 1,
-                        endRadius: bubble.size * 1.05
-                    )
+                .fill(bubble.fruit.accent.opacity(0.22))
+                .frame(width: bubble.size * 1.05, height: bubble.size * 1.05)
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
                 )
-                .frame(width: bubble.size * 1.7, height: bubble.size * 1.7)
-                .blur(radius: bubble.kind == .titan ? 14 : 9)
 
-            // Soft secondary halo
-            Circle()
-                .fill(bubble.color.opacity(0.18))
-                .frame(width: bubble.size * 1.25, height: bubble.size * 1.25)
-                .blur(radius: 6)
-
-            if bubble.kind == .titan || bubble.kind == .elite {
-                ForEach(0..<(bubble.kind == .titan ? 3 : 1), id: \.self) { ring in
-                    Circle()
-                        .strokeBorder(
-                            AngularGradient(
-                                colors: rim + [rim[0]],
-                                center: .center
-                            ),
-                            style: StrokeStyle(
-                                lineWidth: bubble.kind == .titan ? 2.0 : 1.4,
-                                dash: bubble.kind == .titan ? [5, 5] : []
-                            )
-                        )
-                        .frame(
-                            width: bubble.size * (1.2 + CGFloat(ring) * 0.18),
-                            height: bubble.size * (1.2 + CGFloat(ring) * 0.18)
-                        )
-                        .rotationEffect(.degrees(bubble.phase * (16 + Double(ring) * 12) * (ring % 2 == 0 ? 1 : -1)))
-                        .opacity(0.55 - Double(ring) * 0.1)
-                }
-            }
-
-            // Glass core
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            Color.white.opacity(0.98),
-                            bubble.color.opacity(0.95),
-                            bubble.color.opacity(0.72),
-                            bubble.color.opacity(0.38),
-                            bubble.color.opacity(0.18),
-                        ],
-                        center: UnitPoint(x: 0.28, y: 0.24),
-                        startRadius: 0.2,
-                        endRadius: bubble.size * 0.72
-                    )
-                )
-                .overlay {
-                    Circle()
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.white.opacity(0.9), bubble.color.opacity(0.5), .white.opacity(0.1)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: bubble.kind == .titan ? 2.2 : 1.2
-                        )
-                }
-                .overlay {
-                    // Inner glass rim
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
-                        .padding(3)
-                }
-                .overlay(alignment: .topLeading) {
-                    Ellipse()
-                        .fill(
-                            LinearGradient(
-                                colors: [.white.opacity(0.95), .white.opacity(0.15)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: bubble.size * 0.36, height: bubble.size * 0.18)
-                        .offset(x: bubble.size * 0.12, y: bubble.size * 0.12)
-                        .blur(radius: 0.3)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    Circle()
-                        .fill(Color.white.opacity(0.25))
-                        .frame(width: bubble.size * 0.12, height: bubble.size * 0.12)
-                        .offset(x: -bubble.size * 0.18, y: -bubble.size * 0.2)
-                        .blur(radius: 0.5)
-                }
-                .shadow(color: bubble.color.opacity(0.72), radius: bubble.kind == .titan ? 18 : 11, y: 3)
-                .frame(width: bubble.size, height: bubble.size)
+            Text(bubble.fruit.emoji)
+                .font(.system(size: emojiSize))
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
 
             if bubble.maxHp > 1 {
                 Circle()
                     .trim(from: 0, to: hpRatio)
-                    .stroke(
-                        AngularGradient(
-                            colors: [.white, bubble.color, Color.white.opacity(0.35)],
-                            center: .center
-                        ),
-                        style: StrokeStyle(lineWidth: bubble.kind == .titan ? 3.2 : 2.0, lineCap: .round)
-                    )
-                    .frame(width: bubble.size * 0.9, height: bubble.size * 0.9)
+                    .stroke(bubble.fruit.accent.opacity(0.9), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .frame(width: bubble.size * 1.12, height: bubble.size * 1.12)
                     .rotationEffect(.degrees(-90))
             }
 
             if bubble.kind == .titan {
-                Image(systemName: "seal.fill")
-                    .font(.system(size: bubble.size * 0.2, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.white.opacity(0.85), bubble.color.opacity(0.7)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .shadow(color: .white.opacity(0.4), radius: 4)
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.35), lineWidth: 2)
+                    .frame(width: bubble.size * 1.18, height: bubble.size * 1.18)
             }
         }
-        .frame(width: bubble.size * 1.6, height: bubble.size * 1.6)
-        .scaleEffect(bubble.scale * pulse)
+        .frame(width: bubble.size * 1.25, height: bubble.size * 1.25)
+        .scaleEffect(bubble.scale)
+        .shadow(color: bubble.fruit.accent.opacity(0.4), radius: 5, y: 2)
     }
 
     private var shipView: some View {
@@ -540,38 +356,13 @@ struct DisguiseGalleryView: View {
         let scale: CGFloat = 0.9 + shipVisualLevel * 0.035
 
         return ZStack {
-            // Engine plume
-            ForEach(0..<3, id: \.self) { i in
-                Ellipse()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                accent.opacity(0.85 - Double(i) * 0.2),
-                                accent.opacity(0),
-                            ],
-                            center: .top,
-                            startRadius: 1,
-                            endRadius: 20
-                        )
-                    )
-                    .frame(
-                        width: CGFloat(8 + i * 4) + 3 * sin(thrustPhase + CGFloat(i)),
-                        height: CGFloat(18 + i * 8) + 6 * sin(thrustPhase * 1.3 + CGFloat(i))
-                    )
-                    .offset(y: 28 + CGFloat(i) * 4)
-                    .blur(radius: CGFloat(1 + i))
-            }
-
-            // Shadow plate
             Ellipse()
-                .fill(Color.black.opacity(0.35))
-                .frame(width: 44, height: 12)
-                .offset(y: 26)
-                .blur(radius: 4)
+                .fill(accent.opacity(0.5))
+                .frame(width: 10, height: 20)
+                .offset(y: 30)
 
-            // Wings
             Path { path in
-                let wing = 18 + shipVisualLevel * 2.2
+                let wing = 16 + shipVisualLevel * 1.8
                 path.move(to: CGPoint(x: 32, y: 16))
                 path.addLine(to: CGPoint(x: 32 - wing, y: 32))
                 path.addLine(to: CGPoint(x: 32 - wing * 0.35, y: 26))
@@ -583,103 +374,18 @@ struct DisguiseGalleryView: View {
                 path.addLine(to: CGPoint(x: 36, y: 20))
                 path.closeSubpath()
             }
-            .fill(
-                LinearGradient(
-                    colors: [metal, accent.opacity(0.85), Color(red: 0.18, green: 0.28, blue: 0.55)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .overlay(
-                Path { path in
-                    let wing = 18 + shipVisualLevel * 2.2
-                    path.move(to: CGPoint(x: 32, y: 16))
-                    path.addLine(to: CGPoint(x: 32 - wing, y: 32))
-                    path.move(to: CGPoint(x: 32, y: 16))
-                    path.addLine(to: CGPoint(x: 32 + wing, y: 32))
-                }
-                .stroke(Color.white.opacity(0.35), lineWidth: 0.8)
-            )
-            .frame(width: 60 + shipVisualLevel * 3.5, height: 42)
-            .shadow(color: accent.opacity(0.45), radius: 8, y: 2)
+            .fill(metal.opacity(0.88))
+            .frame(width: 64, height: 48)
 
-            // Side cannons
-            if shipLevel >= 3 {
-                ForEach([-1, 1], id: \.self) { side in
-                    VStack(spacing: 2) {
-                        Capsule()
-                            .fill(Color.white.opacity(0.9))
-                            .frame(width: 3, height: 6)
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(
-                                LinearGradient(colors: [accent, metal], startPoint: .top, endPoint: .bottom)
-                            )
-                            .frame(width: 7, height: 18)
-                    }
-                    .offset(x: CGFloat(side) * (18 + shipVisualLevel * 1.1), y: 2)
-                    .shadow(color: accent.opacity(0.8), radius: 5)
-                }
-            }
-
-            // Hull
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white,
-                            metal,
-                            accent.opacity(0.85),
-                            Color(red: 0.12, green: 0.22, blue: 0.48),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 14 + shipVisualLevel * 0.7, height: 32 + shipVisualLevel * 1.1)
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(LinearGradient(colors: [Color.white.opacity(0.95), accent, metal], startPoint: .top, endPoint: .bottom))
+                .frame(width: 18 + shipVisualLevel * 0.4, height: 30 + shipVisualLevel * 0.6)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [.white.opacity(0.8), accent.opacity(0.4)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.2
-                        )
-                )
-                .overlay(alignment: .center) {
                     Capsule()
-                        .fill(accent.opacity(0.55))
-                        .frame(width: 3, height: 16)
-                        .offset(y: 4)
-                }
-                .shadow(color: accent.opacity(0.65), radius: 14, y: 2)
-
-            // Cockpit canopy
-            Capsule()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.95),
-                            accent.opacity(0.75),
-                            Color(red: 0.2, green: 0.45, blue: 0.9).opacity(0.8),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                        .fill(Color.white.opacity(0.55))
+                        .frame(width: 5, height: 10)
+                        .offset(y: -5)
                 )
-                .frame(width: 8 + shipVisualLevel * 0.25, height: 11)
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.5), lineWidth: 0.6))
-                .offset(y: -10)
-                .shadow(color: accent.opacity(0.6), radius: 4)
-
-            if shipLevel >= 5 {
-                Image(systemName: "sparkle")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color(red: 1.0, green: 0.92, blue: 0.45))
-                    .offset(y: 4)
-                    .shadow(color: Color.yellow.opacity(0.8), radius: 4)
-            }
         }
         .frame(width: 78, height: 70)
         .scaleEffect(scale)
@@ -689,11 +395,11 @@ struct DisguiseGalleryView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("色点消消乐")
+                    Text("水果保卫战")
                         .font(.system(size: 16, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
                         .shadow(color: .black.opacity(0.45), radius: 2, y: 1)
-                    Text(isPlaying ? "守住防线 · 优先快球" : "拖动飞船射击")
+                    Text(isPlaying ? "守住防线 · 优先快果" : "拖动飞船射击水果")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white.opacity(0.58))
                 }
@@ -822,14 +528,14 @@ struct DisguiseGalleryView: View {
 
     private func chipBackground(tint: Color) -> some View {
         RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.black.opacity(0.28))
+            .fill(Color.black.opacity(0.45))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(tint.opacity(0.10))
+                    .fill(tint.opacity(0.08))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(tint.opacity(0.28), lineWidth: 0.8)
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.7)
             )
     }
 
@@ -837,19 +543,19 @@ struct DisguiseGalleryView: View {
         VStack(spacing: 3) {
             Text("星际护航")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.72))
-            Text("5 点防线 · 优先清快球")
+                .foregroundStyle(.white.opacity(0.62))
+            Text("5 点防线 · 优先清快果")
                 .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.38))
+                .foregroundStyle(.white.opacity(0.32))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(
             Capsule(style: .continuous)
-                .fill(Color.white.opacity(0.045))
+                .fill(Color.black.opacity(0.32))
                 .overlay(
                     Capsule(style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.6)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
                 )
         )
     }
@@ -869,55 +575,70 @@ struct DisguiseGalleryView: View {
             ZStack {
                 if !isPlaying {
                     Capsule(style: .continuous)
-                        .fill(Color(red: 0.45, green: 0.78, blue: 1.0).opacity(startPulse ? 0.28 : 0.12))
-                        .blur(radius: 10)
+                        .fill(Color.white.opacity(startPulse ? 0.12 : 0.04))
                         .scaleEffect(startPulse ? 1.06 : 1.0)
                         .allowsHitTesting(false)
                 }
 
                 Capsule(style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: isPlaying
-                                ? [
-                                    Color.white.opacity(0.18),
-                                    Color.white.opacity(0.07),
-                                ]
-                                : [
-                                    Color(red: 0.38, green: 0.92, blue: 1.0),
-                                    Color(red: 0.42, green: 0.58, blue: 1.0),
-                                    Color(red: 0.72, green: 0.38, blue: 0.95),
-                                ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                    .fill(Color.black.opacity(isPlaying ? 0.58 : 0.5))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: isPlaying
+                                        ? [
+                                            Color.white.opacity(0.10),
+                                            Color(red: 1.0, green: 0.42, blue: 0.48).opacity(0.12),
+                                            Color.clear,
+                                        ]
+                                        : [
+                                            Color.white.opacity(0.16),
+                                            Color(red: 0.45, green: 0.78, blue: 1.0).opacity(0.10),
+                                            Color.clear,
+                                        ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
                     )
                     .overlay(
                         Capsule(style: .continuous)
                             .strokeBorder(
-                                Color.white.opacity(isPlaying ? 0.28 : 0.55),
-                                lineWidth: 0.8
+                                LinearGradient(
+                                    colors: isPlaying
+                                        ? [
+                                            Color.white.opacity(0.28),
+                                            Color(red: 1.0, green: 0.45, blue: 0.5).opacity(0.35),
+                                            Color.white.opacity(0.08),
+                                        ]
+                                        : [
+                                            Color.white.opacity(0.42),
+                                            Color(red: 0.55, green: 0.85, blue: 1.0).opacity(0.45),
+                                            Color.white.opacity(0.12),
+                                        ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.85
                             )
                     )
-                    .shadow(
-                        color: isPlaying
-                            ? Color.black.opacity(0.22)
-                            : Color(red: 0.4, green: 0.65, blue: 1.0).opacity(0.32),
-                        radius: isPlaying ? 6 : 10,
-                        y: isPlaying ? 2 : 4
-                    )
+                    .shadow(color: Color.black.opacity(0.35), radius: 8, y: 3)
 
                 HStack(spacing: 6) {
                     Image(systemName: isPlaying ? "stop.fill" : "bolt.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.95))
+                        .font(.system(size: isPlaying ? 9 : 11, weight: .bold))
+                        .foregroundStyle(
+                            isPlaying
+                                ? Color(red: 1.0, green: 0.55, blue: 0.58)
+                                : Color(red: 0.7, green: 0.92, blue: 1.0)
+                        )
                     Text(isPlaying ? "结束" : "开始游戏")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
+                        .font(.system(size: isPlaying ? 12 : 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.92))
                 }
-                .padding(.horizontal, 4)
             }
-            .frame(width: isPlaying ? 96 : 128, height: 36)
+            .frame(width: isPlaying ? 84 : 132, height: isPlaying ? 32 : 38)
             .compositingGroup()
         }
         .buttonStyle(.plain)
@@ -943,7 +664,7 @@ struct DisguiseGalleryView: View {
                 } header: {
                     Text("战绩")
                 } footer: {
-                    Text("等级靠经验慢慢涨，无上限。漏掉色核会掉防线；防线归零本局结束。新种类会随击破逐步出现。")
+                    Text("等级靠经验慢慢涨，无上限。漏掉水果会掉防线；防线归零本局结束。新种类会随击破逐步出现。")
                 }
 
                 Section {
@@ -995,20 +716,26 @@ struct DisguiseGalleryView: View {
     private func startMotionLoop() {
         motionTask?.cancel()
         motionTask = Task { @MainActor in
-            let dt: CGFloat = 1.0 / 30.0
             while !Task.isCancelled {
+                // ~24fps play / ~15fps idle — smooth enough, cooler than 30fps.
+                let playing = isPlaying
+                let dt: CGFloat = playing ? (1.0 / 24.0) : (1.0 / 15.0)
+                let sleepNs: UInt64 = playing ? 42_000_000 : 66_000_000
                 tickMotion(dt: dt)
-                try? await Task.sleep(nanoseconds: 33_000_000)
+                try? await Task.sleep(nanoseconds: sleepNs)
             }
         }
     }
 
     private func tickMotion(dt: CGFloat) {
         guard playSize.width > 0 else { return }
-        thrustPhase += dt * (12 + CGFloat(shipLevel) * 2)
+        motionFrame &+= 1
+        thrustPhase += dt * (isPlaying ? 10 : 4)
 
+        // Stars scroll every frame (lightweight).
+        let starMul: CGFloat = isPlaying ? 1.0 : 0.55
         for i in stars.indices {
-            stars[i].position.y += stars[i].speed * dt * (isPlaying ? 1.0 + CGFloat(difficulty) * 0.08 : 0.7)
+            stars[i].position.y += stars[i].speed * dt * starMul
             if stars[i].position.y > playSize.height + 4 {
                 stars[i].position.y = -4
                 stars[i].position.x = CGFloat.random(in: 0...playSize.width)
@@ -1023,12 +750,10 @@ struct DisguiseGalleryView: View {
         var leaked: [GameBubble] = []
         for i in bubbles.indices {
             bubbles[i].phase += dt * bubbles[i].pulseSpeed
-            // Zig enemies weave while falling
             if bubbles[i].kind == .zig {
                 bubbles[i].vx = sin(bubbles[i].phase * 1.8) * bubbles[i].weaveAmp
             }
             bubbles[i].position.x += bubbles[i].vx * dt
-            // Always fall downward from top
             bubbles[i].position.y += abs(bubbles[i].vy) * dt
 
             let r = bubbles[i].size * 0.5
@@ -1040,13 +765,11 @@ struct DisguiseGalleryView: View {
                 bubbles[i].vx = -abs(bubbles[i].vx)
             }
 
-            if bubbles[i].kind != .zig {
-                // Mild horizontal drift only — never reverse fall
-                bubbles[i].vx += CGFloat.random(in: -10...10) * dt
+            if isPlaying, bubbles[i].kind != .zig, motionFrame % 2 == 0 {
+                bubbles[i].vx += CGFloat.random(in: -8...8) * dt
                 bubbles[i].vx = max(-50, min(50, bubbles[i].vx))
             }
 
-            // Clamp fall speed by kind
             let maxFall: CGFloat = {
                 switch bubbles[i].kind {
                 case .titan: return isPlaying ? 42 + CGFloat(difficulty) : 28
@@ -1067,6 +790,12 @@ struct DisguiseGalleryView: View {
         }
         if !removeBubbleIds.isEmpty {
             bubbles.removeAll { removeBubbleIds.contains($0.id) }
+            // Idle: keep a few orbs drifting so the camouflage screen never freezes.
+            if !isPlaying {
+                while bubbles.count < 3 {
+                    spawnBubble(animated: false, prefer: .normal)
+                }
+            }
         }
         for leakedOrb in leaked {
             handleLeak(leakedOrb)
@@ -1091,11 +820,9 @@ struct DisguiseGalleryView: View {
                 removeShots.insert(shots[i].id)
                 let dmg = shots[i].damage
                 bubbles[bIdx].hp -= dmg
-                bubbles[bIdx].scale = 1.12
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.55)) {
-                    if bIdx < bubbles.count { bubbles[bIdx].scale = 1 }
+                if bubbles[bIdx].hp <= 0 || motionFrame % 3 == 0 {
+                    emitHitSpark(at: bubbles[bIdx].position, color: bubbles[bIdx].fruit.accent)
                 }
-                emitHitSpark(at: bubbles[bIdx].position, color: bubbles[bIdx].color)
 
                 if bubbles[bIdx].hp <= 0 {
                     let dead = bubbles.remove(at: bIdx)
@@ -1107,6 +834,13 @@ struct DisguiseGalleryView: View {
         }
         if !removeShots.isEmpty {
             shots.removeAll { removeShots.contains($0.id) }
+        }
+
+        // Nudge @State so ForEach positions always refresh.
+        if motionFrame % 2 == 0 {
+            bubbles = bubbles
+            shots = shots
+            stars = stars
         }
     }
 
@@ -1130,7 +864,7 @@ struct DisguiseGalleryView: View {
         floatTexts.removeAll()
         bubbles.removeAll()
         shipX = playSize.width * 0.5
-        for _ in 0..<5 {
+        for _ in 0..<4 {
             spawnBubble(animated: true, prefer: .normal)
         }
         spawnFloatText("防守开始", at: CGPoint(x: playSize.width * 0.5, y: shipY - 80), color: .white, size: 15)
@@ -1144,7 +878,7 @@ struct DisguiseGalleryView: View {
                 if waveStage >= 4, Int.random(in: 0...4) == 0 {
                     spawnForDifficulty()
                 }
-                if bubbles.count > 11 + waveStage {
+                if bubbles.count > 8 + min(waveStage, 2) {
                     if let idx = bubbles.firstIndex(where: { $0.kind == .swarm || $0.kind == .normal }) {
                         // Leaking intentional cull? Better just remove without leak penalty for cull
                         bubbles.remove(at: idx)
@@ -1155,6 +889,36 @@ struct DisguiseGalleryView: View {
             }
         }
 
+        fireTask = Task { @MainActor in
+            while !Task.isCancelled {
+                if isPlaying { fireLaser() }
+                let interval = fireIntervalNs()
+                try? await Task.sleep(nanoseconds: interval)
+            }
+        }
+    }
+
+    private func resumePlayingLoops() {
+        guard isPlaying else { return }
+        spawnTask?.cancel()
+        spawnTask = Task { @MainActor in
+            while !Task.isCancelled {
+                spawnForDifficulty()
+                let base = max(340, 920 - waveStage * 70 - difficulty * 18)
+                try? await Task.sleep(nanoseconds: UInt64(base) * 1_000_000)
+                if waveStage >= 4, Int.random(in: 0...4) == 0 {
+                    spawnForDifficulty()
+                }
+                if bubbles.count > 8 + min(waveStage, 2) {
+                    if let idx = bubbles.firstIndex(where: { $0.kind == .swarm || $0.kind == .normal }) {
+                        bubbles.remove(at: idx)
+                    } else if let idx = bubbles.indices.first {
+                        bubbles.remove(at: idx)
+                    }
+                }
+            }
+        }
+        fireTask?.cancel()
         fireTask = Task { @MainActor in
             while !Task.isCancelled {
                 if isPlaying { fireLaser() }
@@ -1178,8 +942,8 @@ struct DisguiseGalleryView: View {
     }
 
     private func fireIntervalNs() -> UInt64 {
-        let ns = 280_000_000 - min(shipLevel, 22) * 8_000_000
-        return UInt64(max(110_000_000, ns))
+        let ns = 320_000_000 - min(shipLevel, 18) * 7_000_000
+        return UInt64(max(160_000_000, ns))
     }
 
     private func handleLeak(_ bubble: GameBubble) {
@@ -1238,16 +1002,16 @@ struct DisguiseGalleryView: View {
     }
 
     private func seedStars(in size: CGSize) {
-        stars = (0..<64).map { _ in
+        stars = (0..<16).map { _ in
             StarDust(
                 id: UUID(),
                 position: CGPoint(
                     x: CGFloat.random(in: 0...size.width),
                     y: CGFloat.random(in: 0...size.height)
                 ),
-                size: CGFloat.random(in: 1.0...2.8),
-                opacity: Double.random(in: 0.22...0.85),
-                speed: CGFloat.random(in: 16...80)
+                size: CGFloat.random(in: 1.2...2.6),
+                opacity: Double.random(in: 0.28...0.7),
+                speed: CGFloat.random(in: 22...70)
             )
         }
     }
@@ -1255,7 +1019,10 @@ struct DisguiseGalleryView: View {
     private func seedIdleBubbles() {
         bubbles.removeAll()
         shots.removeAll()
-        for _ in 0..<8 {
+        shards.removeAll()
+        ripples.removeAll()
+        floatTexts.removeAll()
+        for _ in 0..<3 {
             spawnBubble(animated: true, prefer: .normal)
         }
     }
@@ -1301,7 +1068,7 @@ struct DisguiseGalleryView: View {
 
     private func spawnBubble(animated: Bool, prefer: OrbKind, at forced: CGPoint? = nil) {
         guard playSize.width > 40 else { return }
-        let color = colorfulPalette.randomElement()!
+        let fruit = FruitKind.random(for: prefer)
 
         let (size, hp, weave): (CGFloat, Int, CGFloat) = {
             switch prefer {
@@ -1333,13 +1100,16 @@ struct DisguiseGalleryView: View {
             }
         }()
 
+        let softCap = isPlaying ? (9 + min(waveStage, 2)) : 4
+        if bubbles.count >= softCap { return }
+
         let bubble = GameBubble(
             id: UUID(),
-            color: color,
+            fruit: fruit,
             kind: prefer,
             size: size,
             position: CGPoint(x: spawnX, y: spawnY),
-            scale: animated ? 0.12 : 1,
+            scale: 1,
             vx: prefer == .zig ? weave * 0.4 : CGFloat.random(in: -18...18),
             vy: fallSpeed,
             phase: CGFloat.random(in: 0...(2 * .pi)),
@@ -1349,13 +1119,6 @@ struct DisguiseGalleryView: View {
             weaveAmp: weave
         )
         bubbles.append(bubble)
-        if animated {
-            withAnimation(.spring(response: 0.48, dampingFraction: 0.64)) {
-                if let i = bubbles.firstIndex(where: { $0.id == bubble.id }) {
-                    bubbles[i].scale = 1
-                }
-            }
-        }
     }
 
     private func fireLaser() {
@@ -1410,8 +1173,8 @@ struct DisguiseGalleryView: View {
                 )
             )
         }
-        if shots.count > 40 {
-            shots.removeFirst(shots.count - 40)
+        if shots.count > 18 {
+            shots.removeFirst(shots.count - 18)
         }
     }
 
@@ -1456,9 +1219,9 @@ struct DisguiseGalleryView: View {
         shipXP += xpGain
 
         if bubble.kind == .titan {
-            spawnFloatText("+泰坦", at: bubble.position, color: bubble.color, size: 18)
+            spawnFloatText("+西瓜", at: bubble.position, color: bubble.fruit.accent, size: 18)
         } else if bubble.kind == .elite {
-            spawnFloatText("坚核 +\(kindBonus)", at: bubble.position, color: .white, size: 13)
+            spawnFloatText("菠萝 +\(kindBonus)", at: bubble.position, color: .white, size: 13)
         }
 
         refreshShipLevel()
@@ -1483,10 +1246,10 @@ struct DisguiseGalleryView: View {
         waveStage = nextStage
         let tip: String = {
             switch waveStage {
-            case 1: return "新目标：群核"
-            case 2: return "新目标：游走核"
-            case 3: return "新目标：坚核"
-            case 4: return "新目标：泰坦"
+            case 1: return "新目标：草莓群"
+            case 2: return "新目标：游走果"
+            case 3: return "新目标：菠萝"
+            case 4: return "新目标：大西瓜"
             default: return "压力上升"
             }
         }()
@@ -1515,90 +1278,99 @@ struct DisguiseGalleryView: View {
     }
 
     private func spawnFloatText(_ text: String, at point: CGPoint, color: Color, size: CGFloat) {
+        if floatTexts.count > 5 {
+            floatTexts.removeFirst(floatTexts.count - 5)
+        }
         let id = UUID()
         floatTexts.append(FloatText(id: id, text: text, position: point, color: color, fontSize: size, opacity: 1))
-        withAnimation(.easeOut(duration: 0.85)) {
+        withAnimation(.easeOut(duration: 0.7)) {
             if let i = floatTexts.firstIndex(where: { $0.id == id }) {
-                floatTexts[i].position.y -= 42
+                floatTexts[i].position.y -= 36
                 floatTexts[i].opacity = 0
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
             floatTexts.removeAll { $0.id == id }
         }
     }
 
     private func emitHitSpark(at point: CGPoint, color: Color) {
+        if ripples.count > 6 { return }
         let id = UUID()
-        ripples.append(PopRipple(id: id, position: point, color: color, size: 10, opacity: 0.7, lineWidth: 1.5))
-        withAnimation(.easeOut(duration: 0.25)) {
+        ripples.append(PopRipple(id: id, position: point, color: color, size: 10, opacity: 0.55, lineWidth: 1.2))
+        withAnimation(.easeOut(duration: 0.2)) {
             if let i = ripples.firstIndex(where: { $0.id == id }) {
-                ripples[i].size = 28
+                ripples[i].size = 22
                 ripples[i].opacity = 0
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
             ripples.removeAll { $0.id == id }
         }
     }
 
     private func emitRipple(from bubble: GameBubble) {
+        // Skip most ripples for normals — shatter is enough visual feedback.
+        if bubble.kind == .normal || bubble.kind == .swarm { return }
+        if ripples.count > 6 { return }
         let id = UUID()
         ripples.append(
             PopRipple(
                 id: id,
                 position: bubble.position,
-                color: bubble.color,
+                color: bubble.fruit.accent,
                 size: bubble.size * 0.3,
-                opacity: 0.9,
-                lineWidth: bubble.kind == .titan ? 3 : 2
+                opacity: 0.75,
+                lineWidth: bubble.kind == .titan ? 2.5 : 1.6
             )
         )
-        withAnimation(.easeOut(duration: 0.45)) {
+        withAnimation(.easeOut(duration: 0.35)) {
             if let i = ripples.firstIndex(where: { $0.id == id }) {
-                ripples[i].size = bubble.size * (bubble.kind == .titan ? 3.0 : 2.2)
+                ripples[i].size = bubble.size * (bubble.kind == .titan ? 2.2 : 1.8)
                 ripples[i].opacity = 0
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
             ripples.removeAll { $0.id == id }
         }
     }
 
     private func emitShatter(from bubble: GameBubble) {
-        let count = bubble.kind == .titan ? Int.random(in: 18...26) : Int.random(in: 10...16)
+        let count = bubble.kind == .titan ? 6 : (bubble.kind == .elite ? 5 : 3)
+        if shards.count > 20 {
+            shards.removeFirst(shards.count - 20)
+        }
         var newShards: [ShatterShard] = []
         for _ in 0..<count {
             let angle = Double.random(in: 0...(2 * .pi))
-            let dist = Double.random(in: 28...(bubble.kind == .titan ? 140 : 95))
+            let dist = Double.random(in: 20...(bubble.kind == .titan ? 70 : 48))
             let id = UUID()
+            let end = CGPoint(
+                x: bubble.position.x + CGFloat(cos(angle) * dist),
+                y: bubble.position.y + CGFloat(sin(angle) * dist)
+            )
             newShards.append(
                 ShatterShard(
                     id: id,
-                    color: [bubble.color, .white.opacity(0.95)].randomElement()!,
+                    color: bubble.fruit.accent,
                     position: bubble.position,
-                    width: CGFloat.random(in: 2.5...9),
-                    height: CGFloat.random(in: 8...24),
+                    width: CGFloat.random(in: 2...5),
+                    height: CGFloat.random(in: 6...14),
                     rotation: Double.random(in: 0...360),
                     opacity: 1,
                     blur: 0
                 )
             )
-            let end = CGPoint(
-                x: bubble.position.x + CGFloat(cos(angle) * dist),
-                y: bubble.position.y + CGFloat(sin(angle) * dist)
-            )
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-                withAnimation(.easeOut(duration: 0.42)) {
+                withAnimation(.easeOut(duration: 0.28)) {
                     if let i = shards.firstIndex(where: { $0.id == id }) {
                         shards[i].position = end
                         shards[i].opacity = 0
-                        shards[i].rotation += Double.random(in: 80...220)
-                        shards[i].blur = 1
+                        shards[i].rotation += Double.random(in: 40...120)
                     }
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
                 shards.removeAll { $0.id == id }
             }
         }
@@ -1620,13 +1392,83 @@ struct DisguiseGalleryView: View {
 
 // MARK: - Models
 
+private enum FruitKind: CaseIterable {
+    case apple, greenApple, banana, orange, grape, lemon, strawberry, cherry, peach, kiwi, watermelon, pineapple
+
+    var emoji: String {
+        switch self {
+        case .apple: return "🍎"
+        case .greenApple: return "🍏"
+        case .banana: return "🍌"
+        case .orange: return "🍊"
+        case .grape: return "🍇"
+        case .lemon: return "🍋"
+        case .strawberry: return "🍓"
+        case .cherry: return "🍒"
+        case .peach: return "🍑"
+        case .kiwi: return "🥝"
+        case .watermelon: return "🍉"
+        case .pineapple: return "🍍"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .apple: return "苹果"
+        case .greenApple: return "青苹果"
+        case .banana: return "香蕉"
+        case .orange: return "橙子"
+        case .grape: return "葡萄"
+        case .lemon: return "柠檬"
+        case .strawberry: return "草莓"
+        case .cherry: return "樱桃"
+        case .peach: return "桃子"
+        case .kiwi: return "猕猴桃"
+        case .watermelon: return "西瓜"
+        case .pineapple: return "菠萝"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .apple: return Color(red: 0.95, green: 0.28, blue: 0.32)
+        case .greenApple: return Color(red: 0.45, green: 0.82, blue: 0.38)
+        case .banana: return Color(red: 1.0, green: 0.82, blue: 0.22)
+        case .orange: return Color(red: 1.0, green: 0.55, blue: 0.18)
+        case .grape: return Color(red: 0.58, green: 0.32, blue: 0.88)
+        case .lemon: return Color(red: 1.0, green: 0.88, blue: 0.28)
+        case .strawberry: return Color(red: 0.98, green: 0.32, blue: 0.42)
+        case .cherry: return Color(red: 0.92, green: 0.18, blue: 0.32)
+        case .peach: return Color(red: 1.0, green: 0.62, blue: 0.48)
+        case .kiwi: return Color(red: 0.55, green: 0.72, blue: 0.28)
+        case .watermelon: return Color(red: 0.28, green: 0.78, blue: 0.42)
+        case .pineapple: return Color(red: 1.0, green: 0.78, blue: 0.22)
+        }
+    }
+
+    static func random(for kind: OrbKind) -> FruitKind {
+        switch kind {
+        case .normal:
+            return [.apple, .greenApple, .banana, .orange, .peach, .kiwi, .lemon].randomElement()!
+        case .swarm:
+            return [.strawberry, .cherry, .grape].randomElement()!
+        case .elite:
+            return .pineapple
+        case .zig:
+            return [.cherry, .grape, .lemon].randomElement()!
+        case .titan:
+            return .watermelon
+        }
+    }
+}
+
 private enum OrbKind {
     case normal, swarm, elite, zig, titan
 }
 
 private struct GameBubble: Identifiable {
     let id: UUID
-    let color: Color
+    let fruit: FruitKind
     let kind: OrbKind
     let size: CGFloat
     var position: CGPoint

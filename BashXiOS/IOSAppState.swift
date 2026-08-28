@@ -29,9 +29,10 @@ final class IOSAppState: ObservableObject {
     let vpn = VPNManager()
     private let tester = SpeedTester()
     private var persistTask: Task<Void, Never>?
+    private var configWriteTask: Task<Void, Never>?
     private var outboundIPTask: Task<Void, Never>?
-    private var vpnWatchTask: Task<Void, Never>?
     private var proxyGroupsTask: Task<Void, Never>?
+    private var cancellables = Set<AnyCancellable>()
 
     var showsDisguise: Bool {
         settings.iosDisguiseEnabled && !isAppUnlocked
@@ -56,25 +57,21 @@ final class IOSAppState: ObservableObject {
         // Re-apply with catalog name `AppIcon-*` so SpringBoard never keeps a blank tile
         // from older builds that used bare style rawValues.
         Task { await IOSIconManager.apply(style: settings.logoStyle) }
-        vpnWatchTask = Task { [weak self] in
-            guard let self else { return }
-            var lastConnected = false
-            while !Task.isCancelled {
-                let connected = self.vpn.isConnected
-                if connected != lastConnected {
-                    lastConnected = connected
-                    if connected {
-                        self.scheduleOutboundIPRefresh(delay: 1.2)
-                        self.scheduleProxyGroupsRefresh(delay: 0.8)
-                    } else {
-                        self.outboundIP = "—"
-                        self.outboundIPLoading = false
-                        self.proxyGroups = []
-                    }
+        vpn.$status
+            .receive(on: RunLoop.main)
+            .removeDuplicates()
+            .sink { [weak self] status in
+                guard let self else { return }
+                if status == .connected {
+                    self.scheduleOutboundIPRefresh(delay: 1.2)
+                    self.scheduleProxyGroupsRefresh(delay: 0.8)
+                } else if status == .disconnected || status == .invalid {
+                    self.outboundIP = "—"
+                    self.outboundIPLoading = false
+                    self.proxyGroups = []
                 }
-                try? await Task.sleep(nanoseconds: 800_000_000)
             }
-        }
+            .store(in: &cancellables)
     }
 
     var selectedNode: ProxyNode? {
@@ -457,15 +454,51 @@ final class IOSAppState: ObservableObject {
             .set(settings.secret, forKey: "apiSecret")
         UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
             .set(settings.proxyMode.rawValue, forKey: "proxyMode")
-        _ = IOSConfigWriter.write(
-            nodes: nodes,
-            selectedName: settings.selectedNodeName,
-            mode: settings.proxyMode,
-            rules: effectiveRuntimeRules(),
-            secret: settings.secret,
-            dnsPreference: settings.dnsPreference,
-            tunnelCapture: settings.iosTunnelCapture
-        )
+        let nodes = nodes
+        let selectedName = settings.selectedNodeName
+        let mode = settings.proxyMode
+        let rules = effectiveRuntimeRules()
+        let secret = settings.secret
+        let dnsPreference = settings.dnsPreference
+        let tunnelCapture = settings.iosTunnelCapture
+        configWriteTask?.cancel()
+        configWriteTask = Task.detached(priority: .utility) {
+            _ = IOSConfigWriter.write(
+                nodes: nodes,
+                selectedName: selectedName,
+                mode: mode,
+                rules: rules,
+                secret: secret,
+                dnsPreference: dnsPreference,
+                tunnelCapture: tunnelCapture
+            )
+        }
+    }
+
+    func writeConfigNow() async {
+        configWriteTask?.cancel()
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(settings.secret, forKey: "apiSecret")
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(settings.proxyMode.rawValue, forKey: "proxyMode")
+        let nodes = nodes
+        let selectedName = settings.selectedNodeName
+        let mode = settings.proxyMode
+        let rules = effectiveRuntimeRules()
+        let secret = settings.secret
+        let dnsPreference = settings.dnsPreference
+        let tunnelCapture = settings.iosTunnelCapture
+        await Task.detached(priority: .utility) {
+            _ = IOSConfigWriter.write(
+                nodes: nodes,
+                selectedName: selectedName,
+                mode: mode,
+                rules: rules,
+                secret: secret,
+                dnsPreference: dnsPreference,
+                tunnelCapture: tunnelCapture
+            )
+        }.value
     }
 
     func setIosTunnelCapture(_ enabled: Bool) {
@@ -591,7 +624,7 @@ final class IOSAppState: ObservableObject {
             UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
                 .set(name, forKey: "selectedNode")
         }
-        writeConfig()
+        await writeConfigNow()
         // Drop stale geo DBs that make mihomo hang downloading GitHub inside the NE.
         Self.scrubStaleGeoDatabases()
         if !vpn.isConnected {

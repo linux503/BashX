@@ -68,6 +68,8 @@ struct SettingsView: View {
                 } label: {
                     Text(item.title(lang: lang))
                         .font(.system(size: 13, weight: tab == item ? .semibold : .medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundStyle(tab == item ? BashXTheme.accent(for: appearance) : .secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)

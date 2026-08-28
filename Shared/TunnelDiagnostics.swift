@@ -4,6 +4,8 @@ import Foundation
 enum TunnelDiagnostics {
     private static let errorKey = "lastTunnelError"
     private static let successKey = "lastTunnelSuccessAt"
+    private static let stopReasonKey = "lastTunnelStopReason"
+    private static let stopLabelKey = "lastTunnelStopLabel"
 
     private static var defaults: UserDefaults? {
         UserDefaults(suiteName: AppConstants.appGroupIdentifier)
@@ -18,8 +20,44 @@ enum TunnelDiagnostics {
         defaults?.set(Date().timeIntervalSince1970, forKey: successKey)
     }
 
+    static func recordStop(reason: Int, label: String) {
+        defaults?.set(reason, forKey: stopReasonKey)
+        defaults?.set(label, forKey: stopLabelKey)
+        // User-initiated disconnect is not an error.
+        if label == "user" || label == "none" {
+            defaults?.removeObject(forKey: errorKey)
+            return
+        }
+        defaults?.set(userFacingStopMessage(label: label), forKey: errorKey)
+    }
+
     static func lastFailureMessage() -> String? {
         defaults?.string(forKey: errorKey)
+    }
+
+    static func lastStopLabel() -> String? {
+        defaults?.string(forKey: stopLabelKey)
+    }
+
+    private static func userFacingStopMessage(label: String) -> String {
+        switch label {
+        case "providerFailed", "connectionFailed":
+            return "隧道异常退出（可能内存不足），请重连"
+        case "noNetwork":
+            return "网络不可用，VPN 已断开"
+        case "networkChange":
+            return "网络切换导致断开，请重连"
+        case "sleep":
+            return "设备休眠导致断开"
+        case "superceded":
+            return "被其他 VPN 挤掉"
+        case "idleTimeout":
+            return "空闲超时断开"
+        case "appUpdate":
+            return "应用更新后需重连"
+        default:
+            return "VPN 已断开（\(label)）"
+        }
     }
 }
 

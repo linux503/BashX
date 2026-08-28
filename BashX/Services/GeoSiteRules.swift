@@ -21,6 +21,8 @@ enum GeoSiteRules {
         "cnn",
         "ubi",
         "aws",
+        "category-education-!cn",
+        "category-ecommerce-!cn",
     ]
 
     static func sanitize(_ rules: [String]) -> [String] {

@@ -110,6 +110,7 @@ enum VPNQuickControl {
         if let proto = mgr.protocolConfiguration as? NETunnelProviderProtocol {
             proto.serverAddress = "BashX"
             proto.providerBundleIdentifier = AppConstants.tunnelBundleIdentifier
+            proto.disconnectOnSleep = false
             if #available(iOS 14.2, *) {
                 proto.includeAllNetworks = false
                 proto.excludeLocalNetworks = true

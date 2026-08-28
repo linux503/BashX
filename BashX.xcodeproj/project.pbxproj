@@ -60,6 +60,7 @@
 		5EB81C3359CCA3BC3DE4502F /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB99BE955D962C3A58632773 /* L10n.swift */; };
 		5FEC2D81F8FDD59F53B942F2 /* Paths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD540993DF70F793F76776BB /* Paths.swift */; };
 		6323909DAC5168B7A9C82DA4 /* OutboundIPProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FD6B4AEB55D6F771FA9A560 /* OutboundIPProbe.swift */; };
+		64A4CEB536327502AB070985 /* bashx-smart-rules.txt in Resources */ = {isa = PBXBuildFile; fileRef = 7D1849BFF96C7E4AC25AE1A1 /* bashx-smart-rules.txt */; };
 		65A3BBDB9CCFC792A407105C /* VPNQuickControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3948FC3776C3CBD634D912AB /* VPNQuickControl.swift */; };
 		6763F378C92ADE47FB1BDFAC /* GoogleReliability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B93A6D01DC1890B6F02E9A0 /* GoogleReliability.swift */; };
 		67ACDF998536D7F3A932A73E /* VPNQuickControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3948FC3776C3CBD634D912AB /* VPNQuickControl.swift */; };
@@ -89,6 +90,7 @@
 		9AD6375497AD43AD653C7FD5 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58661F2D6C67EB19F79A16E1 /* PacketTunnelProvider.swift */; };
 		9B54C99BE4BD8F8257C7077B /* GeoSiteRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C9EB92FC7AF6763E05E120 /* GeoSiteRules.swift */; };
 		9BD133998B95A2A50E69C144 /* WebsiteProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48C5B14437DB3CE9F19D6DD1 /* WebsiteProbe.swift */; };
+		9D2EBCBD388877DB2366DED8 /* bashx-adblock.txt in Resources */ = {isa = PBXBuildFile; fileRef = F58034D4327ADAB05F455274 /* bashx-adblock.txt */; };
 		9E0FA04C2F14061CB32E32CD /* GeoDataBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93CA516F1FFE0271064DA3A4 /* GeoDataBootstrap.swift */; };
 		9EB3502E9E114F503094BDCE /* DisguiseGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FAF7A84FB866CBE33D4ADD1 /* DisguiseGalleryView.swift */; };
 		A69284FF98404329EB08A6C2 /* SpeedTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F13F1B333AA683481D4E43 /* SpeedTester.swift */; };
@@ -99,7 +101,6 @@
 		AE1D476872C91676A2353851 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59B0282838D8E54998FED10 /* Theme.swift */; };
 		AE4E4A2D1865F5C9DF674E4E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C9A63E843433EAA78E218C52 /* Assets.xcassets */; };
 		B362FBA82113022D8219A7D7 /* SettingsViewIOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = E36E925E51BC8591B18F4AAC /* SettingsViewIOS.swift */; };
-		B6E4CE14F25D73A1BE338F27 /* rules in Resources */ = {isa = PBXBuildFile; fileRef = 4DB481D26B2E831C65A3B332 /* rules */; };
 		B75C505EB6D56888A590E290 /* RuntimeRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57BD00C6F4E1C534C3671363 /* RuntimeRules.swift */; };
 		BE1A5CFFED3D4728574575D8 /* DnsProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94F78DC4D192E20DD38DEC2C /* DnsProfile.swift */; };
 		BE206BDFD9090CC15402A5F1 /* connPool_stub.s in Resources */ = {isa = PBXBuildFile; fileRef = 9F87B9F27F9709BE925D12A7 /* connPool_stub.s */; };
@@ -225,6 +226,7 @@
 		76AFBB99833D8C2B09437A21 /* SubscriptionURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionURL.swift; sourceTree = "<group>"; };
 		79B018BA934378CA2281D016 /* BashXVPNControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashXVPNControl.swift; sourceTree = "<group>"; };
 		7AA52AAA929C806FCD9E60AD /* ByteFormat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByteFormat.swift; sourceTree = "<group>"; };
+		7D1849BFF96C7E4AC25AE1A1 /* bashx-smart-rules.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "bashx-smart-rules.txt"; sourceTree = "<group>"; };
 		7D777F4649C0DF0D58A6A6DA /* ClashRuleSyntax.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClashRuleSyntax.swift; sourceTree = "<group>"; };
 		7E0FD9D9C68F56D2839ECB7D /* BashXiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashXiOSApp.swift; sourceTree = "<group>"; };
 		80C919DCB3469820F7A22AA8 /* QRCodeImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeImage.swift; sourceTree = "<group>"; };
@@ -273,6 +275,7 @@
 		EB99BE955D962C3A58632773 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		EB9AB48745A3F29877B39677 /* VideoAdBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoAdBlock.swift; sourceTree = "<group>"; };
 		ECCBAB998CF4E92BA923E7A1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F58034D4327ADAB05F455274 /* bashx-adblock.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "bashx-adblock.txt"; sourceTree = "<group>"; };
 		F59B0282838D8E54998FED10 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		F61175246CC8ED0CD8FBE695 /* TrafficMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrafficMonitor.swift; sourceTree = "<group>"; };
 		FFF2D5C5C6DD27C4E325BF58 /* SubscriptionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubscriptionViews.swift; sourceTree = "<group>"; };
@@ -354,6 +357,15 @@
 				13F6324374600FEBDBBE2DF4 /* TunnelInterface.swift */,
 			);
 			path = PacketTunnel;
+			sourceTree = "<group>";
+		};
+		28A8944A79EB389F74BEDD17 /* rules */ = {
+			isa = PBXGroup;
+			children = (
+				F58034D4327ADAB05F455274 /* bashx-adblock.txt */,
+				7D1849BFF96C7E4AC25AE1A1 /* bashx-smart-rules.txt */,
+			);
+			path = rules;
 			sourceTree = "<group>";
 		};
 		502AC128C19EDC4D2EC196E2 /* Intents */ = {
@@ -497,6 +509,7 @@
 			children = (
 				03B8C6DDFEFD4A9FEB4A91B9 /* Core */,
 				4DB481D26B2E831C65A3B332 /* rules */,
+				28A8944A79EB389F74BEDD17 /* rules */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -704,7 +717,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE4E4A2D1865F5C9DF674E4E /* Assets.xcassets in Resources */,
-				B6E4CE14F25D73A1BE338F27 /* rules in Resources */,
+				9D2EBCBD388877DB2366DED8 /* bashx-adblock.txt in Resources */,
+				64A4CEB536327502AB070985 /* bashx-smart-rules.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -928,7 +942,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -953,7 +967,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -974,7 +988,7 @@
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1057,7 +1071,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -1085,7 +1099,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;
@@ -1107,7 +1121,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -1128,7 +1142,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1148,7 +1162,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1168,7 +1182,7 @@
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1260,7 +1274,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.66;
+				MARKETING_VERSION = 0.1.68;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;

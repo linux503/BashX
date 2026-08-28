@@ -44,7 +44,7 @@ enum ByteFormat {
     static func menuBarCompact(_ bytesPerSec: Int64) -> String {
         let v = Double(max(0, bytesPerSec))
         if v < 1024 {
-            return String(format: "%.1fK", v / 1024)
+            return String(format: "%.0fB", min(v, 999))
         }
         if v < 1024 * 1024 {
             let k = v / 1024
@@ -63,6 +63,9 @@ enum ByteFormat {
 
     static func menuBarFixed(_ bytesPerSec: Int64) -> String {
         let v = Double(max(0, bytesPerSec))
+        if v < 1024 {
+            return String(format: "%.0fB", min(v, 999))
+        }
         if v < 1024 * 1024 {
             let k = min(v / 1024, 999)
             if k < 10 { return String(format: "%.1fK", k) }

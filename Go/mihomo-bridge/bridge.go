@@ -77,18 +77,12 @@ func SetOutboundInterface(name string) {
 }
 
 func init() {
-	debug.SetGCPercent(5)
-	// Stay under Network Extension jetsam (~15–50MB depending on iOS).
-	// gVisor TCP stack needs more headroom than system-only UDP/DNS path.
-	debug.SetMemoryLimit(24 * 1024 * 1024)
+	debug.SetGCPercent(12)
+	// Network Extension jetsam is typically ~50MB. Stay under it but leave room
+	// for gVisor + a few concurrent connections (24MB was too tight → silent kills).
+	debug.SetMemoryLimit(45 * 1024 * 1024)
 	runtime.GOMAXPROCS(2)
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		for range ticker.C {
-			runtime.GC()
-			debug.FreeOSMemory()
-		}
-	}()
+	// GC is driven from PacketTunnelProvider (BridgeForceGC) — no duplicate ticker here.
 }
 
 // SetHomeDir sets Mihomo home directory (config + geo data).

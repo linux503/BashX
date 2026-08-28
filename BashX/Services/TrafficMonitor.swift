@@ -37,6 +37,8 @@ final class PanelRateStore: ObservableObject {
     @Published private(set) var upTotal: Int64 = 0
     @Published private(set) var isLive = false
     @Published private(set) var samples: [TrafficSample] = []
+    /// Skip chart sample array when panel is closed — saves memory + SwiftUI churn.
+    var chartSamplesEnabled = false
 
     func clear() {
         if downMbps != "0.0K" { downMbps = "0.0K" }
@@ -56,10 +58,10 @@ final class PanelRateStore: ObservableObject {
         if self.upTotal != upTotal { self.upTotal = upTotal }
         if isLive != live { isLive = live }
 
-        if live {
+        if live, chartSamplesEnabled {
             var next = samples
             next.append(TrafficSample(up: up, down: down, at: Date()))
-            if next.count > 42 { next.removeFirst(next.count - 42) }
+            if next.count > 28 { next.removeFirst(next.count - 28) }
             samples = next
         }
     }
@@ -77,35 +79,47 @@ final class MenuBarRateStore: ObservableObject {
     @Published private(set) var coreRunning = false
     /// Observed by panel top bar only (not by menu-bar label).
     let panel = PanelRateStore()
+    /// Called after menu-bar strings are committed (objectWillChange fires too early for chrome).
+    var onRatesUpdated: (() -> Void)?
 
     private var lastMenuPublish = Date.distantPast
     private var lastPanelPublish = Date.distantPast
 
     func setCoreRunning(_ running: Bool) {
-        if coreRunning != running { coreRunning = running }
+        let changed = coreRunning != running
+        if changed { coreRunning = running }
         if !running { clearRatesOnly() }
+        if changed { onRatesUpdated?() }
     }
 
     func clear() {
         clearRatesOnly()
         panel.clear()
+        onRatesUpdated?()
     }
 
     private func clearRatesOnly() {
+        var changed = false
         if menuDown != "0.0K" || menuUp != "0.0K" {
             menuDown = "0.0K"
             menuUp = "0.0K"
+            changed = true
         }
-        if help != "BashX · 未连接" { help = "BashX · 未连接" }
+        if help != "BashX · 未连接" {
+            help = "BashX · 未连接"
+            changed = true
+        }
+        if changed { onRatesUpdated?() }
     }
 
     /// Panel ~1Hz via `panel`; menu bar ~0.6s for live ↓/↑.
-    func update(down: Int64, up: Int64, downTotal: Int64 = 0, upTotal: Int64 = 0, live: Bool = true) {
+    func update(down: Int64, up: Int64, downTotal: Int64 = 0, upTotal: Int64 = 0, live: Bool = true, trackPanelChart: Bool = false) {
         let now = Date()
         let hasTraffic = down > 0 || up > 0
 
         if hasTraffic || now.timeIntervalSince(lastPanelPublish) >= 1.0 {
             lastPanelPublish = now
+            panel.chartSamplesEnabled = trackPanelChart
             panel.update(
                 down: down,
                 up: up,
@@ -129,6 +143,7 @@ final class MenuBarRateStore: ObservableObject {
         menuDown = nd
         menuUp = nu
         help = h
+        onRatesUpdated?()
     }
 }
 
@@ -148,6 +163,8 @@ final class TrafficMonitor: ObservableObject {
     weak var menuBarRates: MenuBarRateStore?
     /// When false, skip chart sample array (saves SwiftUI churn while panel is closed / other tab).
     var chartSamplesEnabled = false
+    /// True while main panel window is open — enables sidebar traffic chart samples.
+    var panelChartEnabled = false
 
     private var trafficTask: Task<Void, Never>?
     private var lastConnTotals: (up: Int64, down: Int64, at: Date)?
@@ -158,7 +175,7 @@ final class TrafficMonitor: ObservableObject {
     private var secret = ""
     private let apiSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
-        config.httpMaximumConnectionsPerHost = 6
+        config.httpMaximumConnectionsPerHost = 3
         config.timeoutIntervalForRequest = 30
         return URLSession(configuration: config)
     }()
@@ -267,7 +284,7 @@ final class TrafficMonitor: ObservableObject {
         connectionsTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshConnectionsOnce()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
     }
@@ -348,8 +365,8 @@ final class TrafficMonitor: ObservableObject {
 
     private func publishTrafficUIIfNeeded(force: Bool = false) {
         let now = Date()
-        // ~1.2Hz for panel; menu bar throttles separately inside MenuBarRateStore.
-        guard force || now.timeIntervalSince(lastRateUIPublish) >= 0.85 else { return }
+        // ~2Hz for menu bar; MenuBarRateStore throttles menu digits separately.
+        guard force || now.timeIntervalSince(lastRateUIPublish) >= 0.5 else { return }
         lastRateUIPublish = now
 
         menuBarRates?.update(
@@ -357,7 +374,8 @@ final class TrafficMonitor: ObservableObject {
             up: pendingUp,
             downTotal: pendingDownTotal,
             upTotal: pendingUpTotal,
-            live: true
+            live: true,
+            trackPanelChart: panelChartEnabled
         )
 
         let publishMonitor = chartSamplesEnabled || connectionsTask != nil || logsTask != nil
@@ -413,7 +431,7 @@ final class TrafficMonitor: ObservableObject {
         var lines = logLines
         lines.append(contentsOf: pendingLogLines)
         pendingLogLines.removeAll(keepingCapacity: true)
-        if lines.count > 200 { lines.removeFirst(lines.count - 200) }
+        if lines.count > 100 { lines.removeFirst(lines.count - 100) }
         logLines = lines
     }
 
