@@ -1,6 +1,20 @@
-# Public repo: README + game source only (local app code stays on disk, untracked)
-/*
-!/.gitignore
-!/README.md
-!/game/
-!/game/**
+.DS_Store
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+build-*/
+build-release/
+/tmp/
+
+# Fetched at build time (scripts/fetch_mihomo.sh)
+Resources/Core/mihomo
+Resources/Core/mihomo-*
+
+# Local release artifacts (upload via scripts/publish_release.sh)
+dist/
+
+# Android / Go local artifacts
+Android/.gradle/
+Android/**/build/
+Go/**/vendor/
