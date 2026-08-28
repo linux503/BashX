@@ -10,6 +10,13 @@
 - 支持音效与震动反馈
 - 记录最高分与累计击破数
 
+## 源码
+
+`game/` 目录：
+
+- `DisguiseGalleryView.swift` — 游戏主界面与逻辑
+- `GameSFX.swift` — 程序化音效
+
 ## 下载
 
 **[GitHub Releases 下载最新版](https://github.com/linux503/BashX/releases)**
