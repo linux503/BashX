@@ -2,68 +2,49 @@
 
 > **免责声明：本仓库仅供技术测试使用，不提供任何形式的商业服务或技术支持。**
 
-macOS 菜单栏代理客户端（mihomo / Clash Meta）。
+轻量网络工具 · macOS 菜单栏 / iOS 客户端。
 
 ## 下载
 
-最新版：[Releases](https://github.com/linux503/BashX/releases)
+与 App 内 **设置 → 关于 → 打开发布页** 相同：
 
-## 功能
+**[GitHub Releases 下载最新版](https://github.com/linux503/BashX/releases)**
 
-- 订阅更新（Clash YAML / Base64 `ss://`）
-- 节点测速、面板选择
-- **系统代理一键开关**（`networksetup` → mixed-port）
-- **TUN 模式**（写入配置；开启时启动内核会要管理员权限）
-- **BashX 智能规则**（国内直连 / 广告拦截 / 国外代理；[规则说明](docs/rules.md)）
-- **规则编辑**（面板「规则」页，保存后热重载/重启）
-- **菜单栏快速切节点**（按延迟展示前 10 个）
+安装包文件名：`BashX.dmg`（始终为最新版）或 `BashX-x.y.z.dmg`（带版本号）。
 
-## 环境
+- macOS 13+（Ventura），Intel / Apple Silicon 通用
+- 下载后拖入「应用程序」；若提示「已损坏」，在 DMG 内运行「一键解锁并打开」
 
-- macOS 13+ (Ventura 13.7.8 及以上)
-- Xcode 15+
-- 可选：`brew install mihomo`
+App 内点 **检查更新** 会自动从 GitHub 拉取最新 DMG，无需手动找版本号。
 
-## 生成工程并编译
+## 隐私伪装（iOS）
 
-```bash
-cd BashX
-xcodegen generate
-xcodebuild -scheme BashX -configuration Debug -derivedDataPath build
-open build/Build/Products/Debug/BashX.app
-```
+打开 App 先进入 **「水果保卫战」** 休闲小游戏界面，外观像普通游戏，不显示代理相关字样。
 
-## 使用
+- 设置里可开启 **启动伪装锁屏**
+- 切到后台会自动重新锁定
+- 解锁方式：在提示卡片上 **连点 5 次** 进入真实界面
+- 支持 **立即锁定**，随时回到伪装页
 
-1. 菜单栏 → 打开面板 → 添加订阅 → 更新 → 测速
-2. **系统代理：开**（会自动尝试启动内核）
-3. 或开 **TUN**（会弹管理员密码）
-4. 菜单栏「节点：xxx」可快速切换
-5. 面板「规则」页可改规则
+适合需要低调使用、不希望旁人一眼看出 App 用途的场景。
+
+## 主要功能
+
+**Mac**
+- 菜单栏一键开关系统代理 / TUN
+- 订阅管理、节点测速、规则分流
+- 应用分组：按 App 指定不同线路
+- 网站连通测试、流量监控
+
+**iOS**
+- VPN 连接、订阅与节点管理
+- 隐私伪装锁屏（见上）
+- 多款桌面图标可切换
+
+## 使用（Mac）
+
+1. 菜单栏打开面板 → 添加订阅 → 更新节点
+2. 开启系统代理或 TUN
+3. 选择节点即可使用
 
 配置目录：`~/Library/Application Support/BashX/`
-
-## 规则
-
-- 文档：[docs/rules.md](docs/rules.md)
-- 源文件：[Resources/rules/bashx-smart-rules.txt](Resources/rules/bashx-smart-rules.txt)
-- 导出：`bash scripts/export_rules.sh` → `dist/rules/`
-
-## iOS
-
-完整客户端（订阅 / 节点 / 测速 / VPN）见 **[docs/ios.md](docs/ios.md)**。
-
-## Android（Galaxy Z Fold 6）
-
-见 **[Android/README.md](Android/README.md)**。外屏底栏、内屏双栏，功能对齐 iOS。
-
-```bash
-bash scripts/build_mihomo_android.sh   # 可选，VPN 内核
-cd Android && ./gradlew :app:assembleDebug
-```
-
-## 说明
-
-- 测速为 TCP / 代理延迟，不是完整网页测速
-- TUN 依赖 mihomo，开启时通常需要管理员权限
-- 默认规则：国内直连，国外走代理；支持规则 / 全局 / 直连三种模式

@@ -4,7 +4,11 @@ import Foundation
 enum AppUpdateService {
     static let repoOwner = "linux503"
     static let repoName = "BashX"
+    /// Same page as README — Settings → About → Open releases.
     static let releasesPage = "https://github.com/linux503/BashX/releases"
+    static let releasesLatestPage = "https://github.com/linux503/BashX/releases/latest"
+    /// Stable asset name on every release (plus versioned BashX-x.y.z.dmg).
+    static let latestAssetName = "BashX.dmg"
 
     struct ReleaseInfo: Sendable, Equatable {
         let version: String
@@ -252,6 +256,9 @@ enum AppUpdateService {
     private static func pickDMGAsset(from assets: [[String: Any]], version: String) -> [String: Any]? {
         let dmgs = assets.filter { ($0["name"] as? String)?.lowercased().hasSuffix(".dmg") == true }
         guard !dmgs.isEmpty else { return nil }
+        if let stable = dmgs.first(where: { ($0["name"] as? String) == latestAssetName }) {
+            return stable
+        }
         if let matched = dmgs.first(where: { ($0["name"] as? String)?.contains(version) == true }) {
             return matched
         }

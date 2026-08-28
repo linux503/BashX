@@ -249,6 +249,9 @@ fi
 
 rm -rf "$STAGE"
 
+cp -f "$DMG" "$DIST/BashX.dmg"
+echo "Stable latest: $DIST/BashX.dmg"
+
 echo ""
 echo "Done: $DMG"
 ls -lh "$DMG"
