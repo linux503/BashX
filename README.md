@@ -21,7 +21,7 @@
 
 **[GitHub Releases 下载最新版](https://github.com/linux503/BashX/releases/latest)**
 
-当前版本：**1.0.3** · 安装包：`BashX.dmg` 或 `BashX-1.0.3.dmg`
+当前版本：**1.0.4** · 安装包：`BashX.dmg` 或 `BashX-1.0.4.dmg`
 
 - macOS 13+，Intel / Apple Silicon 通用
 - 下载后拖入「应用程序」即可
