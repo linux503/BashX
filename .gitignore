@@ -17,4 +17,5 @@ dist/
 # Android / Go local artifacts
 Android/.gradle/
 Android/**/build/
+Android/*.apk
 Go/**/vendor/
