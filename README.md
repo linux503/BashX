@@ -19,9 +19,10 @@
 
 ## 下载
 
-**[GitHub Releases 下载最新版](https://github.com/linux503/BashX/releases)**
+**[GitHub Releases 下载最新版](https://github.com/linux503/BashX/releases/latest)**
 
-安装包：`BashX.dmg`（最新版）或 `BashX-x.y.z.dmg`
+当前版本：**1.0.3** · 安装包：`BashX.dmg` 或 `BashX-1.0.3.dmg`
 
 - macOS 13+，Intel / Apple Silicon 通用
 - 下载后拖入「应用程序」即可
+- App 内「设置 → 关于」检查更新会自动下载安装包
