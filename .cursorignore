@@ -1,0 +1,7 @@
+# Generated build artifacts and large binary frameworks do not help code retrieval.
+build-ios/
+**/DerivedData/
+**/.build/
+**/*.xcframework/
+**/*.framework/
+**/*.aar

@@ -1,0 +1,15 @@
+{
+    "files.watcherExclude": {
+        "**/.git/objects/**": true,
+        "**/.git/subtree-cache/**": true,
+        "**/build-ios/**": true,
+        "**/DerivedData/**": true,
+        "**/.build/**": true
+    },
+    "search.exclude": {
+        "**/build-ios/**": true,
+        "**/DerivedData/**": true,
+        "**/.build/**": true,
+        "**/*.xcframework/**": true
+    }
+}

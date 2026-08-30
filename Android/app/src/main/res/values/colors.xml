@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accent">#38A3F5</color>
+    <color name="accent_deep">#1A6BC7</color>
+    <color name="accent_bright">#85D1FF</color>
+    <color name="mist">#EBF5FF</color>
+    <color name="grouped">#F2F2F7</color>
+    <color name="mark_yellow">#FFD61F</color>
+    <color name="mark_yellow_deep">#EBAD0A</color>
+    <color name="mark_yellow_bright">#FFF061</color>
+    <color name="mark_ink">#1F1A0A</color>
+    <color name="mark_ink_soft">#4D380F</color>
+</resources>

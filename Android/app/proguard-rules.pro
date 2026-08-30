@@ -1,0 +1,4 @@
+-keep class bridge.** { *; }
+-keep class com.bashx.mihomo.** { *; }
+-keep class go.** { *; }
+-dontwarn java.beans.**

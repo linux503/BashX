@@ -1,0 +1,1 @@
+OTHER_LDFLAGS = $(inherited) -Wl,-undefined,dynamic_lookup

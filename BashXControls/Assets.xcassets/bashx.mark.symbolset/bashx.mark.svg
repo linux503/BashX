@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <g id="Notes"></g>
+  <g id="Guides" stroke="none" fill="none">
+        <path d="M0,100 L128,100" id="Baseline-S" stroke="#FF00FF" stroke-width="0.5"/>
+        <path d="M0,32 L128,32" id="Capline-S" stroke="#FF00FF" stroke-width="0.5"/>
+        <path d="M22,0 L22,128" id="Left-margin-S" stroke="#00FFFF" stroke-width="0.5"/>
+        <path d="M106,0 L106,128" id="Right-margin-S" stroke="#00FFFF" stroke-width="0.5"/>
+        <path d="M0,100 L128,100" id="Baseline-M" stroke="#FF00FF" stroke-width="0.5"/>
+        <path d="M0,28 L128,28" id="Capline-M" stroke="#FF00FF" stroke-width="0.5"/>
+        <path d="M16,0 L16,128" id="Left-margin-M" stroke="#00FFFF" stroke-width="0.5"/>
+        <path d="M112,0 L112,128" id="Right-margin-M" stroke="#00FFFF" stroke-width="0.5"/>
+        <path d="M0,100 L128,100" id="Baseline-L" stroke="#FF00FF" stroke-width="0.5"/>
+        <path d="M0,24 L128,24" id="Capline-L" stroke="#FF00FF" stroke-width="0.5"/>
+        <path d="M10,0 L10,128" id="Left-margin-L" stroke="#00FFFF" stroke-width="0.5"/>
+        <path d="M118,0 L118,128" id="Right-margin-L" stroke="#00FFFF" stroke-width="0.5"/>
+  </g>
+  <g id="Symbols">
+    <g id="Regular-S"><path d="M93.445,81.000 L64.000,98.000 L34.555,81.000 L34.555,47.000 L64.000,30.000 L93.445,47.000 Z M64.000,40.000 L77.500,50.000 L72.700,50.000 L64.000,45.760 L55.300,50.000 L50.500,50.000 Z M64.000,52.000 L76.000,61.500 L71.400,61.500 L64.000,57.520 L56.600,61.500 L52.000,61.500 Z M64.000,63.500 L74.500,72.500 L70.100,72.500 L64.000,68.780 L57.900,72.500 L53.500,72.500 Z M64.000,75.800 L69.500,80.000 L64.000,84.200 L58.500,80.000 Z" fill="#000000" fill-rule="evenodd"/></g>
+    <g id="Regular-M"><path d="M98.641,84.000 L64.000,104.000 L29.359,84.000 L29.359,44.000 L64.000,24.000 L98.641,44.000 Z M64.000,37.000 L80.000,49.000 L74.400,49.000 L64.000,43.720 L53.600,49.000 L48.000,49.000 Z M64.000,51.000 L78.000,62.000 L72.800,62.000 L64.000,57.240 L55.200,62.000 L50.000,62.000 Z M64.000,64.500 L76.000,74.500 L71.000,74.500 L64.000,70.500 L57.000,74.500 L52.000,74.500 Z M64.000,79.000 L70.500,84.000 L64.000,89.000 L57.500,84.000 Z" fill="#000000" fill-rule="evenodd"/></g>
+    <g id="Regular-L"><path d="M105.569,88.000 L64.000,112.000 L22.431,88.000 L22.431,40.000 L64.000,16.000 L105.569,40.000 Z M64.000,32.000 L83.000,46.000 L76.500,46.000 L64.000,39.800 L51.500,46.000 L45.000,46.000 Z M64.000,49.000 L80.500,62.000 L74.500,62.000 L64.000,56.200 L53.500,62.000 L47.500,62.000 Z M64.000,65.000 L78.000,77.000 L72.400,77.000 L64.000,71.720 L55.600,77.000 L50.000,77.000 Z M64.000,82.200 L71.500,88.000 L64.000,93.800 L56.500,88.000 Z" fill="#000000" fill-rule="evenodd"/></g>
+  </g>
+</svg>
