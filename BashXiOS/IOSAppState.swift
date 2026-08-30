@@ -56,6 +56,9 @@ final class IOSAppState: ObservableObject {
         }
         reloadNodesFromCache()
         applyDelayCache()
+        if let sel = settings.selectedNodeName, ClashConfigParser.isPlaceholderNodeName(sel) {
+            settings.selectedNodeName = nodes.first(where: { !ClashConfigParser.isPlaceholderNodeName($0.name) })?.name
+        }
         writeConfig()
         // Re-apply with catalog name `AppIcon-*` so SpringBoard never keeps a blank tile
         // from older builds that used bare style rawValues.
@@ -145,6 +148,12 @@ final class IOSAppState: ObservableObject {
     }
 
     func setMode(_ mode: ProxyMode) {
+        // Global mode ignores DOMAIN rules — WeChat image CDN would go overseas and fail.
+        if vpn.isConnected, mode == .global {
+            statusText = "已连接时无法切换全局模式（微信发图需要规则模式）"
+            UISelectionFeedbackGenerator().selectionChanged()
+            return
+        }
         guard settings.proxyMode != mode else {
             // Re-assert live mode if UI already shows it but tunnel drifted.
             if vpn.isConnected {
@@ -662,8 +671,7 @@ final class IOSAppState: ObservableObject {
             statusText = "已切换为规则模式（微信发图需要）"
         }
         await writeConfigNow()
-        // Drop stale geo DBs that make mihomo hang downloading GitHub inside the NE.
-        Self.scrubStaleGeoDatabases()
+        IOSConfigWriter.scrubStaleGeoDatabases()
         if !vpn.isConnected {
             if let issue = MihomoConfigCheck.preflight() {
                 statusText = issue
@@ -680,17 +688,6 @@ final class IOSAppState: ObservableObject {
             scheduleOutboundIPRefresh(delay: 1.5)
         } else {
             outboundIP = "—"
-        }
-    }
-
-    private static func scrubStaleGeoDatabases() {
-        let fm = FileManager.default
-        let home = Paths.mihomoHomeDir
-        for name in ["geoip.metadb", "geosite.dat", "country.mmdb", "GeoLite2-Country.mmdb"] {
-            let url = home.appendingPathComponent(name)
-            if fm.fileExists(atPath: url.path) {
-                try? fm.removeItem(at: url)
-            }
         }
     }
 }

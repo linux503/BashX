@@ -199,6 +199,9 @@ final class VPNManager: ObservableObject {
         reconnectTask?.cancel()
         conflictVPNHint = nil
         do {
+            #if os(iOS)
+            _ = IOSConfigWriter.prepareForConnect()
+            #endif
             if let issue = MihomoConfigCheck.preflight() {
                 lastError = issue
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -339,12 +342,16 @@ final class VPNManager: ObservableObject {
     private func beginConnectWatch() {
         connectWatchTask?.cancel()
         connectWatchTask = Task { [weak self] in
-            for tick in 0..<65 {
+            // Give NE + mihomo more room on cold start (geo scrub / parse) before abort+retry.
+            for tick in 0..<90 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 let s = self.status
                 if s == .connected {
-                    await MainActor.run { self.lastError = nil }
+                    await MainActor.run {
+                        self.lastError = nil
+                        self.reconnectAttempt = 0
+                    }
                     return
                 }
                 if s == .disconnected || s == .invalid {
@@ -355,9 +362,13 @@ final class VPNManager: ObservableObject {
                                 ?? L10n.t("vpn.fail")
                         }
                     }
+                    // Unexpected drop mid-connect → soft reconnect (not stop+loop stampede).
+                    if Self.userWantsConnection(), !self.userInitiatedDisconnect {
+                        self.scheduleAutoReconnect()
+                    }
                     return
                 }
-                if tick >= 55 {
+                if tick >= 75 {
                     await MainActor.run {
                         self.lastError = TunnelLogReader.lastErrorHint() ?? L10n.t("vpn.timeout")
                     }

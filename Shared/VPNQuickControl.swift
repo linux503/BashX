@@ -98,6 +98,14 @@ enum VPNQuickControl {
     }
 
     private static func connect() async throws {
+        // Controls extension cannot link ClashConfigParser / IOSConfigWriter — scrub + rule mode only.
+        // Full rewrite happens in-app via VPNManager → IOSConfigWriter.prepareForConnect().
+        MihomoConfigCheck.scrubStaleGeoDatabases()
+        if UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .string(forKey: "proxyMode") == "global" {
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set("rule", forKey: "proxyMode")
+        }
         if let issue = MihomoConfigCheck.preflight() {
             throw ControlError.configMissing(issue)
         }

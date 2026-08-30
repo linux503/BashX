@@ -22,17 +22,31 @@ enum AppConstants {
     /// App Group: full TUN capture (default) vs HTTP-proxy-only experiment.
     static let iosTunnelCaptureKey = "iosTunnelCapture"
 
-    /// Strategy groups in menu bar / iOS home — Shadowrocket.conf order:
-    /// 谷歌(JP) → 电报 → AI(US) → 日本/香港/台湾/美国 区域组（不含 AUTO）。
-    /// Ref: https://raw.githubusercontent.com/LingJingMaster/Shadowrocket-Rules/refs/heads/main/Shadowrocket.conf
+    /// Strategy groups in menu bar / iOS / Mac panel — Shadowrocket-style service order.
     static let menuProxyGroups: [String] = [
-        "GOOGLE", "TELEGRAM", "AI", "JP", "HK", "TW", "US",
+        "OPENAI", "COPILOT", "AUTO",
+        "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK",
+        "TELEGRAM", "TWITTER", "WHATSAPP",
+        "MICROSOFT", "APPLE", "GOOGLE", "STEAM",
+        "AI", "JP", "HK", "TW", "US",
     ]
 
     /// Human labels for strategy rows (Shadowrocket-style).
     static func groupDisplayName(_ group: String) -> String {
         switch group.uppercased() {
-        case "GOOGLE": return "谷歌"
+        case "OPENAI": return "ChatGPT"
+        case "COPILOT": return "Copilot"
+        case "ANTHROPIC": return "Claude"
+        case "NETFLIX": return "Netflix"
+        case "BILIBILI": return "哔哩哔哩"
+        case "DOUYIN": return "抖音"
+        case "TIKTOK": return "TikTok"
+        case "TWITTER": return "Twitter"
+        case "WHATSAPP": return "WhatsApp"
+        case "MICROSOFT": return "微软服务"
+        case "APPLE": return "苹果服务"
+        case "STEAM": return "Steam"
+        case "GOOGLE": return "谷歌服务"
         case "TELEGRAM": return "电报"
         case "TELEGRAM-FAILOVER": return "电报故障转移"
         case "TELEGRAM-AUTO": return "电报自动"
@@ -44,8 +58,9 @@ enum AppConstants {
         case "HK": return "香港"
         case "TW": return "台湾"
         case "US": return "美国"
-        case "AUTO": return "自动"
-        case "PROXY": return "节点"
+        case "AUTO": return "自动选择"
+        case "PROXY": return "节点选择"
+        case "DIRECT": return "DIRECT"
         default: return group
         }
     }
@@ -91,7 +106,9 @@ enum AppConstants {
         let knownGroups: Set<String> = [
             "GOOGLE", "TELEGRAM", "AI", "JP", "HK", "TW", "US", "AUTO", "PROXY", "DIRECT",
             "TELEGRAM-FAILOVER", "TELEGRAM-AUTO", "CURSOR", "CURSOR-FAILOVER", "CURSOR-AUTO",
-            "GOOGLE-AUTO", "OPENAI", "ANTHROPIC",
+            "GOOGLE-AUTO", "OPENAI", "ANTHROPIC", "COPILOT",
+            "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK", "TWITTER", "WHATSAPP",
+            "MICROSOFT", "APPLE", "STEAM",
         ]
         if knownGroups.contains(upper) {
             return groupDisplayName(raw)

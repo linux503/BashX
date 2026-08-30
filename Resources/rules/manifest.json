@@ -1,10 +1,10 @@
 {
   "name": "BashX Smart Rules",
   "id": "bashx-smart",
-  "version": 20,
-  "updated": "2026-08-28",
-  "description": "Cursor 进程整树+CDN→CURSOR(美国优先) · Google→JP · AI稳定组 · 港股/港银",
-  "ruleCount": 295,
+  "version": 27,
+  "updated": "2026-08-31",
+  "description": "国内优先分流 · B站/抖音直连 · iOS MATCH,DIRECT · Cursor 进程整树 · 政务/银行直连",
+  "ruleCount": 360,
   "source": "https://github.com/LingJingMaster/Shadowrocket-Rules",
   "files": {
     "rules": "bashx-smart-rules.txt",

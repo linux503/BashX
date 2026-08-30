@@ -7,10 +7,9 @@ import Foundation
 /// 0. (Mac) PROCESS-NAME app routing from base — prepended first
 /// 1. WeChat local + LAN
 /// 2. Google / AI / Telegram / GitHub / YouTube  → strategy groups
-/// 3. Apple (push optional PROXY; rest DIRECT)
-/// 4. 国内服务 blanket DIRECT (`.cn` + major apps) — 国内 App 不走节点
-/// 5. GeoIP / 外国 TLD 兜底 → 无法判断走 PROXY
-/// 6. MATCH,PROXY（漏网之鱼）
+/// 3. Apple (push optional PROXY; rest APPLE/DIRECT)
+/// 4. 国内服务 blanket DIRECT（含 B 站/抖音 — 勿默认进策略组）
+/// 5. GeoIP（Mac）/ 外国 TLD；iOS 漏网之鱼 → MATCH,DIRECT
 enum IosRoutingRules {
     /// Full rule list written into mihomo (Packet Tunnel on iOS / local core on Mac).
     static func build(fromBase base: [String]) -> [String] {
@@ -26,6 +25,8 @@ enum IosRoutingRules {
         }
         #endif
 
+        // WeChat CDN/upload first — bare-IP dials must not fall through to MATCH,PROXY.
+        out.append(contentsOf: IosDirectDomains.wechatPriorityRules)
         out.append(contentsOf: bootstrap)
         out.append(contentsOf: proxyFirst)   // must precede China blanket
         out.append(contentsOf: apple)
@@ -111,14 +112,23 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,ggpht.com,GOOGLE",
         "DOMAIN-KEYWORD,youtube,GOOGLE",
         // 🤖 AI
-        "DOMAIN-SUFFIX,openai.com,AI",
-        "DOMAIN-SUFFIX,chatgpt.com,AI",
+        "DOMAIN-SUFFIX,openai.com,OPENAI",
+        "DOMAIN-SUFFIX,chatgpt.com,OPENAI",
         "DOMAIN-SUFFIX,ai.com,AI",
-        "DOMAIN-SUFFIX,anthropic.com,AI",
-        "DOMAIN-SUFFIX,claude.ai,AI",
-        "DOMAIN-SUFFIX,cursor.com,AI",
-        "DOMAIN-SUFFIX,cursor.sh,AI",
-        "DOMAIN-SUFFIX,cursorapi.com,AI",
+        "DOMAIN-SUFFIX,anthropic.com,ANTHROPIC",
+        "DOMAIN-SUFFIX,claude.ai,ANTHROPIC",
+        "DOMAIN,copilot.microsoft.com,COPILOT",
+        "DOMAIN-SUFFIX,githubcopilot.com,COPILOT",
+        "DOMAIN-SUFFIX,cursor.com,CURSOR",
+        "DOMAIN-SUFFIX,cursor.sh,CURSOR",
+        "DOMAIN-SUFFIX,cursorapi.com,CURSOR",
+        "DOMAIN-SUFFIX,cursor-cdn.com,CURSOR",
+        "DOMAIN-SUFFIX,cursorvm.com,CURSOR",
+        "DOMAIN-SUFFIX,anysphere.co,CURSOR",
+        "DOMAIN-SUFFIX,anysphere.com,CURSOR",
+        "DOMAIN-SUFFIX,anysphere.tech,CURSOR",
+        "DOMAIN-KEYWORD,cursor.sh,CURSOR",
+        "DOMAIN-KEYWORD,gcpp.cursor,CURSOR",
         // 📲 电报
         "DOMAIN-SUFFIX,telegram.org,TELEGRAM",
         "DOMAIN-SUFFIX,telegram-cdn.org,TELEGRAM",
@@ -133,30 +143,32 @@ enum IosRoutingRules {
         "IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve",
         "IP-CIDR,91.105.192.0/23,TELEGRAM,no-resolve",
         "IP-CIDR,185.76.151.0/24,TELEGRAM,no-resolve",
-        // 🐱 代码托管
+        // 🐱 代码托管 / Wiki（须在 .org 直连之前）
         "DOMAIN-SUFFIX,github.com,PROXY",
         "DOMAIN-SUFFIX,githubusercontent.com,PROXY",
         "DOMAIN-SUFFIX,githubassets.com,PROXY",
         "DOMAIN-SUFFIX,gitlab.com,PROXY",
+        "DOMAIN-SUFFIX,wikipedia.org,PROXY",
+        "DOMAIN-SUFFIX,wikimedia.org,PROXY",
+        "DOMAIN-SUFFIX,wikidata.org,PROXY",
         // Social
-        "DOMAIN-SUFFIX,twitter.com,PROXY",
-        "DOMAIN-SUFFIX,x.com,PROXY",
-        "DOMAIN-SUFFIX,twimg.com,PROXY",
-        "DOMAIN-SUFFIX,t.co,PROXY",
+        "DOMAIN-SUFFIX,twitter.com,TWITTER",
+        "DOMAIN-SUFFIX,x.com,TWITTER",
+        "DOMAIN-SUFFIX,twimg.com,TWITTER",
+        "DOMAIN-SUFFIX,t.co,TWITTER",
         "DOMAIN-SUFFIX,facebook.com,PROXY",
         "DOMAIN-SUFFIX,fbcdn.net,PROXY",
         "DOMAIN-SUFFIX,instagram.com,PROXY",
         "DOMAIN-SUFFIX,cdninstagram.com,PROXY",
-        "DOMAIN-SUFFIX,whatsapp.com,PROXY",
-        "DOMAIN-SUFFIX,whatsapp.net,PROXY",
+        "DOMAIN-SUFFIX,whatsapp.com,WHATSAPP",
+        "DOMAIN-SUFFIX,whatsapp.net,WHATSAPP",
         "DOMAIN-SUFFIX,discord.com,PROXY",
         "DOMAIN-SUFFIX,discordapp.com,PROXY",
         "DOMAIN-SUFFIX,reddit.com,PROXY",
-        "DOMAIN-SUFFIX,netflix.com,PROXY",
+        "DOMAIN-SUFFIX,netflix.com,NETFLIX",
         "DOMAIN-SUFFIX,spotify.com,PROXY",
-        "DOMAIN-SUFFIX,tiktok.com,PROXY",
-        "DOMAIN-SUFFIX,tiktokcdn.com,PROXY",
-        "DOMAIN-SUFFIX,wikipedia.org,PROXY",
+        "DOMAIN-SUFFIX,tiktok.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokcdn.com,TIKTOK",
         "DOMAIN-SUFFIX,cloudflare.com,PROXY",
         // 📺 .tv TLD + 流媒体（必须在 QUIC REJECT 之前）
         "DOMAIN-SUFFIX,tv,PROXY",
@@ -178,18 +190,18 @@ enum IosRoutingRules {
     // MARK: - 3. Apple DIRECT (non-push)
 
     private static let apple: [String] = [
-        "DOMAIN-SUFFIX,apple.com,DIRECT",
-        "DOMAIN-SUFFIX,icloud.com,DIRECT",
-        "DOMAIN-SUFFIX,icloud-content.com,DIRECT",
-        "DOMAIN-SUFFIX,cdn-apple.com,DIRECT",
-        "DOMAIN-SUFFIX,mzstatic.com,DIRECT",
-        "DOMAIN-SUFFIX,apple-cloudkit.com,DIRECT",
-        "DOMAIN-SUFFIX,apple-mapkit.com,DIRECT",
-        "DOMAIN-SUFFIX,me.com,DIRECT",
-        "DOMAIN-SUFFIX,ess.apple.com,DIRECT",
-        "DOMAIN-SUFFIX,gs.apple.com,DIRECT",
-        "DOMAIN,gateway.icloud.com,DIRECT",
-        "DOMAIN,gsa.apple.com,DIRECT",
+        "DOMAIN-SUFFIX,apple.com,APPLE",
+        "DOMAIN-SUFFIX,icloud.com,APPLE",
+        "DOMAIN-SUFFIX,icloud-content.com,APPLE",
+        "DOMAIN-SUFFIX,cdn-apple.com,APPLE",
+        "DOMAIN-SUFFIX,mzstatic.com,APPLE",
+        "DOMAIN-SUFFIX,apple-cloudkit.com,APPLE",
+        "DOMAIN-SUFFIX,apple-mapkit.com,APPLE",
+        "DOMAIN-SUFFIX,me.com,APPLE",
+        "DOMAIN-SUFFIX,ess.apple.com,APPLE",
+        "DOMAIN-SUFFIX,gs.apple.com,APPLE",
+        "DOMAIN,gateway.icloud.com,APPLE",
+        "DOMAIN,gsa.apple.com,APPLE",
         "IP-CIDR,17.248.0.0/16,DIRECT,no-resolve",
         "IP-CIDR,17.249.0.0/16,DIRECT,no-resolve",
         // System DoH must not hit GOOGLE health-check
@@ -251,9 +263,20 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,bdimg.com,DIRECT",
         "DOMAIN-SUFFIX,baidubce.com,DIRECT",
         "DOMAIN-SUFFIX,bcebos.com,DIRECT",
+        // 抖音 / 字节 — 默认直连（策略组易被选成节点导致打不开）
         "DOMAIN-SUFFIX,bytedance.com,DIRECT",
+        "DOMAIN-SUFFIX,bytedance.net,DIRECT",
+        "DOMAIN-SUFFIX,byteimg.com,DIRECT",
+        "DOMAIN-SUFFIX,byteoversea.com,DIRECT",
         "DOMAIN-SUFFIX,douyin.com,DIRECT",
+        "DOMAIN-SUFFIX,douyincdn.com,DIRECT",
+        "DOMAIN-SUFFIX,douyinpic.com,DIRECT",
+        "DOMAIN-SUFFIX,douyinvod.com,DIRECT",
+        "DOMAIN-SUFFIX,snssdk.com,DIRECT",
+        "DOMAIN-SUFFIX,amemv.com,DIRECT",
+        "DOMAIN-SUFFIX,ixigua.com,DIRECT",
         "DOMAIN-SUFFIX,toutiao.com,DIRECT",
+        "DOMAIN-SUFFIX,toutiaovod.com,DIRECT",
         "DOMAIN-SUFFIX,feishu.cn,DIRECT",
         "DOMAIN-SUFFIX,larksuite.com,DIRECT",
         "DOMAIN-SUFFIX,jd.com,DIRECT",
@@ -267,11 +290,17 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,12306.cn,DIRECT",
         "DOMAIN-SUFFIX,didichuxing.com,DIRECT",
         "DOMAIN-SUFFIX,udache.com,DIRECT",
+        "DOMAIN-SUFFIX,map.qq.com,DIRECT",
+        "DOMAIN-SUFFIX,map.baidu.com,DIRECT",
 
-        // 视频 / 社交 / 资讯
+        // 视频 / 社交 / 资讯 — B 站默认直连
         "DOMAIN-SUFFIX,bilibili.com,DIRECT",
+        "DOMAIN-SUFFIX,bilibili.cn,DIRECT",
         "DOMAIN-SUFFIX,bilivideo.com,DIRECT",
+        "DOMAIN-SUFFIX,bilivideo.cn,DIRECT",
         "DOMAIN-SUFFIX,hdslb.com,DIRECT",
+        "DOMAIN-SUFFIX,biliapi.com,DIRECT",
+        "DOMAIN-SUFFIX,biliapi.net,DIRECT",
         "DOMAIN-SUFFIX,iqiyi.com,DIRECT",
         "DOMAIN-SUFFIX,iqiyipic.com,DIRECT",
         "DOMAIN-SUFFIX,youku.com,DIRECT",
@@ -289,11 +318,14 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,kugou.com,DIRECT",
         "DOMAIN-SUFFIX,kuwo.cn,DIRECT",
         "DOMAIN-SUFFIX,music.163.com,DIRECT",
+        "DOMAIN-SUFFIX,ximalaya.com,DIRECT",
+        "DOMAIN-SUFFIX,xmcdn.com,DIRECT",
 
-        // 厂商 / 支付 / 运营商 / 政务
+        // 厂商 / 支付 / 运营商
         "DOMAIN-SUFFIX,mi.com,DIRECT",
         "DOMAIN-SUFFIX,xiaomi.com,DIRECT",
         "DOMAIN-SUFFIX,miui.com,DIRECT",
+        "DOMAIN-SUFFIX,mi-img.com,DIRECT",
         "DOMAIN-SUFFIX,huawei.com,DIRECT",
         "DOMAIN-SUFFIX,hicloud.com,DIRECT",
         "DOMAIN-SUFFIX,honor.com,DIRECT",
@@ -308,7 +340,68 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,chinamobile.com,DIRECT",
         "DOMAIN-SUFFIX,chinaunicom.com,DIRECT",
         "DOMAIN-SUFFIX,chinatelecom.com.cn,DIRECT",
+
+        // CDN 杂项（国内 App 常用 .com 边缘，勿落 MATCH/PROXY）
+        "DOMAIN-SUFFIX,qiniucdn.com,DIRECT",
+        "DOMAIN-SUFFIX,qiniudn.com,DIRECT",
+        "DOMAIN-SUFFIX,qnssl.com,DIRECT",
+        "DOMAIN-SUFFIX,clouddn.com,DIRECT",
+        "DOMAIN-SUFFIX,upyun.com,DIRECT",
+        "DOMAIN-SUFFIX,upaiyun.com,DIRECT",
+        "DOMAIN-SUFFIX,ksyun.com,DIRECT",
+        "DOMAIN-SUFFIX,ksyuncs.com,DIRECT",
+        "DOMAIN-SUFFIX,ks-cdn.com,DIRECT",
+        "DOMAIN-SUFFIX,volces.com,DIRECT",
+        "DOMAIN-SUFFIX,volccdn.com,DIRECT",
+        "DOMAIN-SUFFIX,hwcdn.net,DIRECT",
+        "DOMAIN-SUFFIX,cdngslb.com,DIRECT",
+        "DOMAIN-SUFFIX,tbcdn.cn,DIRECT",
+        "DOMAIN-SUFFIX,tbcache.com,DIRECT",
+
+        // 政务 / 银行 — 本地直连（勿泛匹配全部 .org，以免误伤 Wikipedia）
         "DOMAIN-SUFFIX,gov.cn,DIRECT",
+        "DOMAIN-SUFFIX,gov,DIRECT",
+        "DOMAIN-SUFFIX,org.cn,DIRECT",
+        "DOMAIN-SUFFIX,edu.cn,DIRECT",
+        "DOMAIN-SUFFIX,ac.cn,DIRECT",
+        "DOMAIN-SUFFIX,mil.cn,DIRECT",
+        "DOMAIN-SUFFIX,bank,DIRECT",
+        "DOMAIN-KEYWORD,bank,DIRECT",
+        "DOMAIN-KEYWORD,gov,DIRECT",
+        "DOMAIN-SUFFIX,icbc.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,icbc.com,DIRECT",
+        "DOMAIN-SUFFIX,ccb.com,DIRECT",
+        "DOMAIN-SUFFIX,abchina.com,DIRECT",
+        "DOMAIN-SUFFIX,bankcomm.com,DIRECT",
+        "DOMAIN-SUFFIX,boc.cn,DIRECT",
+        "DOMAIN-SUFFIX,bankofchina.com,DIRECT",
+        "DOMAIN-SUFFIX,cmbchina.com,DIRECT",
+        "DOMAIN-SUFFIX,cmb.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,cib.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,spdb.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,cebbank.com,DIRECT",
+        "DOMAIN-SUFFIX,cmbc.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,psbc.com,DIRECT",
+        "DOMAIN-SUFFIX,citicbank.com,DIRECT",
+        "DOMAIN-SUFFIX,hxb.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,cgbchina.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,bankofbeijing.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,bosc.cn,DIRECT",
+        "DOMAIN-SUFFIX,hzbank.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,njcb.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,nbcb.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,czbank.com,DIRECT",
+        "DOMAIN-SUFFIX,hsbank.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,bankofshanghai.com,DIRECT",
+        "DOMAIN-SUFFIX,pingan.com,DIRECT",
+        "DOMAIN-SUFFIX,1qianbao.com,DIRECT",
+        "DOMAIN-SUFFIX,webank.com,DIRECT",
+        "DOMAIN-SUFFIX,mybank.cn,DIRECT",
+        "DOMAIN-SUFFIX,chinapay.com,DIRECT",
+        "DOMAIN-SUFFIX,yeepay.com,DIRECT",
+        "DOMAIN-SUFFIX,unionpay.com,DIRECT",
+        "DOMAIN-SUFFIX,95516.com,DIRECT",
+        "DOMAIN-SUFFIX,tenpay.com,DIRECT",
 
         // 其它常用国产
         "DOMAIN-SUFFIX,pinduoduo.com,DIRECT",

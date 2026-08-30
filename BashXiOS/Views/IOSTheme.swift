@@ -101,30 +101,47 @@ struct IOSPageBackground<Content: View>: View {
                         .fill(
                             RadialGradient(
                                 colors: [
-                                    IOSTheme.accentBright.opacity(0.35),
-                                    IOSTheme.accent.opacity(0.12),
+                                    IOSTheme.accentBright.opacity(0.42),
+                                    IOSTheme.accent.opacity(0.16),
                                     Color.clear,
                                 ],
                                 center: .center,
-                                startRadius: 20,
-                                endRadius: geo.size.width * 0.72
+                                startRadius: 16,
+                                endRadius: geo.size.width * 0.78
                             )
                         )
-                        .frame(width: geo.size.width * 1.2, height: geo.size.width * 1.2)
-                        .offset(y: -geo.size.width * 0.35)
-                        .blur(radius: 8)
+                        .frame(width: geo.size.width * 1.35, height: geo.size.width * 1.15)
+                        .offset(y: -geo.size.width * 0.42)
+                        .blur(radius: 10)
+
+                    // Secondary cool bloom
+                    Ellipse()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color(red: 0.35, green: 0.78, blue: 1.0).opacity(0.18),
+                                    Color.clear,
+                                ],
+                                center: .center,
+                                startRadius: 8,
+                                endRadius: 160
+                            )
+                        )
+                        .frame(width: 320, height: 220)
+                        .offset(x: geo.size.width * 0.22, y: -20)
+                        .blur(radius: 28)
 
                     Circle()
-                        .fill(IOSTheme.accentDeep.opacity(0.10))
-                        .frame(width: 220, height: 220)
-                        .offset(x: geo.size.width * 0.32, y: 40)
+                        .fill(IOSTheme.accentDeep.opacity(0.12))
+                        .frame(width: 240, height: 240)
+                        .offset(x: geo.size.width * 0.34, y: 28)
+                        .blur(radius: 44)
+
+                    Circle()
+                        .fill(Color(red: 0.2, green: 0.72, blue: 0.88).opacity(0.10))
+                        .frame(width: 200, height: 200)
+                        .offset(x: -geo.size.width * 0.32, y: 100)
                         .blur(radius: 40)
-
-                    Circle()
-                        .fill(Color(red: 0.2, green: 0.7, blue: 0.85).opacity(0.08))
-                        .frame(width: 180, height: 180)
-                        .offset(x: -geo.size.width * 0.3, y: 120)
-                        .blur(radius: 36)
                 }
                 .allowsHitTesting(false)
             }

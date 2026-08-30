@@ -14,6 +14,9 @@ enum ClashRuleSyntax {
 
     static let knownPolicies: Set<String> = [
         "PROXY", "AUTO", "GOOGLE", "TELEGRAM", "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE",
+        "OPENAI", "ANTHROPIC", "COPILOT", "AI", "CURSOR",
+        "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK", "TWITTER", "WHATSAPP",
+        "MICROSOFT", "APPLE", "STEAM", "JP", "HK", "TW", "US",
     ]
 
     static func parseLines(_ text: String) -> [String] {

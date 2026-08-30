@@ -5,11 +5,16 @@ struct HomeView: View {
     @EnvironmentObject private var state: IOSAppState
     @EnvironmentObject private var vpn: VPNManager
     @State private var showNodePicker = false
+    @State private var showPolicyGroups = false
     @State private var showQuickTools = false
     @State private var showModePicker = false
     @State private var brandAppear = false
     @State private var heroBreath = false
     @State private var heroScan: Double = 0
+    @State private var auroraShift = false
+    @State private var ringSpin: Double = 0
+    @State private var shimmer: CGFloat = -0.4
+    @State private var sparkle = false
 
     private var lang: AppLanguage { state.settings.uiLanguage }
     private func t(_ key: String) -> String { L10n.t(key, lang) }
@@ -20,8 +25,8 @@ struct HomeView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
                         heroSection
-                            .padding(.top, 8)
-                            .padding(.bottom, 16)
+                            .padding(.top, -16)
+                            .padding(.bottom, 8)
 
                         locationBar
                             .padding(.horizontal, 20)
@@ -82,6 +87,11 @@ struct HomeView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $showPolicyGroups) {
+            PolicyGroupsView()
+                .environmentObject(state)
+                .environmentObject(vpn)
+        }
         .sheet(isPresented: $showModePicker) {
             ProxyModePickerSheet(
                 current: state.settings.proxyMode,
@@ -94,42 +104,127 @@ struct HomeView: View {
             .presentationDragIndicator(.visible)
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.7)) { brandAppear = true }
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) { brandAppear = true }
+            startHeroAmbient()
             syncHeroMotion(connected: vpn.isConnected)
             if vpn.isConnected {
                 state.scheduleProxyGroupsRefresh()
             }
         }
         .onChange(of: vpn.isConnected) { connected in
+            syncHeroMotion(connected: connected)
             if connected {
                 state.scheduleProxyGroupsRefresh(delay: 0.6)
             }
+        }
+        .onChange(of: vpn.isBusyConnecting) { _ in
+            syncHeroMotion(connected: vpn.isConnected)
         }
     }
 
     // MARK: - Hero (first viewport = one composition)
 
+    private var heroAccent: Color {
+        if vpn.isConnected { return IOSTheme.good }
+        if vpn.isBusyConnecting { return IOSTheme.warn }
+        return IOSTheme.accent
+    }
+
     private var heroLogoMark: some View {
-        Group {
-            if UIImage(named: state.settings.logoStyle.iosPreviewImageName) != nil {
-                Image(state.settings.logoStyle.iosPreviewImageName)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-            } else {
-                Image(systemName: "app.fill")
-                    .font(.system(size: 36))
-                    .foregroundStyle(IOSTheme.accent)
+        ZStack {
+            // Soft halo behind mark
+            Circle()
+                .fill(heroAccent.opacity(heroBreath ? 0.22 : 0.10))
+                .frame(width: 88, height: 88)
+                .blur(radius: 12)
+                .scaleEffect(heroBreath ? 1.12 : 0.92)
+
+            // Thin tech rings around logo
+            ForEach(0..<2, id: \.self) { i in
+                Circle()
+                    .strokeBorder(
+                        AngularGradient(
+                            colors: [
+                                heroAccent.opacity(0),
+                                heroAccent.opacity(0.55),
+                                IOSTheme.accentBright.opacity(0.35),
+                                heroAccent.opacity(0),
+                            ],
+                            center: .center
+                        ),
+                        lineWidth: i == 0 ? 1.4 : 1
+                    )
+                    .frame(width: 72 + CGFloat(i) * 14, height: 72 + CGFloat(i) * 14)
+                    .rotationEffect(.degrees(ringSpin * (i == 0 ? 1 : -0.7)))
+                    .opacity(0.7)
             }
+
+            Group {
+                if UIImage(named: state.settings.logoStyle.iosPreviewImageName) != nil {
+                    Image(state.settings.logoStyle.iosPreviewImageName)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                } else {
+                    Image(systemName: "app.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(IOSTheme.accent)
+                }
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.55), heroAccent.opacity(0.35), Color.white.opacity(0.15)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.2
+                    )
+            )
+            .shadow(color: heroAccent.opacity(0.35), radius: heroBreath ? 18 : 10, y: 5)
         }
-        .frame(width: 56, height: 56)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
-        )
-        .shadow(color: IOSTheme.accent.opacity(0.28), radius: 14, y: 6)
+        .frame(width: 96, height: 96)
         .animation(.easeInOut(duration: 0.2), value: state.settings.logoStyle)
+    }
+
+    private var brandTitle: some View {
+        Text("BashX")
+            .font(.system(size: 38, weight: .heavy, design: .rounded))
+            .tracking(-1.2)
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [
+                        IOSTheme.ink,
+                        IOSTheme.accentDeep.opacity(0.92),
+                        IOSTheme.ink,
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .overlay {
+                // Light sweep across brand
+                LinearGradient(
+                    colors: [
+                        Color.clear,
+                        Color.white.opacity(0.55),
+                        Color.clear,
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 56)
+                .offset(x: shimmer * 160)
+                .blendMode(.softLight)
+                .mask(
+                    Text("BashX")
+                        .font(.system(size: 38, weight: .heavy, design: .rounded))
+                        .tracking(-1.2)
+                )
+            }
     }
 
     private var heroSection: some View {
@@ -137,38 +232,45 @@ struct HomeView: View {
             heroAtmosphere
                 .allowsHitTesting(false)
 
-            VStack(spacing: 20) {
+            VStack(spacing: 10) {
                 // Brand mark — hero-level, not nav chrome
-                VStack(spacing: 10) {
+                VStack(spacing: 4) {
                     heroLogoMark
-                        .scaleEffect(brandAppear ? 1 : 0.86)
+                        .scaleEffect(brandAppear ? 1 : 0.82)
                         .opacity(brandAppear ? 1 : 0)
-                        .scaleEffect(heroBreath && vpn.isConnected ? 1.04 : 1)
+                        .scaleEffect(heroBreath ? 1.03 : 1)
 
-                    Text("BashX")
-                        .font(IOSTheme.brandFont)
-                        .foregroundStyle(IOSTheme.ink)
-                        .tracking(-0.8)
+                    brandTitle
                         .opacity(brandAppear ? 1 : 0)
-                        .offset(y: brandAppear ? 0 : 8)
+                        .offset(y: brandAppear ? 0 : 10)
 
                     Text(heroSubtitle)
-                        .font(.system(.subheadline, design: .rounded).weight(.medium))
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 28)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(.ultraThinMaterial)
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .strokeBorder(heroAccent.opacity(0.18), lineWidth: 0.6)
+                                )
+                        )
                         .opacity(brandAppear ? 1 : 0)
+                        .padding(.top, 2)
                 }
 
-                IOSStatusPill(
-                    text: homeStatusText,
-                    tone: vpn.isConnected ? .connected : (vpn.isBusyConnecting ? .connecting : .idle)
-                )
+                HStack(spacing: 8) {
+                    IOSStatusPill(
+                        text: homeStatusText,
+                        tone: vpn.isConnected ? .connected : (vpn.isBusyConnecting ? .connecting : .idle)
+                    )
+                    modePill
+                }
                 .scaleEffect(brandAppear ? 1 : 0.9)
                 .opacity(brandAppear ? 1 : 0)
-
-                modePill
-                    .opacity(brandAppear ? 1 : 0)
 
                 IOSConnectControl(
                     isConnected: vpn.isConnected,
@@ -177,11 +279,11 @@ struct HomeView: View {
                 ) {
                     Task { await state.toggleVPN() }
                 }
-                .padding(.top, 4)
+                .padding(.top, 0)
 
                 if state.nodes.isEmpty, !vpn.isConnected {
                     firstUseGuide
-                        .padding(.top, 8)
+                        .padding(.top, 4)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
 
@@ -219,100 +321,180 @@ struct HomeView: View {
                 }
             }
         }
-        .onChange(of: vpn.isConnected) { connected in
-            syncHeroMotion(connected: connected)
-        }
     }
 
     private var heroAtmosphere: some View {
         ZStack {
-            if vpn.isConnected {
-                connectedBreathField
-                connectedScanArc
-                connectedOrbitDots
-            } else if vpn.isBusyConnecting {
+            // Always-on aurora wash
+            Ellipse()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            heroAccent.opacity(auroraShift ? 0.34 : 0.16),
+                            IOSTheme.accentBright.opacity(0.12),
+                            Color.clear,
+                        ],
+                        center: .center,
+                        startRadius: 8,
+                        endRadius: 210
+                    )
+                )
+                .frame(width: 460, height: 340)
+                .blur(radius: 30)
+                .offset(x: auroraShift ? 22 : -26, y: auroraShift ? -12 : 14)
+                .scaleEffect(heroBreath ? 1.1 : 0.92)
+
+            Ellipse()
+                .fill(IOSTheme.accentDeep.opacity(auroraShift ? 0.16 : 0.07))
+                .frame(width: 280, height: 210)
+                .blur(radius: 38)
+                .offset(x: auroraShift ? -48 : 40, y: 36)
+
+            // Glass disc behind connect button
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color.white.opacity(0.14),
+                            Color.white.opacity(0.02),
+                            Color.clear,
+                        ],
+                        center: .center,
+                        startRadius: 20,
+                        endRadius: 150
+                    )
+                )
+                .frame(width: 300, height: 300)
+                .blur(radius: 1)
+                .opacity(0.9)
+
+            // Concentric dashed rings (premium VPN radar)
+            ForEach(0..<4, id: \.self) { i in
                 Circle()
-                    .fill(IOSTheme.warn.opacity(0.16))
-                    .frame(width: 280, height: 280)
+                    .strokeBorder(
+                        heroAccent.opacity(0.16 - Double(i) * 0.03),
+                        style: StrokeStyle(lineWidth: i == 0 ? 1.4 : 1, dash: [2 + CGFloat(i), 6 + CGFloat(i) * 2])
+                    )
+                    .frame(width: 150 + CGFloat(i) * 38, height: 150 + CGFloat(i) * 38)
+                    .rotationEffect(.degrees(ringSpin * (i % 2 == 0 ? 1 : -1) * (0.28 + Double(i) * 0.08)))
+                    .opacity(sparkle ? 0.9 : 0.35)
+            }
+
+            // Dual sweep arcs (counter-rotating)
+            Circle()
+                .trim(from: 0.0, to: 0.14)
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            heroAccent.opacity(0),
+                            heroAccent.opacity(0.65),
+                            IOSTheme.accentBright.opacity(0.3),
+                            heroAccent.opacity(0),
+                        ],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 20, lineCap: .round)
+                )
+                .frame(width: 236, height: 236)
+                .rotationEffect(.degrees(heroScan))
+                .opacity(vpn.isConnected ? 0.7 : 0.4)
+                .blur(radius: 0.6)
+
+            Circle()
+                .trim(from: 0.0, to: 0.08)
+                .stroke(
+                    AngularGradient(
+                        colors: [
+                            Color.clear,
+                            IOSTheme.accentBright.opacity(0.5),
+                            Color.clear,
+                        ],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                )
+                .frame(width: 290, height: 290)
+                .rotationEffect(.degrees(-heroScan * 0.7 + 40))
+                .opacity(0.45)
+
+            // Tick marks (compass / premium dial)
+            ForEach(0..<24, id: \.self) { i in
+                Capsule()
+                    .fill(heroAccent.opacity(i % 6 == 0 ? 0.45 : 0.18))
+                    .frame(width: i % 6 == 0 ? 2.2 : 1.2, height: i % 6 == 0 ? 10 : 5)
+                    .offset(y: -148)
+                    .rotationEffect(.degrees(Double(i) / 24.0 * 360.0 + ringSpin * 0.15))
+                    .opacity(sparkle ? 0.85 : 0.4)
+            }
+
+            // Orbit sparks
+            ForEach(0..<10, id: \.self) { i in
+                orbitSpark(index: i)
+            }
+
+            if vpn.isBusyConnecting {
+                Circle()
+                    .strokeBorder(IOSTheme.warn.opacity(0.4), lineWidth: 2.5)
+                    .frame(width: 210, height: 210)
+                    .scaleEffect(heroBreath ? 1.22 : 0.86)
+                    .opacity(heroBreath ? 0.12 : 0.6)
+            }
+
+            if vpn.isConnected {
+                // Soft green bloom when protected
+                Circle()
+                    .fill(IOSTheme.good.opacity(heroBreath ? 0.18 : 0.08))
+                    .frame(width: 260, height: 260)
                     .blur(radius: 24)
-                    .scaleEffect(heroBreath ? 1.06 : 0.96)
             }
         }
         .frame(maxWidth: .infinity)
         .frame(height: 0)
-        .offset(y: 120)
+        .offset(y: 88)
     }
 
-    private var connectedBreathField: some View {
-        Circle()
-            .fill(
-                RadialGradient(
-                    colors: [
-                        IOSTheme.good.opacity(heroBreath ? 0.28 : 0.14),
-                        IOSTheme.good.opacity(0.05),
-                        Color.clear,
-                    ],
-                    center: .center,
-                    startRadius: 20,
-                    endRadius: 210
-                )
-            )
-            .frame(width: 420, height: 420)
-            .scaleEffect(heroBreath ? 1.08 : 0.94)
-            .blur(radius: 2)
-    }
-
-    private var connectedScanArc: some View {
-        Circle()
-            .trim(from: 0.02, to: 0.22)
-            .stroke(
-                AngularGradient(
-                    colors: [
-                        IOSTheme.good.opacity(0),
-                        IOSTheme.good.opacity(0.45),
-                        IOSTheme.accentBright.opacity(0.2),
-                        IOSTheme.good.opacity(0),
-                    ],
-                    center: .center
-                ),
-                style: StrokeStyle(lineWidth: 28, lineCap: .round)
-            )
-            .frame(width: 300, height: 300)
-            .rotationEffect(.degrees(heroScan))
-            .opacity(0.55)
-            .blur(radius: 1)
-    }
-
-    private var connectedOrbitDots: some View {
-        ZStack {
-            ForEach(0..<6, id: \.self) { i in
-                orbitDot(index: i)
-            }
-        }
-    }
-
-    private func orbitDot(index: Int) -> some View {
-        let angle = Double(index) / 6.0 * .pi * 2.0 + heroScan * .pi / 180.0
+    private func orbitSpark(index: Int) -> some View {
+        let base = Double(index) / 10.0 * .pi * 2.0
+        let angle = base + heroScan * .pi / 180.0 * (index % 2 == 0 ? 1 : -0.55)
+        let radiusX: CGFloat = 100 + CGFloat(index % 4) * 12
+        let radiusY: CGFloat = 72 + CGFloat(index % 3) * 14
         return Circle()
-            .fill(index % 2 == 0 ? IOSTheme.good : IOSTheme.accentBright)
-            .frame(width: 4, height: 4)
-            .opacity(heroBreath ? 0.9 : 0.35)
-            .offset(x: cos(angle) * 118, y: sin(angle) * 88)
-            .shadow(color: IOSTheme.good.opacity(0.6), radius: 3)
+            .fill(index % 2 == 0 ? heroAccent : IOSTheme.accentBright)
+            .frame(width: index % 3 == 0 ? 5.5 : 3, height: index % 3 == 0 ? 5.5 : 3)
+            .opacity(sparkle ? 0.95 : 0.22)
+            .offset(x: cos(angle) * radiusX, y: sin(angle) * radiusY)
+            .shadow(color: heroAccent.opacity(0.75), radius: 3.5)
+            .blur(radius: index % 3 == 0 ? 0 : 0.5)
+    }
+
+    private func startHeroAmbient() {
+        withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) {
+            auroraShift = true
+            heroBreath = true
+            sparkle = true
+        }
+        withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) {
+            ringSpin = 360
+        }
+        withAnimation(.linear(duration: 9).repeatForever(autoreverses: false)) {
+            heroScan = 360
+        }
+        withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: false)) {
+            shimmer = 1.15
+        }
     }
 
     private func syncHeroMotion(connected: Bool) {
-        heroBreath = false
-        heroScan = 0
-        if connected || vpn.isBusyConnecting {
-            withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
-                heroBreath = true
-            }
+        // Keep ambient motion; boost intensity when connected / connecting.
+        let breathDur: Double = (connected || vpn.isBusyConnecting) ? 1.55 : 3.2
+        let scanDur: Double = connected ? 5.2 : (vpn.isBusyConnecting ? 3.8 : 9.0)
+        withAnimation(.easeInOut(duration: breathDur).repeatForever(autoreverses: true)) {
+            heroBreath = true
+            sparkle = true
+            auroraShift = true
         }
-        if connected {
-            withAnimation(.linear(duration: 6.5).repeatForever(autoreverses: false)) {
-                heroScan = 360
-            }
+        withAnimation(.linear(duration: scanDur).repeatForever(autoreverses: false)) {
+            heroScan = 360
         }
     }
 
@@ -490,88 +672,63 @@ struct HomeView: View {
         .opacity(state.nodes.isEmpty ? 0.55 : 1)
     }
 
-    // MARK: - Proxy groups (GOOGLE / TELEGRAM / AUTO / AI / JP / HK / US)
+    // MARK: - Proxy groups entry (full list in PolicyGroupsView)
 
     @ViewBuilder
     private var proxyGroupsBar: some View {
         if !vpn.isConnected {
             EmptyView()
-        } else if state.proxyGroups.isEmpty {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text(t("home.loadingGroups"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button(t("home.refresh")) {
-                    state.scheduleProxyGroupsRefresh()
-                }
-                .font(.caption.weight(.semibold))
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(groupBarBackground)
         } else {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(t("home.groups"))
-                        .font(.system(.caption, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        state.scheduleProxyGroupsRefresh()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.caption.weight(.bold))
+            Button {
+                showPolicyGroups = true
+                state.scheduleProxyGroupsRefresh()
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(t("home.groups"))
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(groupsSummaryText)
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    if state.proxyGroups.isEmpty {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text("\(state.proxyGroups.count)")
+                            .font(.system(.caption, design: .rounded).weight(.bold))
                             .foregroundStyle(IOSTheme.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(IOSTheme.accent.opacity(0.12))
+                            )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(t("home.refreshGroups"))
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.tertiary)
                 }
-
-                ForEach(state.proxyGroups) { group in
-                    Menu {
-                        ForEach(group.all.prefix(60), id: \.self) { name in
-                            Button {
-                                state.selectGroupProxy(group: group.name, name: name)
-                            } label: {
-                                if name == group.now {
-                                    Label(AppConstants.shortProxyLabel(name, limit: 28), systemImage: "checkmark")
-                                } else {
-                                    Text(AppConstants.shortProxyLabel(name, limit: 28))
-                                }
-                            }
-                        }
-                        if group.all.count > 60 {
-                            Text(String(format: t("home.groupsMore"), "\(group.all.count)"))
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
-                            Text(AppConstants.groupDisplayName(group.name))
-                                .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .frame(minWidth: 52, alignment: .leading)
-
-                            Spacer(minLength: 8)
-
-                            Text(groupSelectionLabel(group.now))
-                                .font(.system(.subheadline, design: .rounded).weight(.medium))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .multilineTextAlignment(.trailing)
-
-                            Image(systemName: "chevron.up.chevron.down")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background(groupBarBackground)
-                    }
-                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .background(groupBarBackground)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(t("home.groupsOpen"))
         }
+    }
+
+    private var groupsSummaryText: String {
+        if state.proxyGroups.isEmpty {
+            return t("home.loadingGroups")
+        }
+        let preview = state.proxyGroups.prefix(3).map {
+            AppConstants.groupDisplayName($0.name)
+        }.joined(separator: " · ")
+        return preview.isEmpty ? t("home.groupsHint") : preview
     }
 
     private var groupBarBackground: some View {
@@ -640,17 +797,6 @@ struct HomeView: View {
                     .padding(.top, 4)
             }
         }
-    }
-
-    private func groupSelectionLabel(_ now: String) -> String {
-        let raw = now.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return "—" }
-        let known = ["GOOGLE", "TELEGRAM", "AI", "JP", "HK", "TW", "US", "AUTO", "PROXY", "DIRECT",
-                     "TELEGRAM-FAILOVER", "TELEGRAM-AUTO", "CURSOR", "CURSOR-FAILOVER", "CURSOR-AUTO"]
-        if known.contains(raw.uppercased()) {
-            return AppConstants.groupDisplayName(raw)
-        }
-        return AppConstants.shortProxyLabel(raw, limit: 18)
     }
 
     private func shouldShowStatusHint(_ text: String) -> Bool {

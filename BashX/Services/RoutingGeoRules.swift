@@ -23,22 +23,22 @@ enum RoutingGeoRules {
         "GEOIP,!CN,PROXY,no-resolve",
     ]
 
-    /// Mac without geo DB yet — domain TLD fallback only.
+    /// Mac without geo DB yet — specific foreign TLDs + MATCH,PROXY.
     static let macLite: [String] = foreignTLDProxy + [
         "MATCH,PROXY",
     ]
 
-    /// iOS NE: no geo DB (memory / jetsam) — TLD + MATCH,PROXY.
+    /// iOS NE: no geo DB — **never** blanket `DOMAIN-SUFFIX,com/net,PROXY`
+    /// (breaks Alipay/WeChat/bank CDN on obscure .com hosts). Shadowrocket-style:
+    /// proxyFirst already lists overseas services; unknown → DIRECT (国内优先).
     static let iosLite: [String] = foreignTLDProxy + [
-        "MATCH,PROXY",
+        "DOMAIN-SUFFIX,bank,DIRECT",
+        "MATCH,DIRECT",
     ]
 
     /// Foreign TLD catch-all when GEOSITE,tld-!cn unavailable.
-    /// Placed after chinaDirect — known CN domains already matched.
+    /// Do NOT include `.com` / `.net` — too many CN CDNs live there.
     private static let foreignTLDProxy: [String] = [
-        "DOMAIN-SUFFIX,com,PROXY",
-        "DOMAIN-SUFFIX,net,PROXY",
-        "DOMAIN-SUFFIX,org,PROXY",
         "DOMAIN-SUFFIX,io,PROXY",
         "DOMAIN-SUFFIX,co,PROXY",
         "DOMAIN-SUFFIX,app,PROXY",

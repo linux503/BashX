@@ -20,6 +20,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let logQueue = DispatchQueue(label: "bashx.tunnel.log", qos: .utility)
     private var lastOutboundIF: String = ""
     private var lastPathCloseAt: Date = .distantPast
+    /// Require consecutive dead-core ticks before cancel — single false read caused flap loops.
+    private var coreDeadStreak = 0
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         // Keep prior session tail for diagnosing abrupt jetsam kills.
@@ -50,15 +52,31 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // Broken / mismatched geo files make mihomo try GitHub download during Parse and hang the NE.
         scrubStaleGeoDatabases()
 
-        let settings = makeNetworkSettings(tunnelCapture: Self.loadTunnelCapture())
-        setTunnelNetworkSettings(settings) { [weak self] error in
+        // Start mihomo BEFORE setTunnelNetworkSettings — otherwise default-route + DNS hijack
+        // go live while the core is still parsing config (WeChat / all apps lose network).
+        let tunnelCapture = Self.loadTunnelCapture()
+        bootCore(tunnelCapture: tunnelCapture) { [weak self] result in
             guard let self else { return }
-            if let error {
-                self.writeLog("setTunnelNetworkSettings failed: \(error)")
-                self.finish(completionHandler, error)
-                return
+            switch result {
+            case .failure(let err):
+                self.finish(completionHandler, err)
+            case .success(let pendingBridgeFd):
+                let settings = self.makeNetworkSettings(tunnelCapture: tunnelCapture)
+                self.setTunnelNetworkSettings(settings) { error in
+                    if let error {
+                        self.writeLog("setTunnelNetworkSettings failed: \(error)")
+                        self.finish(completionHandler, error)
+                        return
+                    }
+                    if pendingBridgeFd >= 0 {
+                        self.startPacketBridge(bridgeFd: pendingBridgeFd)
+                    }
+                    self.finish(completionHandler, nil)
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                        self?.runConnectivityDiagnostics()
+                    }
+                }
             }
-            self.startEngine(completionHandler)
         }
         #else
         writeLog("MihomoCore missing — run scripts/build_mihomo_ios.sh")
@@ -67,11 +85,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     #if canImport(MihomoCore)
-    /// iOS 18+：必须 socketpair + packetFlow 桥；utun 直读收不到 App 包（Stash 新版用 Darwin Tun + 自有桥）。
-    private func startEngine(_ completionHandler: @escaping (Error?) -> Void) {
+    /// Bring up mihomo (DNS + mixed-port + TUN fd) before NE routes traffic into the tunnel.
+    private func bootCore(tunnelCapture: Bool, completion: @escaping (Result<Int32, Error>) -> Void) {
         BridgeUpdateLogLevel("warning")
 
-        let tunnelCapture = Self.loadTunnelCapture()
         let bindIF = TunnelInterface.preferredOutboundInterface() ?? ""
         BridgeSetOutboundInterface(bindIF)
         writeLog("outbound bindIF=\(bindIF.isEmpty ? "(none)" : bindIF)")
@@ -80,25 +97,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         guard tunnelCapture else {
             writeLog("TUN mode=off proxy-only mixed-port=\(AppConstants.mixedPort)")
             packetBridge = nil
-            applyAndStart(tunFd: -1, socketpair: false, completionHandler)
+            startCoreOnly(tunFd: -1, socketpair: false, pendingBridgeFd: -1, completion: completion)
             return
         }
 
         guard let pair = TunnelSocketPair.make() else {
             writeLog("socketpair failed errno=\(errno)")
-            finish(completionHandler, TunnelError.tunFDNotFound)
+            completion(.failure(TunnelError.tunFDNotFound))
             return
         }
-        writeLog("TUN mode=socketpair+gvisor mihomoFd=\(pair.mihomoFd) bridgeFd=\(pair.bridgeFd)")
-        startPacketBridge(bridgeFd: pair.bridgeFd)
-        applyAndStart(tunFd: pair.mihomoFd, socketpair: true, completionHandler)
+        writeLog("TUN mode=socketpair+gvisor mihomoFd=\(pair.mihomoFd) bridgeFd=\(pair.bridgeFd) (bridge deferred until NE routes live)")
+        startCoreOnly(tunFd: pair.mihomoFd, socketpair: true, pendingBridgeFd: pair.bridgeFd, completion: completion)
     }
 
-    private enum TunnelDataMode {
-        case socketpair(TunnelSocketPair.Pair)
-    }
-
-    private func applyAndStart(tunFd: Int32, socketpair: Bool, _ completionHandler: @escaping (Error?) -> Void) {
+    private func startCoreOnly(
+        tunFd: Int32,
+        socketpair: Bool,
+        pendingBridgeFd: Int32,
+        completion: @escaping (Result<Int32, Error>) -> Void
+    ) {
         BridgeConfigureTUNPath(socketpair)
 
         if tunFd >= 0 {
@@ -108,7 +125,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     NSLocalizedDescriptionKey: "SetTUNFd 失败"
                 ])
                 writeLog("SetTUNFd failed: \(err)")
-                finish(completionHandler, err)
+                completion(.failure(err))
                 return
             }
         } else {
@@ -125,7 +142,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 NSLocalizedDescriptionKey: "mihomo 启动失败"
             ])
             writeLog("start failed ok=\(ok) err=\(err)")
-            finish(completionHandler, err)
+            completion(.failure(err))
             return
         }
         writeLog("api secret=\(apiSecret.isEmpty ? "off" : "on")")
@@ -139,23 +156,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             if tunFd < 0 { return "proxy-only" }
             return socketpair ? "socketpair+gvisor" : "utun-direct+gvisor"
         }()
-        writeLog("proxy started running=\(BridgeIsRunning()) path=\(path)")
-        // Proxy-only: re-assert NEProxySettings after mixed-port is listening.
-        if tunFd < 0 {
-            let settings = makeNetworkSettings(tunnelCapture: false)
-            setTunnelNetworkSettings(settings) { [weak self] error in
-                if let error {
-                    self?.writeLog("re-apply proxy settings failed: \(error.localizedDescription)")
-                } else {
-                    self?.writeLog("re-apply proxy settings ok (127.0.0.1:\(AppConstants.mixedPort))")
-                }
-            }
-        }
-        finish(completionHandler, nil)
-
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2.0) { [weak self] in
-            self?.runConnectivityDiagnostics()
-        }
+        writeLog("core ready running=\(BridgeIsRunning()) path=\(path)")
+        completion(.success(pendingBridgeFd))
     }
 
     private func startPacketBridge(bridgeFd: Int32) {
@@ -312,12 +314,51 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         return ud?.bool(forKey: AppConstants.iosTunnelCaptureKey) ?? true
     }
 
+    /// Tencent / WeChat CDN — bypass utun at NE layer (mirrors mihomo route-exclude-address).
+    private static let wechatBypassRoutes: [NEIPv4Route] = [
+        NEIPv4Route(destinationAddress: "1.12.0.0", subnetMask: "255.252.0.0"),
+        NEIPv4Route(destinationAddress: "14.17.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "14.18.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "14.19.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "14.116.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "43.154.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "58.247.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "58.251.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "59.37.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "101.32.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "101.226.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "101.227.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "109.244.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "111.30.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "113.96.0.0", subnetMask: "255.240.0.0"),
+        NEIPv4Route(destinationAddress: "119.147.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "121.51.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "129.226.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "140.207.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "157.255.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "180.101.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "180.163.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "182.254.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "183.3.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "183.36.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "183.47.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "183.57.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "183.60.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "183.192.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "183.232.0.0", subnetMask: "255.255.0.0"),
+        NEIPv4Route(destinationAddress: "203.205.128.0", subnetMask: "255.255.192.0"),
+        NEIPv4Route(destinationAddress: "211.95.0.0", subnetMask: "255.255.0.0"),
+    ]
+
     private func makeNetworkSettings(tunnelCapture: Bool) -> NEPacketTunnelNetworkSettings {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "254.1.1.1")
+        settings.mtu = 1400
 
         if tunnelCapture {
             let ipv4 = NEIPv4Settings(addresses: [AppConstants.tunAddress], subnetMasks: [AppConstants.tunSubnetMask])
             ipv4.includedRoutes = [NEIPv4Route.default()]
+            // Keep WeChat / Tencent CDN on the physical path during any brief core boot window.
+            ipv4.excludedRoutes = Self.wechatBypassRoutes
             settings.ipv4Settings = ipv4
             // Do NOT capture IPv6: mihomo runs with ipv6:false, and WeChat media often
             // prefers IPv6 CDN — swallowing v6 into TUN then dropping it breaks 发图.
@@ -523,18 +564,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Local API alone is NOT enough — NE idle looks at packetFlow traffic.
     private func startKeepalive() {
         keepaliveTimer?.cancel()
+        coreDeadStreak = 0
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + 12, repeating: 22)
+        // ~15s: stay under typical NE idle (~30–60s) without hammering CPU/jetsam.
+        timer.schedule(deadline: .now() + 8, repeating: 15)
         timer.setEventHandler { [weak self] in
             guard let self, self.proxyStarted else { return }
             #if canImport(MihomoCore)
             if !BridgeIsRunning() {
-                self.writeLog("keepalive: mihomo dead — canceling tunnel for recovery")
-                self.cancelTunnelWithError(NSError(domain: "BashX", code: -40, userInfo: [
-                    NSLocalizedDescriptionKey: "核心已停止，正在重连"
-                ]))
+                self.coreDeadStreak += 1
+                self.writeLog("keepalive: mihomo running=false streak=\(self.coreDeadStreak)")
+                if self.coreDeadStreak >= 2 {
+                    self.writeLog("keepalive: mihomo dead — canceling tunnel for recovery")
+                    self.cancelTunnelWithError(NSError(domain: "BashX", code: -40, userInfo: [
+                        NSLocalizedDescriptionKey: "核心已停止，正在重连"
+                    ]))
+                }
                 return
             }
+            self.coreDeadStreak = 0
             #endif
             // 1) Touch local API (cheap health check).
             if let url = URL(string: "http://\(AppConstants.externalController)/version") {

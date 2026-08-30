@@ -54,7 +54,22 @@ enum ClashConfigParser {
         stableAINodeName: String? = nil,
         excludedNodeNames: Set<String> = []
     ) -> String {
-        let proxies: [[String: Any]] = nodes.map { node in
+        let exportNodes: [ProxyNode] = {
+            guard forIOS else { return nodes }
+            let real = nodes.filter { Self.isSpeedTestable($0) }
+            let pool = real.isEmpty
+                ? nodes.filter { !Self.isPlaceholderNodeName($0.name) }
+                : real
+            guard !pool.isEmpty else { return nodes }
+            let cap = 32
+            let selected = selectedName.flatMap { name in pool.first(where: { $0.name == name }) }
+            var names = Self.urlTestPool(from: pool.map(\.name), selected: selected?.name, limit: cap)
+            if names.isEmpty { names = Array(pool.prefix(cap).map(\.name)) }
+            let picked = Set(names)
+            return pool.filter { picked.contains($0.name) }
+        }()
+
+        let proxies: [[String: Any]] = exportNodes.map { node in
             var dict: [String: Any] = [:]
             for (k, v) in node.raw {
                 dict[k] = unwrap(v.value)
@@ -68,7 +83,7 @@ enum ClashConfigParser {
             return dict
         }
 
-        let names = nodes.map(\.name)
+        let names = exportNodes.map(\.name)
         let realNames = names.filter { !Self.isPlaceholderNodeName($0) }
         let selected = selectedName.flatMap { name in
             realNames.contains(name) ? name : nil
@@ -77,8 +92,10 @@ enum ClashConfigParser {
         let healthyNames = realNames.filter { !excludedNodeNames.contains($0) }
         let poolSource = healthyNames.isEmpty ? realNames : healthyNames
         let baseRules = (rules.isEmpty ? AppSettings.defaultRules : rules)
-        let rewrittenRules = Self.normalizeAIRules(
-            Self.normalizeGoogleRules(Self.normalizeTelegramRules(baseRules))
+        let rewrittenRules = Self.normalizeServiceRules(
+            Self.normalizeAIRules(
+                Self.normalizeGoogleRules(Self.normalizeTelegramRules(baseRules))
+            )
         )
         let finalRules = rewrittenRules.isEmpty ? AppSettings.defaultRules : rewrittenRules
 
@@ -169,6 +186,15 @@ enum ClashConfigParser {
             Self.regionUrlTest(name: "TW", proxies: twProxies, interval: 600),
         ]
 
+        let serviceGroups = Self.serviceSelectGroups(
+            poolSource: poolSource,
+            jpProxies: jpProxies,
+            hkProxies: hkProxies,
+            usProxies: usProxies,
+            twProxies: twProxies,
+            forIOS: forIOS
+        )
+
         let auxiliaryGroups: [[String: Any]] = {
             if forIOS {
                 // Must include every hub listed in PROXY/GLOBAL (TW was missing → mihomo reject).
@@ -179,7 +205,8 @@ enum ClashConfigParser {
                     Self.iosSelectGroup(name: "HK", proxies: hkProxies),
                     Self.iosSelectGroup(name: "US", proxies: usProxies),
                     Self.iosSelectGroup(name: "TW", proxies: twProxies),
-                ] + Self.telegramGroups(proxies: telegramProxies, forIOS: true) + cursorGroups + aiGroups
+                ] + Self.telegramGroups(proxies: telegramProxies, forIOS: true)
+                    + cursorGroups + aiGroups + serviceGroups
             }
             // Shadowrocket-style: GOOGLE prefers JP, then HK, then GOOGLE-AUTO / PROXY.
             // Do not nest PROXY inside GOOGLE if PROXY may list GOOGLE — PROXY is leaf+region only.
@@ -218,7 +245,8 @@ enum ClashConfigParser {
                 ],
                 googleAuto,
                 googleSelect,
-            ] + regionGroups + Self.telegramGroups(proxies: telegramProxies, forIOS: false) + cursorGroups + aiGroups
+            ] + regionGroups + Self.telegramGroups(proxies: telegramProxies, forIOS: false)
+                + cursorGroups + aiGroups + serviceGroups
         }()
 
         let iosMixedPort = forIOS && !tunEnabled ? mixedPort : (forIOS ? 0 : mixedPort)
@@ -308,20 +336,23 @@ enum ClashConfigParser {
                 "strict-route": false
             ]
             if forIOS {
-                // Bypass TUN entirely for common WeChat/QQ CDN edges — survives global mode
-                // and avoids gVisor breaking large image uploads.
+                // Bypass TUN entirely for WeChat/QQ CDN — gVisor DIRECT still slows 发图.
+                tun["mtu"] = 1400
                 tun["route-exclude-address"] = [
+                    "1.12.0.0/14",
                     "14.17.0.0/16", "14.18.0.0/16", "14.19.0.0/16", "14.116.0.0/16",
-                    "101.226.0.0/16", "101.227.0.0/16",
+                    "43.154.0.0/16",
+                    "58.247.0.0/16", "58.251.0.0/16", "59.37.0.0/16",
+                    "101.32.0.0/16", "101.226.0.0/16", "101.227.0.0/16",
+                    "109.244.0.0/16", "111.30.0.0/16",
                     "113.96.0.0/12",
-                    "119.147.0.0/16", "121.51.0.0/16",
+                    "119.147.0.0/16", "121.51.0.0/16", "129.226.0.0/16",
                     "140.207.0.0/16", "157.255.0.0/16",
-                    "180.163.0.0/16", "182.254.0.0/16",
+                    "180.101.0.0/16", "180.163.0.0/16", "182.254.0.0/16",
                     "183.3.0.0/16", "183.36.0.0/16", "183.47.0.0/16",
                     "183.57.0.0/16", "183.60.0.0/16",
                     "183.192.0.0/16", "183.232.0.0/16",
                     "203.205.128.0/19", "211.95.0.0/16",
-                    "58.251.0.0/16", "59.37.0.0/16",
                 ]
             }
             root["tun"] = tun
@@ -357,7 +388,7 @@ enum ClashConfigParser {
         ]
     ]
 
-    /// iOS NE: sniff for DOMAIN rules, but keep original destination (WeChat-safe).
+    /// iOS NE: sniff SNI so bare-IP WeChat CDN hits DOMAIN→DIRECT (do NOT skip weixin/qpic).
     private static let iosSnifferBlock: [String: Any] = [
         "enable": true,
         "force-dns-mapping": true,
@@ -379,6 +410,66 @@ enum ClashConfigParser {
     private static func iosSelectGroup(name: String, proxies: [String]) -> [String: Any] {
         let list = proxies.isEmpty ? ["DIRECT"] : proxies
         return ["name": name, "type": "select", "proxies": list]
+    }
+
+    /// Manual policy groups for Netflix / TikTok / social / domestic services (Shadowrocket-style).
+    /// Never nest these into PROXY — PROXY may only list leaf hubs (AUTO/JP/HK/…) to avoid loops.
+    private static func serviceSelectGroups(
+        poolSource: [String],
+        jpProxies: [String],
+        hkProxies: [String],
+        usProxies: [String],
+        twProxies: [String],
+        forIOS: Bool
+    ) -> [[String: Any]] {
+        let leafCap = forIOS ? 6 : 24
+        let leaves = Array(poolSource.filter { $0 != "DIRECT" && !Self.isPlaceholderNodeName($0) }.prefix(leafCap))
+
+        func hasHub(_ proxies: [String]) -> Bool {
+            !proxies.isEmpty && proxies != ["DIRECT"]
+        }
+
+        func members(
+            hubs: [String],
+            preferDirect: Bool,
+            includeProxy: Bool,
+            proxyFirst: Bool = false
+        ) -> [String] {
+            var list: [String] = []
+            if preferDirect { list.append("DIRECT") }
+            if proxyFirst { list.append("PROXY") }
+            for hub in hubs where !list.contains(hub) { list.append(hub) }
+            for leaf in leaves where !list.contains(leaf) { list.append(leaf) }
+            if includeProxy, !proxyFirst, !list.contains("PROXY") { list.append("PROXY") }
+            if !preferDirect, !list.contains("DIRECT") { list.append("DIRECT") }
+            return list.isEmpty ? ["DIRECT"] : list
+        }
+
+        var streamingHubs: [String] = []
+        if hasHub(jpProxies) { streamingHubs.append("JP") }
+        if hasHub(hkProxies) { streamingHubs.append("HK") }
+        if hasHub(twProxies) { streamingHubs.append("TW") }
+
+        var socialHubs: [String] = []
+        if hasHub(jpProxies) { socialHubs.append("JP") }
+        if hasHub(hkProxies) { socialHubs.append("HK") }
+        if hasHub(usProxies) { socialHubs.append("US") }
+
+        var tiktokHubs: [String] = []
+        if hasHub(jpProxies) { tiktokHubs.append("JP") }
+        if hasHub(hkProxies) { tiktokHubs.append("HK") }
+
+        return [
+            iosSelectGroup(name: "NETFLIX", proxies: members(hubs: streamingHubs, preferDirect: false, includeProxy: true)),
+            iosSelectGroup(name: "TIKTOK", proxies: members(hubs: tiktokHubs, preferDirect: false, includeProxy: true)),
+            iosSelectGroup(name: "TWITTER", proxies: members(hubs: socialHubs, preferDirect: false, includeProxy: true)),
+            iosSelectGroup(name: "WHATSAPP", proxies: members(hubs: socialHubs, preferDirect: false, includeProxy: true)),
+            iosSelectGroup(name: "STEAM", proxies: members(hubs: [], preferDirect: false, includeProxy: false, proxyFirst: true)),
+            iosSelectGroup(name: "MICROSOFT", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
+            iosSelectGroup(name: "APPLE", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
+            iosSelectGroup(name: "BILIBILI", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
+            iosSelectGroup(name: "DOUYIN", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
+        ]
     }
 
     /// High-availability Telegram path (Shadowrocket 电报消息 + mihomo failover):
@@ -548,7 +639,7 @@ enum ClashConfigParser {
         if sticky.isEmpty { sticky = ["DIRECT"] }
         else if !sticky.contains("DIRECT") { sticky.append("DIRECT") }
 
-        var groups: [[String: Any]] = ["OPENAI", "ANTHROPIC"].map { name in
+        var groups: [[String: Any]] = ["OPENAI", "ANTHROPIC", "COPILOT"].map { name in
             var members = sticky
             if !forIOS, !usProxies.isEmpty, usProxies != ["DIRECT"], !members.contains("US") {
                 members.insert("US", at: 0)
@@ -584,6 +675,8 @@ enum ClashConfigParser {
             "PROCESS-NAME,Cursor Helper (GPU),CURSOR",
             "PROCESS-NAME,Cursor Helper (Renderer),CURSOR",
             "PROCESS-NAME,Cursor Helper (Plugin),CURSOR",
+            "PROCESS-NAME,Cursor Helper (Network),CURSOR",
+            "PROCESS-PATH,*Cursor.app/Contents/Frameworks/Cursor Helper*,CURSOR",
             "PROCESS-PATH,*Cursor.app/Contents/MacOS/*,CURSOR",
             "PROCESS-PATH,*Cursor Helper*.app/Contents/MacOS/*,CURSOR",
             // Cursor cloud backends (docs.cursor.com enterprise allowlist)
@@ -594,10 +687,16 @@ enum ClashConfigParser {
             "DOMAIN-SUFFIX,cursorvm.com,CURSOR",
             "DOMAIN-SUFFIX,anysphere.co,CURSOR",
             "DOMAIN-SUFFIX,anysphere.com,CURSOR",
+            "DOMAIN-SUFFIX,anysphere.tech,CURSOR",
+            "DOMAIN,api2.cursor.sh,CURSOR",
+            "DOMAIN,api3.cursor.sh,CURSOR",
+            "DOMAIN,api4.cursor.sh,CURSOR",
+            "DOMAIN,repo42.cursor.sh,CURSOR",
             "DOMAIN,downloads.cursor.com,CURSOR",
             "DOMAIN,marketplace.cursorapi.com,CURSOR",
             "DOMAIN-KEYWORD,cursor.sh,CURSOR",
             "DOMAIN-KEYWORD,gcpp.cursor,CURSOR",
+            "DOMAIN-KEYWORD,anysphere,CURSOR",
             "DOMAIN-SUFFIX,openai.com,OPENAI",
             "DOMAIN-SUFFIX,chatgpt.com,OPENAI",
             "DOMAIN-SUFFIX,chat.com,OPENAI",
@@ -610,7 +709,40 @@ enum ClashConfigParser {
             "DOMAIN-SUFFIX,x.ai,AI",
             "DOMAIN-SUFFIX,openrouter.ai,AI",
             "DOMAIN-SUFFIX,perplexity.ai,AI",
-            "DOMAIN-SUFFIX,githubcopilot.com,AI",
+            "DOMAIN,copilot.microsoft.com,COPILOT",
+            "DOMAIN,sydney.bing.com,COPILOT",
+            "DOMAIN-SUFFIX,githubcopilot.com,COPILOT",
+        ]
+
+        let missing = inject.filter { rule in
+            let needle = rule.split(separator: ",").prefix(2).joined(separator: ",").uppercased()
+            return !out.contains { $0.uppercased().contains(needle) }
+        }
+        guard !missing.isEmpty else { return out }
+        if let idx = out.firstIndex(where: { $0.uppercased().hasPrefix("GEOSITE,CN") }) {
+            out.insert(contentsOf: missing, at: idx)
+        } else {
+            out.insert(contentsOf: missing, at: min(12, out.count))
+        }
+        return out
+    }
+
+    /// Ensure Netflix / TikTok / social / MS / Apple / domestic groups have rule coverage.
+    private static func normalizeServiceRules(_ rules: [String]) -> [String] {
+        var out = rules
+        let inject = [
+            "GEOSITE,netflix,NETFLIX",
+            "GEOSITE,tiktok,TIKTOK",
+            "GEOSITE,twitter,TWITTER",
+            "GEOSITE,whatsapp,WHATSAPP",
+            "DOMAIN-SUFFIX,steampowered.com,STEAM",
+            "DOMAIN-SUFFIX,steamcommunity.com,STEAM",
+            "DOMAIN-SUFFIX,microsoft.com,MICROSOFT",
+            "DOMAIN-SUFFIX,apple.com,APPLE",
+            "DOMAIN-SUFFIX,bilibili.com,DIRECT",
+            "DOMAIN-SUFFIX,hdslb.com,DIRECT",
+            "DOMAIN-SUFFIX,douyin.com,DIRECT",
+            "DOMAIN-SUFFIX,bytedance.com,DIRECT",
         ]
         let missing = inject.filter { rule in
             let needle = rule.split(separator: ",").prefix(2).joined(separator: ",").uppercased()

@@ -1,6 +1,62 @@
 import Foundation
 
 enum IOSConfigWriter {
+    /// Scrub geo DBs that make mihomo hang downloading GitHub inside the NE.
+    static func scrubStaleGeoDatabases() {
+        MihomoConfigCheck.scrubStaleGeoDatabases()
+    }
+
+    /// Shared preflight for app / widget / auto-reconnect — keeps WeChat-safe rule mode and a lean config.
+    @discardableResult
+    static func prepareForConnect() -> Bool {
+        scrubStaleGeoDatabases()
+        var settings = SettingsStore.load()
+        var changed = false
+        if settings.proxyMode == .global {
+            settings.proxyMode = .rule
+            changed = true
+        }
+        if let sel = settings.selectedNodeName, ClashConfigParser.isPlaceholderNodeName(sel) {
+            settings.selectedNodeName = nil
+            changed = true
+        }
+        if changed {
+            _ = SettingsStore.save(settings)
+        }
+        let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+        ud?.set(settings.secret, forKey: "apiSecret")
+        ud?.set(settings.proxyMode.rawValue, forKey: "proxyMode")
+        let nodes = loadCachedNodes(from: settings)
+        let rules = RuntimeRules.effective(
+            base: settings.rules,
+            prepend: settings.rulesPrepend,
+            videoAdBlockEnabled: settings.videoAdBlockEnabled
+        )
+        return write(
+            nodes: nodes,
+            selectedName: settings.selectedNodeName ?? nodes.first?.name,
+            mode: settings.proxyMode,
+            rules: rules,
+            secret: settings.secret,
+            dnsPreference: settings.dnsPreference,
+            tunnelCapture: settings.iosTunnelCapture
+        )
+    }
+
+    private static func loadCachedNodes(from settings: AppSettings) -> [ProxyNode] {
+        var merged: [ProxyNode] = []
+        var seen = Set<String>()
+        for sub in settings.subscriptions where sub.enabled {
+            let url = Paths.subscriptionCacheURL(id: sub.id)
+            guard let data = try? Data(contentsOf: url),
+                  let parsed = try? ClashConfigParser.parse(data) else { continue }
+            for node in parsed.nodes where seen.insert(node.name).inserted {
+                merged.append(node)
+            }
+        }
+        return merged
+    }
+
     /// Write Clash/mihomo YAML for iOS Packet Tunnel.
     /// - `tunnelCapture`: true = TUN+gVisor（全 App）；false = 仅 mixed-port + 系统 HTTP 代理（实验）。
     @discardableResult

@@ -1,11 +1,15 @@
-# BashX Smart Rules v19
+# BashX Smart Rules v27
 # 参考 LingJingMaster/Shadowrocket-Rules 分流优先级 + ACL4SSR / Clash Verge
 # https://github.com/LingJingMaster/Shadowrocket-Rules
+# v27: 国内优先 — B站/抖音直连；去掉泛 .com PROXY；iOS MATCH,DIRECT；Cursor Helper(Network)
+# v26: 业务策略组 — ChatGPT/Copilot/Netflix/TikTok/Twitter/WhatsApp/微软/苹果/B站/抖音/Steam 可选手动
+# v25: 政务/银行/.org 一律本地直连；扩大微信 CDN 旁路
+# v20: Cursor 进程整树 + CDN/VM 域名 → sticky CURSOR（美国优先）；修复启动 BashX 时 Cursor 卡顿
 # v19: Google→GOOGLE(JP优先) · AI→OPENAI/ANTHROPIC/CURSOR/AI · 苹果推送走代理 · 港股/汇丰→HK · 港银直连
 
 # ========== 1. 私有网络 / 局域网 ==========
 DOMAIN,localhost.weixin.qq.com,DIRECT
-DOMAIN-SUFFIX,local,REJECT
+DOMAIN-SUFFIX,local,DIRECT
 DOMAIN-SUFFIX,localhost,DIRECT
 DOMAIN-SUFFIX,lan,DIRECT
 DOMAIN-SUFFIX,in-addr.arpa,DIRECT
@@ -37,8 +41,9 @@ DOMAIN-SUFFIX,cn.pool.ntp.org,DIRECT
 DOMAIN-SUFFIX,httpdns.alicdn.com,REJECT
 DOMAIN-SUFFIX,httpdns.baidu.com,REJECT
 DOMAIN-SUFFIX,httpdns.c.cdnhwc.com,REJECT
-DOMAIN-SUFFIX,dns.weixin.qq.com.cn,REJECT
-DOMAIN-SUFFIX,dns.weixin.qq.com,REJECT
+# 微信 HTTPDNS：REJECT 会导致发图/登录极慢，必须直连
+DOMAIN-SUFFIX,dns.weixin.qq.com.cn,DIRECT
+DOMAIN-SUFFIX,dns.weixin.qq.com,DIRECT
 IP-CIDR,203.107.1.0/24,REJECT,no-resolve
 
 # ========== 国内优先（豆包 / 腾讯云 IM 等，避免误入港股规则） ==========
@@ -62,7 +67,10 @@ DOMAIN-SUFFIX,tmall.com,DIRECT
 DOMAIN-SUFFIX,alipay.com,DIRECT
 DOMAIN-SUFFIX,jd.com,DIRECT
 DOMAIN-SUFFIX,bilibili.com,DIRECT
+DOMAIN-SUFFIX,bilibili.cn,DIRECT
+DOMAIN-SUFFIX,bilivideo.com,DIRECT
 DOMAIN-SUFFIX,hdslb.com,DIRECT
+DOMAIN-SUFFIX,biliapi.net,DIRECT
 DOMAIN-SUFFIX,zhihu.com,DIRECT
 DOMAIN-SUFFIX,163.com,DIRECT
 DOMAIN-SUFFIX,126.com,DIRECT
@@ -70,7 +78,11 @@ DOMAIN-SUFFIX,netease.com,DIRECT
 DOMAIN-SUFFIX,iqiyi.com,DIRECT
 DOMAIN-SUFFIX,youku.com,DIRECT
 DOMAIN-SUFFIX,douyin.com,DIRECT
+DOMAIN-SUFFIX,douyincdn.com,DIRECT
 DOMAIN-SUFFIX,bytedance.com,DIRECT
+DOMAIN-SUFFIX,byteimg.com,DIRECT
+DOMAIN-SUFFIX,snssdk.com,DIRECT
+DOMAIN-SUFFIX,amemv.com,DIRECT
 DOMAIN-SUFFIX,feishu.cn,DIRECT
 DOMAIN-SUFFIX,dingtalk.com,DIRECT
 DOMAIN-SUFFIX,meituan.com,DIRECT
@@ -80,8 +92,51 @@ DOMAIN-SUFFIX,mi.com,DIRECT
 DOMAIN-SUFFIX,xiaomi.com,DIRECT
 DOMAIN-SUFFIX,huawei.com,DIRECT
 DOMAIN-SUFFIX,gov.cn,DIRECT
+DOMAIN-SUFFIX,gov,DIRECT
+DOMAIN-SUFFIX,org.cn,DIRECT
+DOMAIN-SUFFIX,edu.cn,DIRECT
+DOMAIN-SUFFIX,ac.cn,DIRECT
+DOMAIN-SUFFIX,mil.cn,DIRECT
 DOMAIN-SUFFIX,weibo.com,DIRECT
 DOMAIN-SUFFIX,sina.com.cn,DIRECT
+DOMAIN-SUFFIX,qiniucdn.com,DIRECT
+DOMAIN-SUFFIX,upyun.com,DIRECT
+DOMAIN-SUFFIX,volces.com,DIRECT
+DOMAIN-SUFFIX,ksyun.com,DIRECT
+DOMAIN-SUFFIX,amap.com,DIRECT
+DOMAIN-SUFFIX,autonavi.com,DIRECT
+DOMAIN-SUFFIX,map.baidu.com,DIRECT
+DOMAIN-SUFFIX,map.qq.com,DIRECT
+
+# ========== 银行 — 本地直连（勿经节点；.org 在 Telegram 规则之后） ==========
+DOMAIN-SUFFIX,bank,DIRECT
+DOMAIN-KEYWORD,bank,DIRECT
+DOMAIN-SUFFIX,icbc.com.cn,DIRECT
+DOMAIN-SUFFIX,icbc.com,DIRECT
+DOMAIN-SUFFIX,ccb.com,DIRECT
+DOMAIN-SUFFIX,abchina.com,DIRECT
+DOMAIN-SUFFIX,bankcomm.com,DIRECT
+DOMAIN-SUFFIX,boc.cn,DIRECT
+DOMAIN-SUFFIX,bankofchina.com,DIRECT
+DOMAIN-SUFFIX,cmbchina.com,DIRECT
+DOMAIN-SUFFIX,cmb.com.cn,DIRECT
+DOMAIN-SUFFIX,cib.com.cn,DIRECT
+DOMAIN-SUFFIX,spdb.com.cn,DIRECT
+DOMAIN-SUFFIX,cebbank.com,DIRECT
+DOMAIN-SUFFIX,cmbc.com.cn,DIRECT
+DOMAIN-SUFFIX,psbc.com,DIRECT
+DOMAIN-SUFFIX,citicbank.com,DIRECT
+DOMAIN-SUFFIX,hxb.com.cn,DIRECT
+DOMAIN-SUFFIX,cgbchina.com.cn,DIRECT
+DOMAIN-SUFFIX,bankofbeijing.com.cn,DIRECT
+DOMAIN-SUFFIX,bosc.cn,DIRECT
+DOMAIN-SUFFIX,pingan.com,DIRECT
+DOMAIN-SUFFIX,webank.com,DIRECT
+DOMAIN-SUFFIX,mybank.cn,DIRECT
+DOMAIN-SUFFIX,chinapay.com,DIRECT
+DOMAIN-SUFFIX,yeepay.com,DIRECT
+DOMAIN-SUFFIX,unionpay.com,DIRECT
+DOMAIN-SUFFIX,95516.com,DIRECT
 
 # ========== Telegram → TELEGRAM ==========
 PROCESS-NAME,Telegram,TELEGRAM
@@ -111,6 +166,12 @@ DOMAIN-KEYWORD,telegram,TELEGRAM
 GEOIP,telegram,TELEGRAM,no-resolve
 GEOSITE,telegram,TELEGRAM
 
+# ========== Wiki / 需代理的 .org（须在泛 .org 之前；国内协会走 org.cn） ==========
+DOMAIN-SUFFIX,wikipedia.org,PROXY
+DOMAIN-SUFFIX,wikimedia.org,PROXY
+DOMAIN-SUFFIX,wikidata.org,PROXY
+DOMAIN-SUFFIX,org.cn,DIRECT
+
 # ========== Google 翻译 API（必须在广告规则之前） ==========
 DOMAIN-SUFFIX,translate.google.com,GOOGLE
 DOMAIN-SUFFIX,translate.googleapis.com,GOOGLE
@@ -134,10 +195,33 @@ GEOSITE,google,GOOGLE
 GEOSITE,youtube,GOOGLE
 
 # ========== AI（参考 Shadowrocket AI.list） ==========
-# Cursor
+# Cursor IDE — 进程整树 + 云端域名 → sticky CURSOR（默认美国节点，避免测速打断流）
+PROCESS-NAME,Cursor,CURSOR
+PROCESS-NAME,Cursor Helper,CURSOR
+PROCESS-NAME,Cursor Helper (GPU),CURSOR
+PROCESS-NAME,Cursor Helper (Renderer),CURSOR
+PROCESS-NAME,Cursor Helper (Plugin),CURSOR
+PROCESS-NAME,Cursor Helper (Network),CURSOR
+PROCESS-PATH,*Cursor.app/Contents/Frameworks/Cursor Helper*,CURSOR
+PROCESS-PATH,*Cursor.app/Contents/MacOS/*,CURSOR
+PROCESS-PATH,*Cursor Helper*.app/Contents/MacOS/*,CURSOR
 DOMAIN-SUFFIX,cursor.sh,CURSOR
 DOMAIN-SUFFIX,cursor.com,CURSOR
 DOMAIN-SUFFIX,cursorapi.com,CURSOR
+DOMAIN-SUFFIX,cursor-cdn.com,CURSOR
+DOMAIN-SUFFIX,cursorvm.com,CURSOR
+DOMAIN-SUFFIX,anysphere.co,CURSOR
+DOMAIN-SUFFIX,anysphere.com,CURSOR
+DOMAIN-SUFFIX,anysphere.tech,CURSOR
+DOMAIN,api2.cursor.sh,CURSOR
+DOMAIN,api3.cursor.sh,CURSOR
+DOMAIN,api4.cursor.sh,CURSOR
+DOMAIN,repo42.cursor.sh,CURSOR
+DOMAIN,downloads.cursor.com,CURSOR
+DOMAIN,marketplace.cursorapi.com,CURSOR
+DOMAIN-KEYWORD,cursor.sh,CURSOR
+DOMAIN-KEYWORD,gcpp.cursor,CURSOR
+DOMAIN-KEYWORD,anysphere,CURSOR
 # OpenAI / ChatGPT
 DOMAIN-SUFFIX,chat.com,OPENAI
 DOMAIN-SUFFIX,chatgpt.com,OPENAI
@@ -164,9 +248,9 @@ DOMAIN-SUFFIX,x.ai,AI
 DOMAIN-SUFFIX,openrouter.ai,AI
 DOMAIN-SUFFIX,perplexity.ai,AI
 DOMAIN-SUFFIX,pplx.ai,AI
-DOMAIN,copilot.microsoft.com,AI
-DOMAIN,sydney.bing.com,AI
-DOMAIN-SUFFIX,githubcopilot.com,AI
+DOMAIN,copilot.microsoft.com,COPILOT
+DOMAIN,sydney.bing.com,COPILOT
+DOMAIN-SUFFIX,githubcopilot.com,COPILOT
 DOMAIN-SUFFIX,huggingface.co,AI
 GEOSITE,openai,OPENAI
 GEOSITE,anthropic,ANTHROPIC
@@ -180,28 +264,26 @@ DOMAIN-SUFFIX,githubassets.com,PROXY
 DOMAIN-SUFFIX,gitlab.com,PROXY
 DOMAIN-SUFFIX,atlassian.com,PROXY
 DOMAIN-SUFFIX,atlassian.net,PROXY
-DOMAIN-SUFFIX,bitbucket.org,PROXY
 GEOSITE,github,PROXY
 GEOSITE,gitlab,PROXY
 
-# ========== 微软（非中国） ==========
-DOMAIN-SUFFIX,microsoft.com,PROXY
-DOMAIN-SUFFIX,live.com,PROXY
-DOMAIN-SUFFIX,office.com,PROXY
-DOMAIN-SUFFIX,office365.com,PROXY
-DOMAIN-SUFFIX,onedrive.com,PROXY
-DOMAIN-SUFFIX,microsoftonline.com,PROXY
-GEOSITE,microsoft,PROXY
+# ========== 微软（非中国）→ MICROSOFT（默认 DIRECT，可选手动） ==========
+DOMAIN-SUFFIX,microsoft.com,MICROSOFT
+DOMAIN-SUFFIX,live.com,MICROSOFT
+DOMAIN-SUFFIX,office.com,MICROSOFT
+DOMAIN-SUFFIX,office365.com,MICROSOFT
+DOMAIN-SUFFIX,onedrive.com,MICROSOFT
+DOMAIN-SUFFIX,microsoftonline.com,MICROSOFT
+GEOSITE,microsoft,MICROSOFT
 # 中国区微软更新仍直连
 DOMAIN-SUFFIX,windowsupdate.com,DIRECT
 DOMAIN-SUFFIX,azure.cn,DIRECT
 DOMAIN-SUFFIX,officechina.com,DIRECT
 
-# ========== 汇丰香港 → HK ==========
-DOMAIN-SUFFIX,hsbc.com.hk,HK
-DOMAIN,mobile.eum-appdynamics.com,HK
-
-# ========== 其它香港银行 → DIRECT（IP 稳定，降低风控） ==========
+# ========== 银行（含港银）→ DIRECT 本地直连 ==========
+DOMAIN-SUFFIX,hsbc.com.hk,DIRECT
+DOMAIN-SUFFIX,hsbc.com,DIRECT
+DOMAIN,mobile.eum-appdynamics.com,DIRECT
 DOMAIN-SUFFIX,standardchartered.com.hk,DIRECT
 DOMAIN-SUFFIX,ccb.com.hk,DIRECT
 DOMAIN-SUFFIX,bochk.com,DIRECT
@@ -234,21 +316,21 @@ DOMAIN-SUFFIX,interactivebrokers.com,HK
 DOMAIN-SUFFIX,ibkr.com,HK
 DOMAIN-SUFFIX,schwab.com,HK
 
-# ========== 苹果推送 → PROXY（改善 TG/X 推送）；其它 Apple → DIRECT ==========
+# ========== 苹果推送 → PROXY；其它 Apple → APPLE（默认 DIRECT，可选手动） ==========
 DOMAIN-SUFFIX,push.apple.com,PROXY
 DOMAIN-SUFFIX,gateway.push.apple.com,PROXY
 DOMAIN-SUFFIX,api.push.apple.com,PROXY
 DOMAIN-SUFFIX,sandbox.push.apple.com,PROXY
 DOMAIN-SUFFIX,push-apple.com.akadns.net,PROXY
-DOMAIN-SUFFIX,apple.com.cn,DIRECT
-DOMAIN-SUFFIX,icloud.com.cn,DIRECT
-DOMAIN-SUFFIX,icloud.com,DIRECT
-DOMAIN-SUFFIX,icloud-content.com,DIRECT
-DOMAIN-SUFFIX,apple-cloudkit.com,DIRECT
-DOMAIN-SUFFIX,cdn-apple.com,DIRECT
-DOMAIN-SUFFIX,mzstatic.com,DIRECT
-DOMAIN-SUFFIX,apple.com,DIRECT
-GEOSITE,apple@cn,DIRECT
+DOMAIN-SUFFIX,apple.com.cn,APPLE
+DOMAIN-SUFFIX,icloud.com.cn,APPLE
+DOMAIN-SUFFIX,icloud.com,APPLE
+DOMAIN-SUFFIX,icloud-content.com,APPLE
+DOMAIN-SUFFIX,apple-cloudkit.com,APPLE
+DOMAIN-SUFFIX,cdn-apple.com,APPLE
+DOMAIN-SUFFIX,mzstatic.com,APPLE
+DOMAIN-SUFFIX,apple.com,APPLE
+GEOSITE,apple@cn,APPLE
 
 # ========== 广告 ==========
 GEOSITE,category-ads-all,REJECT
@@ -262,15 +344,23 @@ GEOSITE,microsoft@cn,DIRECT
 GEOSITE,steam@cn,DIRECT
 GEOSITE,category-games@cn,DIRECT
 
-GEOSITE,twitter,PROXY
+GEOSITE,twitter,TWITTER
 GEOSITE,facebook,PROXY
 GEOSITE,instagram,PROXY
-GEOSITE,whatsapp,PROXY
+GEOSITE,whatsapp,WHATSAPP
 GEOSITE,discord,PROXY
 GEOSITE,reddit,PROXY
-GEOSITE,tiktok,PROXY
-GEOSITE,netflix,PROXY
+GEOSITE,tiktok,TIKTOK
+GEOSITE,twitch,PROXY
+GEOSITE,netflix,NETFLIX
 GEOSITE,spotify,PROXY
+# .tv TLD（iOS 无 GEOSITE 时用域名兜底）
+DOMAIN-SUFFIX,tv,PROXY
+DOMAIN-SUFFIX,twitch.tv,PROXY
+DOMAIN-SUFFIX,ttvnw.net,PROXY
+DOMAIN-SUFFIX,jtvnw.net,PROXY
+DOMAIN-SUFFIX,twitchcdn.net,PROXY
+AND,((DOMAIN-SUFFIX,ttvnw.net),(NETWORK,UDP),(DST-PORT,443)),REJECT
 GEOSITE,category-social-media-!cn,PROXY
 GEOSITE,category-media,PROXY
 GEOSITE,category-dev,PROXY
@@ -281,12 +371,15 @@ GEOSITE,geolocation-!cn,PROXY
 GEOSITE,tld-!cn,PROXY
 
 DOMAIN-SUFFIX,steamcontent.com,DIRECT
-DOMAIN-SUFFIX,steampowered.com,PROXY
-DOMAIN-SUFFIX,steamcommunity.com,PROXY
+DOMAIN-SUFFIX,steampowered.com,STEAM
+DOMAIN-SUFFIX,steamcommunity.com,STEAM
 
-# ========== GeoIP 兜底 ==========
+# ========== GeoIP 兜底（Surge / Shadowrocket / Clash Verge） ==========
 GEOIP,CN,DIRECT,no-resolve
 GEOIP,PRIVATE,DIRECT,no-resolve
+GEOIP,!CN,PROXY,no-resolve
 
 # ========== 漏网之鱼 ==========
+# Mac（有 GeoIP）：上面 GEOIP,!CN 已覆盖；此处兜底代理
+# iOS 运行时由 RoutingGeoRules 注入 MATCH,DIRECT（国内优先，避免未知 .com CDN 误走节点）
 MATCH,PROXY

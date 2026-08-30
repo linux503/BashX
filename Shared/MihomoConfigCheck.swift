@@ -28,6 +28,7 @@ enum MihomoConfigCheck {
 
     static func preflight() -> String? {
         #if os(iOS)
+        scrubStaleGeoDatabases()
         if !Paths.usesAppGroup {
             return "App Group 不可用，VPN 无法与主程序共享配置（请检查签名/描述文件）"
         }
@@ -40,6 +41,20 @@ enum MihomoConfigCheck {
         if let err = detectMissingProxyGroups() { return err }
         return detectProxyGroupLoop()
     }
+
+    #if os(iOS)
+    /// Remove geo DBs that make mihomo hang downloading GitHub inside the NE.
+    static func scrubStaleGeoDatabases() {
+        let fm = FileManager.default
+        let home = Paths.mihomoHomeDir
+        for name in ["geoip.metadb", "geosite.dat", "country.mmdb", "GeoLite2-Country.mmdb"] {
+            let url = home.appendingPathComponent(name)
+            if fm.fileExists(atPath: url.path) {
+                try? fm.removeItem(at: url)
+            }
+        }
+    }
+    #endif
 
     /// Mihomo rejects configs when a group lists a member that was never defined.
     static func detectMissingProxyGroups(at url: URL = Paths.mihomoConfigURL) -> String? {

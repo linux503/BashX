@@ -14,13 +14,16 @@ struct MainView: View {
     @State private var switchingNodeName: String?
     /// Instant chip highlight before chromeRevision lands.
     @State private var pendingProxyMode: ProxyMode?
+    @State private var panelProxyGroups: [ClashCore.ProxyGroupInfo] = []
+    @State private var isLoadingProxyGroups = false
 
     private enum DetailTab: CaseIterable, Identifiable {
-        case nodes, apps, subscriptions, monitor, rules
+        case nodes, groups, apps, subscriptions, monitor, rules
         var id: String { String(describing: self) }
         func title(lang: AppLanguage) -> String {
             switch self {
             case .nodes: return L10n.t("mac.panel.nodes", lang)
+            case .groups: return L10n.t("mac.panel.groups", lang)
             case .apps: return L10n.t("mac.panel.apps", lang)
             case .subscriptions: return L10n.t("mac.panel.subscriptions", lang)
             case .monitor: return L10n.t("mac.panel.monitor", lang)
@@ -77,6 +80,9 @@ struct MainView: View {
         .onValueChange(detailTab) { tab in
             if tab == .rules {
                 state.ensureRulesTextLoaded()
+            }
+            if tab == .groups {
+                Task { await refreshPanelProxyGroups() }
             }
             syncMonitorExtras()
         }
@@ -816,6 +822,8 @@ struct MainView: View {
                 switch detailTab {
                 case .nodes:
                     nodesPane
+                case .groups:
+                    groupsPane
                 case .apps:
                     AppRoutingPane()
                 case .subscriptions:
@@ -850,7 +858,7 @@ struct MainView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 340)
+                .frame(maxWidth: 420)
                 .fixedSize(horizontal: false, vertical: true)
 
                 Spacer(minLength: 8)
@@ -908,6 +916,124 @@ struct MainView: View {
         PanelNodesHost(state: state) {
             nodesPaneContent
         }
+    }
+
+    private var groupsPane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t("mac.panel.groups", lang))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    Text(L10n.t("mac.groups.subtitle", lang))
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                }
+                Spacer()
+                Button {
+                    Task { await refreshPanelProxyGroups() }
+                } label: {
+                    Label(L10n.t("mac.groups.refresh", lang), systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isLoadingProxyGroups || !state.coreRunning)
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+
+            if panelProxyGroups.isEmpty {
+                VStack(spacing: 10) {
+                    if isLoadingProxyGroups {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(L10n.t("mac.groups.empty", lang))
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(panelProxyGroups.enumerated()), id: \.element.name) { idx, group in
+                            Menu {
+                                ForEach(group.all.prefix(80), id: \.self) { name in
+                                    Button {
+                                        Task {
+                                            await state.selectGroupProxy(group: group.name, name: name)
+                                            await refreshPanelProxyGroups()
+                                        }
+                                    } label: {
+                                        HStack {
+                                            Text(AppConstants.groupSelectionLabel(name, limit: 36))
+                                            if name == group.now {
+                                                Image(systemName: "checkmark")
+                                            }
+                                        }
+                                    }
+                                }
+                                if group.all.count > 80 {
+                                    Text(L10n.t("mac.menu.groupMore", lang)
+                                        .replacingOccurrences(of: "%@", with: "\(group.all.count)"))
+                                        .foregroundStyle(.secondary)
+                                }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text(AppConstants.groupDisplayName(group.name))
+                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 8)
+                                    Text(AppConstants.groupSelectionLabel(group.now, limit: 22))
+                                        .font(.system(size: 12, design: .rounded))
+                                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                                        .lineLimit(1)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 11)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            if idx < panelProxyGroups.count - 1 {
+                                Rectangle()
+                                    .fill(BashXTheme.hairline(for: appearance))
+                                    .frame(height: 1)
+                                    .padding(.leading, 14)
+                            }
+                        }
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(BashXTheme.card(for: appearance))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(BashXTheme.hairline(for: appearance), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: state.chromeRevision) {
+            guard detailTab == .groups else { return }
+            await refreshPanelProxyGroups()
+        }
+    }
+
+    private func refreshPanelProxyGroups() async {
+        guard state.coreRunning else {
+            panelProxyGroups = []
+            return
+        }
+        isLoadingProxyGroups = true
+        defer { isLoadingProxyGroups = false }
+        let groups = await state.fetchMenuProxyGroups()
+        panelProxyGroups = groups
     }
 
     private var nodesPaneContent: some View {

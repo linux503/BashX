@@ -2,7 +2,7 @@ import Foundation
 
 enum ChinaSmartRules {
     /// Bump when bundled rule set changes so existing installs auto-upgrade.
-    static let version = 24
+    static let version = 27
 
     /// Published rules list (also shipped at Resources/rules/bashx-smart-rules.txt).
     static let rules: [String] = loadBundledRules()
@@ -38,7 +38,7 @@ enum ChinaSmartRules {
 
     /// Minimal fallback if Resources/rules missing (dev/tests).
     private static let embeddedFallback: [String] = [
-        "DOMAIN-SUFFIX,local,REJECT",
+        "DOMAIN-SUFFIX,local,DIRECT",
         "DOMAIN-SUFFIX,localhost,DIRECT",
         "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
         "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
@@ -66,7 +66,6 @@ enum ChinaSmartRules {
         if looksLikeLegacy(rules) { return true }
         if rules.contains(where: { $0.hasPrefix("GEOSITE,gmail") }) { return true }
         if rules.contains(where: { $0.hasPrefix("DOMAIN,www.gstatic.com,DIRECT") }) { return true }
-        if rules.contains(where: { $0.uppercased() == "DOMAIN-SUFFIX,LOCAL,DIRECT" }) { return true }
         // v7: fix GeoSite tags missing from MetaCubeX GeoSite.dat (core fatal on startup)
         if rules.contains(where: { GeoSiteRules.isKnownBroken($0) }) { return true }
         if rules.contains(where: { $0.contains("category-media-!cn") }) { return true }
@@ -100,6 +99,17 @@ enum ChinaSmartRules {
         if rules.contains(where: { $0.contains("DEST-PORT,") }) { return true }
         // v24: .tv PROXY + drop broad .tv QUIC REJECT
         if rules.contains(where: { $0.contains("DOMAIN-SUFFIX,tv,(NETWORK,UDP)") || $0.contains("((DOMAIN-SUFFIX,tv),(NETWORK,UDP)") }) { return true }
+        // v25: 政务/银行直连 + 微信 HTTPDNS 直连
+        if !rules.contains(where: { $0.contains("DOMAIN-SUFFIX,bank,DIRECT") }) { return true }
+        if rules.contains(where: { $0.uppercased().contains("DNS.WEIXIN.QQ.COM") && $0.uppercased().contains("REJECT") }) { return true }
+        // v27: 国内 App 默认直连 + Cursor Network helper + 勿泛匹配 .org
+        if rules.contains(where: { $0.uppercased().contains("BILIBILI.COM,BILIBILI") }) { return true }
+        if rules.contains(where: { $0.uppercased().contains("DOUYIN.COM,DOUYIN") }) { return true }
+        if rules.contains(where: { $0.uppercased() == "DOMAIN-SUFFIX,ORG,DIRECT" }) { return true }
+        if rules.contains(where: { $0.uppercased() == "DOMAIN-SUFFIX,LOCAL,REJECT" }) { return true }
+        if !rules.contains(where: { $0.contains("Cursor Helper (Network)") }) { return true }
+        if !rules.contains(where: { $0.contains("api2.cursor.sh") }) { return true }
+        if !rules.contains(where: { $0.contains("wikipedia.org,PROXY") }) { return true }
         return false
     }
 

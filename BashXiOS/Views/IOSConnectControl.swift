@@ -26,12 +26,34 @@ struct IOSConnectControl: View {
             action()
         } label: {
             ZStack {
-                // Soft ambient glow
+                // Soft ambient glow — always alive
                 Circle()
-                    .fill(centerShadow.opacity(isConnected ? 0.32 : 0.14))
-                    .frame(width: 228, height: 228)
-                    .blur(radius: 32)
-                    .scaleEffect(breath && isConnected ? 1.12 : 1)
+                    .fill(centerShadow.opacity(isConnected ? 0.34 : (breath ? 0.20 : 0.12)))
+                    .frame(width: 236, height: 236)
+                    .blur(radius: 34)
+                    .scaleEffect(breath ? 1.14 : 0.96)
+
+                // Idle / busy subtle orbit rings
+                if !isConnected {
+                    ForEach(0..<2, id: \.self) { i in
+                        Circle()
+                            .strokeBorder(
+                                AngularGradient(
+                                    colors: [
+                                        centerShadow.opacity(0),
+                                        centerShadow.opacity(0.35),
+                                        IOSTheme.accentBright.opacity(0.2),
+                                        centerShadow.opacity(0),
+                                    ],
+                                    center: .center
+                                ),
+                                lineWidth: 1.2
+                            )
+                            .frame(width: 176 + CGFloat(i) * 16, height: 176 + CGFloat(i) * 16)
+                            .rotationEffect(.degrees(orbitAngle * (i == 0 ? 1 : -0.8)))
+                            .opacity(0.55)
+                    }
+                }
 
                 // Tech orbit rings (connected)
                 if isConnected {
@@ -144,23 +166,20 @@ struct IOSConnectControl: View {
 
     private func syncAnimations() {
         if isBusy { startSpin() }
+        breath = false
+        pulse = false
+        withAnimation(.easeInOut(duration: isConnected ? 1.9 : 2.8).repeatForever(autoreverses: true)) {
+            breath = true
+            if isConnected { pulse = true }
+        }
+        withAnimation(.linear(duration: isConnected ? 10 : 16).repeatForever(autoreverses: false)) {
+            orbitAngle = 360
+        }
         if isConnected {
-            pulse = false
-            breath = false
-            withAnimation(.easeInOut(duration: 1.9).repeatForever(autoreverses: true)) {
-                pulse = true
-                breath = true
-            }
-            withAnimation(.linear(duration: 10).repeatForever(autoreverses: false)) {
-                orbitAngle = 360
-            }
             withAnimation(.linear(duration: 2.8).repeatForever(autoreverses: false)) {
                 radarSweep = 360
             }
         } else {
-            pulse = false
-            breath = false
-            orbitAngle = 0
             radarSweep = 0
         }
     }

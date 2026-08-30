@@ -26,6 +26,13 @@ enum GeoDataBootstrap {
         return geo > 64 * 1024 && site > 64 * 1024
     }
 
+    /// iOS NE: remove geo DBs that trigger GitHub downloads and hang tunnel start.
+    static func scrubStaleGeoDatabases() {
+        #if os(iOS)
+        MihomoConfigCheck.scrubStaleGeoDatabases()
+        #endif
+    }
+
     private static let directSession: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
