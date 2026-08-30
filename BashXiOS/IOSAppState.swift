@@ -490,6 +490,7 @@ final class IOSAppState: ObservableObject {
         let secret = settings.secret
         let dnsPreference = settings.dnsPreference
         let tunnelCapture = settings.iosTunnelCapture
+        let profileRoot = IOSConfigWriter.loadPassthroughProfileRoot(from: settings)
         configWriteTask?.cancel()
         configWriteTask = Task.detached(priority: .utility) {
             _ = IOSConfigWriter.write(
@@ -499,7 +500,8 @@ final class IOSAppState: ObservableObject {
                 rules: rules,
                 secret: secret,
                 dnsPreference: dnsPreference,
-                tunnelCapture: tunnelCapture
+                tunnelCapture: tunnelCapture,
+                profileRoot: profileRoot
             )
         }
     }
@@ -517,6 +519,7 @@ final class IOSAppState: ObservableObject {
         let secret = settings.secret
         let dnsPreference = settings.dnsPreference
         let tunnelCapture = settings.iosTunnelCapture
+        let profileRoot = IOSConfigWriter.loadPassthroughProfileRoot(from: settings)
         await Task.detached(priority: .utility) {
             _ = IOSConfigWriter.write(
                 nodes: nodes,
@@ -525,7 +528,8 @@ final class IOSAppState: ObservableObject {
                 rules: rules,
                 secret: secret,
                 dnsPreference: dnsPreference,
-                tunnelCapture: tunnelCapture
+                tunnelCapture: tunnelCapture,
+                profileRoot: profileRoot
             )
         }.value
     }

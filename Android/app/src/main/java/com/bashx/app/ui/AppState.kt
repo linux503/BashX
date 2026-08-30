@@ -351,7 +351,18 @@ class AppState(app: Application) : AndroidViewModel(app) {
             rules = effectiveRules(),
             dnsPreference = s.settings.dnsPreference,
             tunnelCapture = s.settings.tunEnabled,
+            profileRoot = loadPassthroughProfileRoot(s.settings),
         )
+    }
+
+    /** Single enabled Clash YAML with native proxy-groups → keep as profile. */
+    private fun loadPassthroughProfileRoot(settings: AppSettings): Map<String, Any>? {
+        val enabled = settings.subscriptions.filter { it.enabled }
+        if (enabled.size != 1) return null
+        val file = Paths.subscriptionCache(enabled[0].id)
+        if (!file.exists()) return null
+        val parsed = runCatching { ClashConfigParser.parse(file.readBytes()) }.getOrNull() ?: return null
+        return parsed.rawRoot?.takeIf { ClashConfigParser.isCompleteProfile(it) }
     }
 
     fun openAddSubscription() {

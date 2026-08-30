@@ -22,14 +22,39 @@ enum AppConstants {
     /// App Group: full TUN capture (default) vs HTTP-proxy-only experiment.
     static let iosTunnelCaptureKey = "iosTunnelCapture"
 
-    /// Strategy groups in menu bar / iOS / Mac panel — Shadowrocket-style service order.
+    /// Strategy groups preferred in menu / iOS (shown first when present).
     static let menuProxyGroups: [String] = [
-        "OPENAI", "COPILOT", "AUTO",
+        "PROXY",
+        "OPENAI", "COPILOT", "AUTO", "BALANCE", "FALLBACK",
         "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK",
         "TELEGRAM", "TWITTER", "WHATSAPP",
         "MICROSOFT", "APPLE", "GOOGLE", "STEAM",
         "AI", "JP", "HK", "TW", "US",
     ]
+
+    /// Mihomo group types shown in the policy-group UI.
+    static let selectableProxyGroupTypes: Set<String> = [
+        "Selector", "URLTest", "Fallback", "LoadBalance",
+    ]
+
+    static let hiddenProxyGroupNames: Set<String> = [
+        "GLOBAL", "COMPATIBLE", "PASS", "DIRECT", "REJECT",
+    ]
+
+    /// Prefer built-in service order, then keep subscription extras (机场策略组).
+    static func orderedProxyGroupNames(_ names: [String]) -> [String] {
+        var remaining = names
+        var ordered: [String] = []
+        for preferred in menuProxyGroups {
+            if let idx = remaining.firstIndex(of: preferred) {
+                ordered.append(remaining.remove(at: idx))
+            }
+        }
+        ordered.append(contentsOf: remaining.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        })
+        return ordered
+    }
 
     /// Human labels for strategy rows (Shadowrocket-style).
     static func groupDisplayName(_ group: String) -> String {
@@ -59,6 +84,8 @@ enum AppConstants {
         case "TW": return "台湾"
         case "US": return "美国"
         case "AUTO": return "自动选择"
+        case "BALANCE": return "负载均衡"
+        case "FALLBACK": return "故障转移"
         case "PROXY": return "节点选择"
         case "DIRECT": return "DIRECT"
         default: return group
@@ -104,7 +131,7 @@ enum AppConstants {
         guard !raw.isEmpty else { return "—" }
         let upper = raw.uppercased()
         let knownGroups: Set<String> = [
-            "GOOGLE", "TELEGRAM", "AI", "JP", "HK", "TW", "US", "AUTO", "PROXY", "DIRECT",
+            "GOOGLE", "TELEGRAM", "AI", "JP", "HK", "TW", "US", "AUTO", "BALANCE", "FALLBACK", "PROXY", "DIRECT",
             "TELEGRAM-FAILOVER", "TELEGRAM-AUTO", "CURSOR", "CURSOR-FAILOVER", "CURSOR-AUTO",
             "GOOGLE-AUTO", "OPENAI", "ANTHROPIC", "COPILOT",
             "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK", "TWITTER", "WHATSAPP",

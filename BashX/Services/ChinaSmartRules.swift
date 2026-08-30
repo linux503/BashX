@@ -2,7 +2,7 @@ import Foundation
 
 enum ChinaSmartRules {
     /// Bump when bundled rule set changes so existing installs auto-upgrade.
-    static let version = 27
+    static let version = 28
 
     /// Published rules list (also shipped at Resources/rules/bashx-smart-rules.txt).
     static let rules: [String] = loadBundledRules()
@@ -110,6 +110,8 @@ enum ChinaSmartRules {
         if !rules.contains(where: { $0.contains("Cursor Helper (Network)") }) { return true }
         if !rules.contains(where: { $0.contains("api2.cursor.sh") }) { return true }
         if !rules.contains(where: { $0.contains("wikipedia.org,PROXY") }) { return true }
+        // v28: force rewrite — prior builds re-injected GEOSITE/PROCESS into iOS yaml (core start fail)
+        if (storedVersion ?? 0) < 28 { return true }
         return false
     }
 

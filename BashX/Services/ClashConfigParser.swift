@@ -62,7 +62,7 @@ enum ClashConfigParser {
                 ? nodes.filter { !Self.isPlaceholderNodeName($0.name) }
                 : real
             guard !pool.isEmpty else { return nodes }
-            let cap = 32
+            let cap = 24
             let selected = selectedName.flatMap { name in pool.first(where: { $0.name == name }) }
             var names = Self.urlTestPool(from: pool.map(\.name), selected: selected?.name, limit: cap)
             if names.isEmpty { names = Array(pool.prefix(cap).map(\.name)) }
@@ -95,10 +95,15 @@ enum ClashConfigParser {
         let baseRules = (rules.isEmpty ? AppSettings.defaultRules : rules)
         let rewrittenRules = Self.normalizeServiceRules(
             Self.normalizeAIRules(
-                Self.normalizeGoogleRules(Self.normalizeTelegramRules(baseRules))
-            )
+                Self.normalizeGoogleRules(Self.normalizeTelegramRules(baseRules)),
+                forIOS: forIOS
+            ),
+            forIOS: forIOS
         )
-        let finalRules = rewrittenRules.isEmpty ? AppSettings.defaultRules : rewrittenRules
+        // iOS NE: never ship PROCESS / GEOSITE / GEOIP — no process matcher, no geo DB
+        // (normalize* used to re-inject them → mihomo Parse hang / start fail).
+        let scrubbed = forIOS ? Self.scrubIOSIncompatibleRules(rewrittenRules) : rewrittenRules
+        let finalRules = scrubbed.isEmpty ? AppSettings.defaultRules : scrubbed
 
         // Leaves for PROXY hub (no nested strategy groups — avoids loops).
         let proxyLeaves: [String] = {
@@ -109,22 +114,26 @@ enum ClashConfigParser {
             return capped.isEmpty ? ["DIRECT"] : capped
         }()
 
+        // ACL4SSR / Clash Verge style hub names used by PROXY select & 策略组 panel.
+        let autoHubName = "AUTO"
+        let balanceHubName = "BALANCE"
+        let fallbackHubName = "FALLBACK"
+
         let proxyGroupList: [String] = {
             var list: [String]
             if names.isEmpty {
                 list = ["DIRECT"]
             } else if !forIOS, proxyHubMode != .manual {
-                // Smart / LB / failover: PROXY is the auto hub — only concrete leaves.
+                // Smart / LB / failover: PROXY *is* the auto hub — concrete leaves only.
                 list = proxyLeaves
+            } else if forIOS {
+                // iOS: real nodes first (NE cannot nest url-test). Prefer leaf so MATCH,PROXY works.
+                let leaves = Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
+                list = leaves + [autoHubName, "JP", "HK", "US", "TW", "DIRECT"]
             } else {
-                // Leaf hubs only — never nest GOOGLE/AI here (they may reference PROXY → loop).
-                let leaves: [String]
-                if forIOS {
-                    leaves = Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
-                } else {
-                    leaves = poolSource
-                }
-                list = ["AUTO", "JP", "HK", "US", "TW"] + leaves + ["DIRECT"]
+                // Manual Mac: ACL4SSR entry — AUTO / BALANCE / FALLBACK + regions + nodes.
+                list = [autoHubName, balanceHubName, fallbackHubName, "JP", "HK", "US", "TW"]
+                    + poolSource + ["DIRECT"]
             }
             if let selected, proxyHubMode == .manual || forIOS {
                 list.removeAll { $0 == selected }
@@ -134,6 +143,10 @@ enum ClashConfigParser {
             return list.filter { seen.insert($0).inserted }
         }()
 
+        let probeURL = "https://www.gstatic.com/generate_204"
+        let hubInterval = turboMode ? 300 : 180
+        let hubTolerance = turboMode ? 50 : 40
+
         let proxyHubGroup: [String: Any] = {
             if forIOS || proxyHubMode == .manual {
                 return [
@@ -142,16 +155,17 @@ enum ClashConfigParser {
                     "proxies": proxyGroupList
                 ]
             }
+            // Hub chips map PROXY itself to url-test / load-balance / fallback (Clash Verge pattern).
             var g: [String: Any] = [
                 "name": "PROXY",
                 "type": proxyHubMode.clashType,
                 "proxies": proxyGroupList,
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": turboMode ? 300 : 180,
+                "url": probeURL,
+                "interval": hubInterval,
                 "lazy": true,
             ]
             if proxyHubMode == .smart {
-                g["tolerance"] = turboMode ? 80 : 50
+                g["tolerance"] = hubTolerance
             }
             if proxyHubMode == .loadBalance {
                 g["strategy"] = "consistent-hashing"
@@ -269,12 +283,29 @@ enum ClashConfigParser {
             ]
             return [
                 [
-                    "name": "AUTO",
+                    "name": autoHubName,
                     "type": "url-test",
                     "proxies": autoProxies,
-                    "url": "https://www.gstatic.com/generate_204",
-                    "interval": turboMode ? 600 : 300,
-                    "tolerance": turboMode ? 80 : 50,
+                    "url": probeURL,
+                    "interval": turboMode ? 300 : 180,
+                    "tolerance": hubTolerance,
+                    "lazy": true
+                ],
+                [
+                    "name": balanceHubName,
+                    "type": "load-balance",
+                    "proxies": autoProxies,
+                    "url": probeURL,
+                    "interval": hubInterval,
+                    "strategy": "consistent-hashing",
+                    "lazy": true
+                ],
+                [
+                    "name": fallbackHubName,
+                    "type": "fallback",
+                    "proxies": autoProxies,
+                    "url": probeURL,
+                    "interval": hubInterval,
                     "lazy": true
                 ],
                 googleAuto,
@@ -357,38 +388,173 @@ enum ClashConfigParser {
         }
 
         if tunEnabled {
-            var tun: [String: Any] = [
-                "enable": true,
-                "stack": tunStack.isEmpty ? "mixed" : tunStack,
-                "auto-route": true,
-                "auto-detect-interface": true,
-                "dns-hijack": ["any:53"],
-                "strict-route": false
-            ]
-            if forIOS {
-                // Bypass TUN entirely for WeChat/QQ CDN — gVisor DIRECT still slows 发图.
-                tun["mtu"] = 1400
-                tun["route-exclude-address"] = [
-                    "1.12.0.0/14",
-                    "14.17.0.0/16", "14.18.0.0/16", "14.19.0.0/16", "14.116.0.0/16",
-                    "43.154.0.0/16",
-                    "58.247.0.0/16", "58.251.0.0/16", "59.37.0.0/16",
-                    "101.32.0.0/16", "101.226.0.0/16", "101.227.0.0/16",
-                    "109.244.0.0/16", "111.30.0.0/16",
-                    "113.96.0.0/12",
-                    "119.147.0.0/16", "121.51.0.0/16", "129.226.0.0/16",
-                    "140.207.0.0/16", "157.255.0.0/16",
-                    "180.101.0.0/16", "180.163.0.0/16", "182.254.0.0/16",
-                    "183.3.0.0/16", "183.36.0.0/16", "183.47.0.0/16",
-                    "183.57.0.0/16", "183.60.0.0/16",
-                    "183.192.0.0/16", "183.232.0.0/16",
-                    "203.205.128.0/19", "211.95.0.0/16",
-                ]
-            }
-            root["tun"] = tun
+            root["tun"] = Self.tunBlock(stack: tunStack, forIOS: forIOS)
         }
 
         return (try? Yams.dump(object: root)) ?? ""
+    }
+
+    /// True when the subscription YAML already defines policy groups (Clash Verge / Stash style).
+    static func isCompleteProfile(_ root: [String: Any]) -> Bool {
+        if let groups = root["proxy-groups"] as? [Any], !groups.isEmpty { return true }
+        if let groups = root["Proxy Group"] as? [Any], !groups.isEmpty { return true }
+        return false
+    }
+
+    /// Keep subscription `proxies` / `proxy-groups` / `rules` / providers; only inject
+    /// ports, TUN, controller (and platform-safe DNS fallback). Clash Verge / Stash pattern.
+    static func buildPassthroughConfig(
+        from rawRoot: [String: Any],
+        mixedPort: Int,
+        controller: String,
+        secret: String,
+        tunEnabled: Bool,
+        tunStack: String,
+        mode: ProxyMode = .rule,
+        allowLan: Bool = false,
+        dnsPreference: DnsPreference = .smart,
+        forIOS: Bool = false,
+        domainSniffing: Bool = true
+    ) -> String {
+        var root = deepNativeDict(rawRoot)
+
+        // Runtime knobs owned by the app — never keep airport copies.
+        for key in [
+            "mixed-port", "port", "socks-port", "redir-port", "tproxy-port",
+            "allow-lan", "bind-address", "mode", "log-level",
+            "external-controller", "secret", "external-ui", "external-ui-name", "external-ui-url",
+            "tun"
+        ] {
+            root.removeValue(forKey: key)
+        }
+
+        let iosMixedPort = forIOS && !tunEnabled ? mixedPort : (forIOS ? 0 : mixedPort)
+        let bindAddress: String = {
+            if forIOS && !tunEnabled { return "127.0.0.1" }
+            return allowLan ? "*" : "127.0.0.1"
+        }()
+
+        root["mixed-port"] = iosMixedPort
+        root["allow-lan"] = allowLan
+        root["bind-address"] = bindAddress
+        root["mode"] = mode.rawValue
+        root["log-level"] = "warning"
+        root["external-controller"] = controller
+        root["secret"] = secret
+        if root["ipv6"] == nil { root["ipv6"] = false }
+        if root["unified-delay"] == nil { root["unified-delay"] = true }
+
+        if var proxies = root["proxies"] as? [[String: Any]] {
+            for i in proxies.indices {
+                normalizeProxyUDP(&proxies[i])
+            }
+            root["proxies"] = proxies
+        }
+
+        if forIOS {
+            // Airport DNS often needs geosite DB; we disable geo on NE → Google/Telegram
+            // resolve fails while WeChat (.cn policy) still works. Always use BashX iOS DNS.
+            root["dns"] = DnsPreference.iosDnsBlock(for: dnsPreference)
+            // url-test health checks + RULE-SET downloads blow the NE jetsam budget.
+            sanitizeIOSPassthroughGroups(&root)
+            root.removeValue(forKey: "rule-providers")
+            let scrubbed = scrubIOSIncompatibleRules(stringList(root["rules"]) ?? [])
+            root["rules"] = patchIOSPassthroughRules(scrubbed, groupNames: proxyGroupNames(in: root))
+            root["geodata-mode"] = false
+            root["geo-auto-update"] = false
+            root["find-process-mode"] = "off"
+            root["tcp-concurrent"] = false
+            root["keep-alive-interval"] = 30
+            if domainSniffing {
+                root["sniffer"] = iosSnifferBlock
+            }
+        } else {
+            if root["find-process-mode"] == nil { root["find-process-mode"] = "strict" }
+            if root["tcp-concurrent"] == nil { root["tcp-concurrent"] = true }
+            if root["keep-alive-interval"] == nil { root["keep-alive-interval"] = 30 }
+            if domainSniffing, root["sniffer"] == nil {
+                root["sniffer"] = snifferBlock
+            }
+            if root["dns"] == nil {
+                root["dns"] = DnsPreference.dnsBlock(for: dnsPreference)
+            }
+        }
+
+        if tunEnabled {
+            root["tun"] = tunBlock(stack: tunStack, forIOS: forIOS)
+        }
+
+        return (try? Yams.dump(object: root)) ?? ""
+    }
+
+    private static func tunBlock(stack: String, forIOS: Bool) -> [String: Any] {
+        var tun: [String: Any] = [
+            "enable": true,
+            "stack": stack.isEmpty ? "mixed" : stack,
+            "auto-route": true,
+            "auto-detect-interface": true,
+            "dns-hijack": ["any:53"],
+            "strict-route": false
+        ]
+        if forIOS {
+            tun["mtu"] = 1400
+            tun["route-exclude-address"] = [
+                "1.12.0.0/14",
+                "14.17.0.0/16", "14.18.0.0/16", "14.19.0.0/16", "14.116.0.0/16",
+                "43.154.0.0/16",
+                "58.247.0.0/16", "58.251.0.0/16", "59.37.0.0/16",
+                "101.32.0.0/16", "101.226.0.0/16", "101.227.0.0/16",
+                "109.244.0.0/16", "111.30.0.0/16",
+                "113.96.0.0/12",
+                "119.147.0.0/16", "121.51.0.0/16", "129.226.0.0/16",
+                "140.207.0.0/16", "157.255.0.0/16",
+                "180.101.0.0/16", "180.163.0.0/16", "182.254.0.0/16",
+                "183.3.0.0/16", "183.36.0.0/16", "183.47.0.0/16",
+                "183.57.0.0/16", "183.60.0.0/16",
+                "183.192.0.0/16", "183.232.0.0/16",
+                "203.205.128.0/19", "211.95.0.0/16",
+            ]
+        }
+        return tun
+    }
+
+    private static func stringList(_ value: Any?) -> [String]? {
+        guard let arr = value as? [Any] else { return nil }
+        let out = arr.compactMap { item -> String? in
+            if let s = item as? String { return s }
+            return nil
+        }
+        return out
+    }
+
+    private static func deepNativeDict(_ value: [String: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for (k, v) in value {
+            out[k] = deepNative(v)
+        }
+        return out
+    }
+
+    private static func deepNative(_ value: Any) -> Any {
+        let v = unwrap(value)
+        if let dict = v as? [String: Any] {
+            return dict.mapValues { deepNative($0) }
+        }
+        if let arr = v as? [Any] {
+            return arr.map { deepNative($0) }
+        }
+        if let dict = v as? NSDictionary {
+            var out: [String: Any] = [:]
+            for (k, val) in dict {
+                guard let key = k as? String else { continue }
+                out[key] = deepNative(val)
+            }
+            return out
+        }
+        if let arr = v as? NSArray {
+            return arr.map { deepNative($0) }
+        }
+        return v
     }
 
     private static let snifferBlock: [String: Any] = [
@@ -497,9 +663,11 @@ enum ClashConfigParser {
             iosSelectGroup(name: "STEAM", proxies: members(hubs: [], preferDirect: false, includeProxy: false, proxyFirst: true)),
             iosSelectGroup(name: "MICROSOFT", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
             iosSelectGroup(name: "APPLE", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
+        ] + (forIOS ? [] : [
+            // Mac only — iOS rules hard-DIRECT 哔哩/抖音; extra groups waste NE RAM.
             iosSelectGroup(name: "BILIBILI", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
             iosSelectGroup(name: "DOUYIN", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
-        ]
+        ])
     }
 
     /// High-availability Telegram path (Shadowrocket 电报消息 + mihomo failover):
@@ -695,20 +863,126 @@ enum ClashConfigParser {
         return groups
     }
 
+    /// Drop rule types that crash or hang mihomo inside the iOS Network Extension.
+    private static func scrubIOSIncompatibleRules(_ rules: [String]) -> [String] {
+        rules.compactMap { raw in
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty, !t.hasPrefix("#") else { return nil }
+            let u = t.uppercased()
+            if u.hasPrefix("PROCESS-NAME,") || u.hasPrefix("PROCESS-PATH,") { return nil }
+            if u.hasPrefix("GEOSITE,") || u.hasPrefix("GEOIP,") { return nil }
+            // RULE-SET needs rule-providers + often geo payloads — stripped with providers.
+            if u.hasPrefix("RULE-SET,") { return nil }
+            if u.hasPrefix("SUB-RULE,") { return nil }
+            return t
+        }
+    }
+
+    private static func proxyGroupNames(in root: [String: Any]) -> Set<String> {
+        let groups = (root["proxy-groups"] as? [[String: Any]]) ?? []
+        return Set(groups.compactMap { $0["name"] as? String })
+    }
+
+    private static func proxyLeafNames(in root: [String: Any]) -> [String] {
+        let proxies = (root["proxies"] as? [[String: Any]]) ?? []
+        return proxies.compactMap { item -> String? in
+            guard let name = item["name"] as? String, !name.isEmpty else { return nil }
+            if isPlaceholderNodeName(name) { return nil }
+            return name
+        }
+    }
+
+    /// Pick the airport's main outbound group (ACL4SSR / Verge naming).
+    private static func resolvePrimaryProxyGroupName(in groups: [[String: Any]]) -> String? {
+        let names = groups.compactMap { $0["name"] as? String }
+        let preferred = [
+            "PROXY", "Proxy", "proxy",
+            "节点选择", "🚀 节点选择", "手动选择", "Proxy",
+            "选择节点", "全球代理", "国外流量",
+        ]
+        for key in preferred where names.contains(key) { return key }
+        // First select group that lists real proxies (skip DIRECT-only helpers).
+        for g in groups {
+            guard let name = g["name"] as? String,
+                  (g["type"] as? String)?.lowercased() == "select" else { continue }
+            let members = (g["proxies"] as? [Any])?.compactMap { $0 as? String } ?? []
+            if members.contains(where: { $0 != "DIRECT" && $0 != "REJECT" }) {
+                return name
+            }
+        }
+        return names.first
+    }
+
+    /// iOS NE: flatten health-check groups to select; ensure PROXY / GOOGLE / TELEGRAM exist.
+    private static func sanitizeIOSPassthroughGroups(_ root: inout [String: Any]) {
+        var groups = (root["proxy-groups"] as? [[String: Any]]) ?? []
+        let leaves = Array(proxyLeafNames(in: root).prefix(16))
+        let fallbackMembers: [String] = {
+            var list = leaves
+            if list.isEmpty { list = ["DIRECT"] }
+            else if !list.contains("DIRECT") { list.append("DIRECT") }
+            return list
+        }()
+
+        for i in groups.indices {
+            let type = (groups[i]["type"] as? String)?.lowercased() ?? ""
+            if type == "url-test" || type == "fallback" || type == "load-balance" {
+                groups[i]["type"] = "select"
+                for key in ["url", "interval", "tolerance", "lazy", "strategy", "expected-status"] {
+                    groups[i].removeValue(forKey: key)
+                }
+            }
+        }
+
+        let primary = resolvePrimaryProxyGroupName(in: groups) ?? "PROXY"
+        var existing = Set(groups.compactMap { $0["name"] as? String })
+
+        func ensureAlias(_ name: String) {
+            guard !existing.contains(name) else { return }
+            var members: [String] = []
+            if primary != name { members.append(primary) }
+            for leaf in fallbackMembers where !members.contains(leaf) {
+                members.append(leaf)
+            }
+            if members.isEmpty { members = ["DIRECT"] }
+            groups.append(["name": name, "type": "select", "proxies": members])
+            existing.insert(name)
+        }
+
+        ensureAlias("PROXY")
+        ensureAlias("GOOGLE")
+        ensureAlias("TELEGRAM")
+        root["proxy-groups"] = groups
+    }
+
+    /// After scrubbing GEOSITE/GEOIP, inject domain + Telegram DC rules so Google/TG work.
+    private static func patchIOSPassthroughRules(_ rules: [String], groupNames: Set<String>) -> [String] {
+        let googleTarget = groupNames.contains("GOOGLE") ? "GOOGLE" : "PROXY"
+        let telegramTarget = groupNames.contains("TELEGRAM") ? "TELEGRAM" : "PROXY"
+        let proxyTarget = groupNames.contains("PROXY") ? "PROXY" : (groupNames.sorted().first ?? "PROXY")
+
+        func retarget(_ line: String) -> String {
+            line
+                .replacingOccurrences(of: ",GOOGLE", with: ",\(googleTarget)")
+                .replacingOccurrences(of: ",TELEGRAM", with: ",\(telegramTarget)")
+                .replacingOccurrences(of: ",PROXY", with: ",\(proxyTarget)")
+        }
+
+        var inject = IosDirectDomains.wechatPriorityRules.map(retarget)
+        inject.append(contentsOf: IosProxyDomains.rules.map(retarget))
+        // Keep MATCH last from subscription when present.
+        let head = rules.filter { !$0.uppercased().hasPrefix("MATCH,") }
+        let match = rules.last(where: { $0.uppercased().hasPrefix("MATCH,") })
+            ?? "MATCH,\(proxyTarget)"
+        var out = inject + head
+        out.append(retarget(match))
+        return out
+    }
+
     /// Route Cursor / OpenAI / Anthropic / other AI (Shadowrocket AI.list).
-    private static func normalizeAIRules(_ rules: [String]) -> [String] {
+    private static func normalizeAIRules(_ rules: [String], forIOS: Bool = false) -> [String] {
         var out = rules
-        let inject = [
-            // Cursor IDE + Electron helpers — pin whole process tree to sticky CURSOR group.
-            "PROCESS-NAME,Cursor,CURSOR",
-            "PROCESS-NAME,Cursor Helper,CURSOR",
-            "PROCESS-NAME,Cursor Helper (GPU),CURSOR",
-            "PROCESS-NAME,Cursor Helper (Renderer),CURSOR",
-            "PROCESS-NAME,Cursor Helper (Plugin),CURSOR",
-            "PROCESS-NAME,Cursor Helper (Network),CURSOR",
-            "PROCESS-PATH,*Cursor.app/Contents/Frameworks/Cursor Helper*,CURSOR",
-            "PROCESS-PATH,*Cursor.app/Contents/MacOS/*,CURSOR",
-            "PROCESS-PATH,*Cursor Helper*.app/Contents/MacOS/*,CURSOR",
+        var inject: [String] = [
             // Cursor cloud backends (docs.cursor.com enterprise allowlist)
             "DOMAIN-SUFFIX,cursor.sh,CURSOR",
             "DOMAIN-SUFFIX,cursor.com,CURSOR",
@@ -743,6 +1017,19 @@ enum ClashConfigParser {
             "DOMAIN,sydney.bing.com,COPILOT",
             "DOMAIN-SUFFIX,githubcopilot.com,COPILOT",
         ]
+        if !forIOS {
+            inject.insert(contentsOf: [
+                "PROCESS-NAME,Cursor,CURSOR",
+                "PROCESS-NAME,Cursor Helper,CURSOR",
+                "PROCESS-NAME,Cursor Helper (GPU),CURSOR",
+                "PROCESS-NAME,Cursor Helper (Renderer),CURSOR",
+                "PROCESS-NAME,Cursor Helper (Plugin),CURSOR",
+                "PROCESS-NAME,Cursor Helper (Network),CURSOR",
+                "PROCESS-PATH,*Cursor.app/Contents/Frameworks/Cursor Helper*,CURSOR",
+                "PROCESS-PATH,*Cursor.app/Contents/MacOS/*,CURSOR",
+                "PROCESS-PATH,*Cursor Helper*.app/Contents/MacOS/*,CURSOR",
+            ], at: 0)
+        }
 
         let missing = inject.filter { rule in
             let needle = rule.split(separator: ",").prefix(2).joined(separator: ",").uppercased()
@@ -758,13 +1045,10 @@ enum ClashConfigParser {
     }
 
     /// Ensure Netflix / TikTok / social / MS / Apple / domestic groups have rule coverage.
-    private static func normalizeServiceRules(_ rules: [String]) -> [String] {
+    private static func normalizeServiceRules(_ rules: [String], forIOS: Bool = false) -> [String] {
         var out = rules
-        let inject = [
-            "GEOSITE,netflix,NETFLIX",
-            "GEOSITE,tiktok,TIKTOK",
-            "GEOSITE,twitter,TWITTER",
-            "GEOSITE,whatsapp,WHATSAPP",
+        // Never inject GEOSITE on iOS — geo DB is scrubbed; Parse would hang or fail.
+        var inject: [String] = [
             "DOMAIN-SUFFIX,steampowered.com,STEAM",
             "DOMAIN-SUFFIX,steamcommunity.com,STEAM",
             "DOMAIN-SUFFIX,microsoft.com,MICROSOFT",
@@ -773,7 +1057,20 @@ enum ClashConfigParser {
             "DOMAIN-SUFFIX,hdslb.com,DIRECT",
             "DOMAIN-SUFFIX,douyin.com,DIRECT",
             "DOMAIN-SUFFIX,bytedance.com,DIRECT",
+            "DOMAIN-SUFFIX,netflix.com,NETFLIX",
+            "DOMAIN-SUFFIX,tiktok.com,TIKTOK",
+            "DOMAIN-SUFFIX,twitter.com,TWITTER",
+            "DOMAIN-SUFFIX,x.com,TWITTER",
+            "DOMAIN-SUFFIX,whatsapp.com,WHATSAPP",
         ]
+        if !forIOS {
+            inject.insert(contentsOf: [
+                "GEOSITE,netflix,NETFLIX",
+                "GEOSITE,tiktok,TIKTOK",
+                "GEOSITE,twitter,TWITTER",
+                "GEOSITE,whatsapp,WHATSAPP",
+            ], at: 0)
+        }
         let missing = inject.filter { rule in
             let needle = rule.split(separator: ",").prefix(2).joined(separator: ",").uppercased()
             return !out.contains { $0.uppercased().contains(needle) }

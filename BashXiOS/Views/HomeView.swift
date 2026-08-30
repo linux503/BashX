@@ -433,6 +433,43 @@ struct HomeView: View {
             }
 
             if vpn.isBusyConnecting {
+                // Taiji dual-glow while establishing tunnel
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color.white.opacity(heroBreath ? 0.22 : 0.08),
+                                IOSTheme.warn.opacity(0.28),
+                                Color.black.opacity(0.12),
+                                Color.clear,
+                            ],
+                            center: .center,
+                            startRadius: 20,
+                            endRadius: 160
+                        )
+                    )
+                    .frame(width: 280, height: 280)
+                    .blur(radius: 18)
+                    .scaleEffect(heroBreath ? 1.12 : 0.9)
+
+                Circle()
+                    .strokeBorder(
+                        AngularGradient(
+                            colors: [
+                                Color.white.opacity(0),
+                                Color.white.opacity(0.7),
+                                IOSTheme.warn.opacity(0.8),
+                                Color.black.opacity(0.45),
+                                Color.white.opacity(0),
+                            ],
+                            center: .center
+                        ),
+                        lineWidth: 3
+                    )
+                    .frame(width: 220, height: 220)
+                    .rotationEffect(.degrees(ringSpin * 1.6))
+                    .opacity(0.85)
+
                 Circle()
                     .strokeBorder(IOSTheme.warn.opacity(0.4), lineWidth: 2.5)
                     .frame(width: 210, height: 210)

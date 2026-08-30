@@ -683,12 +683,54 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private static func fetchMenuProxyGroups() async -> [[String: Any]] {
+        if let all = await fetchAllPolicyGroups(), !all.isEmpty {
+            return all
+        }
+        // Fallback: fixed names (older cores / partial API).
         var out: [[String: Any]] = []
         for name in AppConstants.menuProxyGroups {
             guard let info = await fetchProxyGroup(name) else { continue }
             out.append(info)
         }
         return out
+    }
+
+    /// All Selector/URLTest/Fallback/LoadBalance groups from `GET /proxies`.
+    private static func fetchAllPolicyGroups() async -> [[String: Any]]? {
+        guard let url = URL(string: "http://\(AppConstants.externalController)/proxies") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: 4)
+        request.httpMethod = "GET"
+        let secret = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .string(forKey: "apiSecret")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await localAPISession().data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let proxies = json["proxies"] as? [String: Any] else {
+            return nil
+        }
+
+        var byName: [String: [String: Any]] = [:]
+        for (name, value) in proxies {
+            if AppConstants.hiddenProxyGroupNames.contains(name.uppercased()) { continue }
+            guard let dict = value as? [String: Any],
+                  let type = dict["type"] as? String,
+                  AppConstants.selectableProxyGroupTypes.contains(type) else { continue }
+            let all = (dict["all"] as? [String]) ?? []
+            guard !all.isEmpty else { continue }
+            byName[name] = [
+                "name": name,
+                "type": type,
+                "now": dict["now"] as? String ?? "",
+                "all": all,
+            ]
+        }
+        guard !byName.isEmpty else { return nil }
+        return AppConstants.orderedProxyGroupNames(Array(byName.keys)).compactMap { byName[$0] }
     }
 
     private static func fetchProxyGroup(_ group: String) async -> [String: Any]? {

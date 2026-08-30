@@ -9,7 +9,7 @@ import Foundation
 /// 2. Google / AI / Telegram / GitHub / YouTube  → strategy groups
 /// 3. Apple (push optional PROXY; rest APPLE/DIRECT)
 /// 4. 国内服务 blanket DIRECT（含 B 站/抖音 — 勿默认进策略组）
-/// 5. GeoIP（Mac）/ 外国 TLD；iOS 漏网之鱼 → MATCH,DIRECT
+/// 5. GeoIP（Mac）/ 外国 TLD；漏网之鱼 → MATCH,PROXY（ACL4SSR）
 enum IosRoutingRules {
     /// Full rule list written into mihomo (Packet Tunnel on iOS / local core on Mac).
     static func build(fromBase base: [String]) -> [String] {
@@ -40,9 +40,16 @@ enum IosRoutingRules {
             guard !t.isEmpty, !t.hasPrefix("#") else { continue }
             if RoutingGeoRules.shouldSkipBaseRule(t) { continue }
             #if os(macOS)
-            if t.uppercased().hasPrefix("PROCESS-NAME,") { continue } // already prepended
+            if t.uppercased().hasPrefix("PROCESS-NAME,") || t.uppercased().hasPrefix("PROCESS-PATH,") {
+                continue // already prepended
+            }
             #else
-            if t.uppercased().hasPrefix("PROCESS-NAME,") { continue }
+            if t.uppercased().hasPrefix("PROCESS-NAME,") || t.uppercased().hasPrefix("PROCESS-PATH,") {
+                continue
+            }
+            if t.uppercased().hasPrefix("GEOSITE,") || t.uppercased().hasPrefix("GEOIP,") {
+                continue
+            }
             #endif
             // WeChat HTTPDNS: never REJECT (breaks 发图 / 登录).
             let u = t.uppercased()

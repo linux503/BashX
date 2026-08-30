@@ -11,6 +11,8 @@ final class AppState: ObservableObject {
     @Published var isTesting = false
     /// `nil` = full test; otherwise the region group key being tested.
     @Published private(set) var speedTestScopeKey: String?
+    /// Invalidates in-flight speed-test callbacks after timeout / cancel.
+    private var speedTestToken = UUID()
     @Published var testedCount = 0
     @Published var coreRunning = false
     @Published var systemProxyOn = false
@@ -27,6 +29,7 @@ final class AppState: ObservableObject {
         case none
         case subscriptions
         case addSubscription
+        case groups
     }
     @Published var panelIntent: PanelIntent = .none
 
@@ -878,9 +881,10 @@ final class AppState: ObservableObject {
         if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
             await ensureUsableProxy(forceProbe: false, verifyGoogle: true)
         }
-        // Hot reconnect path: still prefer a fresh probe + fastest.
-        await runSpeedTest()
-        await selectFastestNodeIfAvailable()
+        // Prefer cached delays — full auto-test on every reconnect made the UI stuck on「测速中」.
+        if settings.proxyHubMode == .smart || settings.autoSelectFastest {
+            await selectFastestNodeIfAvailable()
+        }
     }
 
     /// Avoid colliding with Stash/ClashX default 7890/9090; also bump if OUR ports are occupied by others.
@@ -1484,21 +1488,38 @@ final class AppState: ObservableObject {
         }
         isTesting = true
         speedTestScopeKey = scoped ? groupKey : nil
+        let token = UUID()
+        speedTestToken = token
         testedCount = 0
         bumpNodeListRevision()
         var pendingDelays: [String: (Int, Date)] = [:]
         var lastNodesFlush = Date.distantPast
         defer {
-            isTesting = false
-            speedTestScopeKey = nil
+            if speedTestToken == token {
+                isTesting = false
+                speedTestScopeKey = nil
+            }
             groupCacheSort = nil
             groupCache = []
             bumpNodeListRevision()
         }
 
         statusText = "测速中\(scope)…"
+        // Cap core start so「测速中」cannot hang forever if mihomo never comes up.
         if !isCoreVisiblyAlive {
-            _ = await ensureCoreRunning()
+            let ok = await withTaskGroup(of: Bool.self) { group -> Bool in
+                group.addTask { await self.ensureCoreRunning() }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    return false
+                }
+                let first = await group.next() ?? false
+                group.cancelAll()
+                return first
+            }
+            if !ok, !isCoreVisiblyAlive {
+                statusText = "内核未就绪，改用 TCP 测速\(scope)"
+            }
         }
         let useAPI = isCoreVisiblyAlive || CoreHealth.mixedPortAlive(port: settings.mixedPort)
         let controller = useAPI ? settings.externalController : nil
@@ -1506,47 +1527,64 @@ final class AppState: ObservableObject {
         let workers = settings.turboMode
             ? min(max(settings.concurrency, 1), 6)
             : min(max(settings.concurrency, 1), 4)
-        let results = await tester.testAll(
-            nodes: testables,
-            timeoutMs: perNodeTimeout,
-            concurrency: workers,
-            controller: controller,
-            secret: settings.secret,
-            testURL: settings.testURL
-        ) { [weak self] name, delay in
-            guard let self else { return }
-            pendingDelays[name] = (delay, Date())
-            self.testedCount += 1
-            let now = Date()
-            let done = self.testedCount == testables.count
-            if done || now.timeIntervalSince(lastNodesFlush) > 0.5 {
-                lastNodesFlush = now
-                // Mutate delay cache once per flush without publishing settings each node.
-                var delayCache = self.settings.nodeDelayCache
-                var delayCacheDirty = false
-                for (nodeName, pair) in pendingDelays {
-                    if let idx = self.nodes.firstIndex(where: { $0.name == nodeName }) {
-                        self.nodes[idx].delayMs = pair.0 > 0 ? pair.0 : nil
-                        self.nodes[idx].testedAt = pair.1
-                        if pair.0 > 0 {
-                            let key = self.nodes[idx].delayCacheKey
-                            if delayCache[key] != pair.0 {
-                                delayCache[key] = pair.0
-                                delayCacheDirty = true
+        // Hard ceiling so UI never stays on「测速中」if a probe stalls.
+        let hardCapNs = UInt64(max(20, testables.count) * perNodeTimeout / max(workers, 1) + 15_000) * 1_000_000
+        let results: [SpeedTester.Result] = await withTaskGroup(of: [SpeedTester.Result]?.self) { group in
+            group.addTask {
+                await self.tester.testAll(
+                    nodes: testables,
+                    timeoutMs: perNodeTimeout,
+                    concurrency: workers,
+                    controller: controller,
+                    secret: self.settings.secret,
+                    testURL: self.settings.testURL
+                ) { [weak self] name, delay in
+                    guard let self else { return }
+                    guard self.speedTestToken == token else { return }
+                    pendingDelays[name] = (delay, Date())
+                    self.testedCount += 1
+                    let now = Date()
+                    let done = self.testedCount == testables.count
+                    // Throttle list rebuilds — frequent bumps were a major stutter source.
+                    if done || now.timeIntervalSince(lastNodesFlush) > 1.0 {
+                        lastNodesFlush = now
+                        var delayCache = self.settings.nodeDelayCache
+                        var delayCacheDirty = false
+                        for (nodeName, pair) in pendingDelays {
+                            if let idx = self.nodes.firstIndex(where: { $0.name == nodeName }) {
+                                self.nodes[idx].delayMs = pair.0 > 0 ? pair.0 : nil
+                                self.nodes[idx].testedAt = pair.1
+                                if pair.0 > 0 {
+                                    let key = self.nodes[idx].delayCacheKey
+                                    if delayCache[key] != pair.0 {
+                                        delayCache[key] = pair.0
+                                        delayCacheDirty = true
+                                    }
+                                }
                             }
                         }
+                        if delayCacheDirty {
+                            self.settings.nodeDelayCache = delayCache
+                        }
+                        pendingDelays.removeAll(keepingCapacity: true)
+                        self.bumpNodeListRevision()
+                    }
+                    if done || now.timeIntervalSince(self.speedUITick) > 0.8 {
+                        self.speedUITick = now
+                        self.statusText = "测速\(scope) \(self.testedCount)/\(testables.count)"
                     }
                 }
-                if delayCacheDirty {
-                    self.settings.nodeDelayCache = delayCache
-                }
-                pendingDelays.removeAll(keepingCapacity: true)
-                self.bumpNodeListRevision()
             }
-            if done || now.timeIntervalSince(self.speedUITick) > 0.35 {
-                self.speedUITick = now
-                self.statusText = "测速\(scope) \(self.testedCount)/\(testables.count)"
+            group.addTask {
+                try? await Task.sleep(nanoseconds: hardCapNs)
+                return nil
             }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? []
+        }
+        if results.isEmpty, testedCount < testables.count {
+            statusText = "测速超时\(scope)，已停止"
         }
 
         if scoped {
@@ -2120,30 +2158,31 @@ final class AppState: ObservableObject {
 
     /// Switch PROXY hub between smart / load-balance / failover / manual.
     func setProxyHubMode(_ mode: ProxyHubMode) async {
-        guard settings.proxyHubMode != mode else { return }
+        guard settings.proxyHubMode != mode else {
+            bumpNodeListRevision()
+            return
+        }
         settings.proxyHubMode = mode
         if mode != .manual {
             settings.selectedNodeName = "AUTO"
-            settings.autoSelectFastest = true
+            settings.autoSelectFastest = (mode == .smart)
         }
         bumpChromeRevision()
+        bumpNodeListRevision()
         statusText = "\(mode.title)…"
         schedulePersist()
         writeConfig()
         if coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) {
             applyCoreRunning(true)
             await applyConfig(reloadIfRunning: true)
-            if mode == .manual {
-                await syncSelectedOutbound()
-            } else {
-                await runSpeedTest()
-                await selectFastestNodeIfAvailable()
-            }
+            // Keep hub mode sticky — never call selectNode() here (that forces .manual).
+            await syncSelectedOutbound()
             statusText = "已启用\(mode.title)"
             scheduleOutboundIPRefresh()
         } else {
             statusText = "已选择\(mode.title)（下次连接生效）"
         }
+        bumpNodeListRevision()
     }
 
     /// Query egress IP through mixed-port (debounced after node switch).
@@ -2902,11 +2941,26 @@ final class AppState: ObservableObject {
         let domainSniffing = settings.domainSniffing
         let dnsPreference = settings.dnsPreference
         let configURL = Paths.configURL
+        let profileRoot = Self.loadPassthroughProfileRoot(from: settings)
 
         writeConfigBuildTask?.cancel()
         let task = Task { [weak self] in
             let yaml = await Task.detached(priority: .userInitiated) {
-                ClashConfigParser.buildConfig(
+                if let profileRoot {
+                    return ClashConfigParser.buildPassthroughConfig(
+                        from: profileRoot,
+                        mixedPort: mixedPort,
+                        controller: controller,
+                        secret: secret,
+                        tunEnabled: tunEnabled,
+                        tunStack: tunStack,
+                        mode: mode,
+                        allowLan: allowLan,
+                        dnsPreference: dnsPreference,
+                        domainSniffing: domainSniffing
+                    )
+                }
+                return ClashConfigParser.buildConfig(
                     nodes: snapshotNodes,
                     selectedName: selectedName,
                     mixedPort: mixedPort,
@@ -2941,6 +2995,17 @@ final class AppState: ObservableObject {
         }
         writeConfigBuildTask = task
         return task
+    }
+
+    /// Single enabled Clash YAML with native `proxy-groups` → keep as profile (Verge/Stash).
+    static func loadPassthroughProfileRoot(from settings: AppSettings) -> [String: Any]? {
+        let enabled = settings.subscriptions.filter(\.enabled)
+        guard enabled.count == 1, let sub = enabled.first else { return nil }
+        let url = Paths.subscriptionCacheURL(id: sub.id)
+        guard let data = try? Data(contentsOf: url),
+              let parsed = try? ClashConfigParser.parse(data),
+              ClashConfigParser.isCompleteProfile(parsed.rawRoot) else { return nil }
+        return parsed.rawRoot
     }
 
     /// TUN in yaml only when elevated start succeeded — avoids boot crash without admin rights.
@@ -3011,6 +3076,11 @@ final class AppState: ObservableObject {
 
     func fetchMenuProxyGroups() async -> [ClashCore.ProxyGroupInfo] {
         guard coreRunning else { return [] }
+        let all = await ClashCore.fetchAllProxyGroups(
+            controller: settings.externalController,
+            secret: settings.secret
+        )
+        if !all.isEmpty { return all }
         var out: [ClashCore.ProxyGroupInfo] = []
         for name in AppConstants.menuProxyGroups {
             if let info = await ClashCore.fetchProxyGroup(
@@ -3557,10 +3627,15 @@ final class AppState: ObservableObject {
                         : (settings.tunEnabled
                             ? "内核运行中 · \(settings.mixedPort)（TUN 待开启）"
                             : "内核运行中 · \(settings.mixedPort) · \(settings.proxyMode.title)")
-                    // Every connect: probe + pick fastest so the bottom selection updates immediately.
-                    statusText = "连接成功 · 正在测速优选…"
-                    await runSpeedTest()
-                    await selectFastestNodeIfAvailable()
+                    // Prefer cached delay / AUTO — avoid auto full speed-test (stuck「测速中」+ stutter).
+                    statusText = effectiveTunInConfig()
+                        ? "内核运行中（TUN）· \(settings.proxyMode.title)"
+                        : (settings.tunEnabled
+                            ? "内核运行中 · \(settings.mixedPort)（TUN 待开启）"
+                            : "内核运行中 · \(settings.mixedPort) · \(settings.proxyMode.title)")
+                    if settings.proxyHubMode == .smart || settings.autoSelectFastest {
+                        await selectFastestNodeIfAvailable()
+                    }
                     if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
                         await ensureUsableProxy(forceProbe: true, verifyGoogle: true)
                     }

@@ -2,14 +2,12 @@ import AppKit
 import SwiftUI
 
 /// Native menu-bar dropdown (ClashX-style).
-/// Labels use a frozen snapshot to avoid submenu flash; never clear groups mid-open.
+/// Labels use a frozen snapshot to avoid submenu flash.
 struct MenuBarView: View {
     @ObservedObject var state: AppState
     @State private var snap = MenuBarSnapshot.empty
     @State private var menuIsOpen = false
-    @State private var pendingGroups: [MenuProxyGroupSnapshot]?
     @State private var pendingSnapRefresh = false
-    @State private var groupsTask: Task<Void, Never>?
     @State private var trackingID: UUID?
 
     var body: some View {
@@ -56,18 +54,11 @@ struct MenuBarView: View {
 
     private func handleMenuPresent() {
         menuIsOpen = true
-        // Light sync of toggles/status only — keep existing strategy groups to avoid flash.
         refreshSnap(reason: .present)
     }
 
     private func handleMenuDismiss() {
         menuIsOpen = false
-        if let pending = pendingGroups {
-            pendingGroups = nil
-            if snap.proxyGroups != pending {
-                snap.proxyGroups = pending
-            }
-        }
         if pendingSnapRefresh {
             pendingSnapRefresh = false
             refreshSnap(reason: .chrome)
@@ -80,45 +71,20 @@ struct MenuBarView: View {
         // While the menu is opening/open: never rebuild the full snap (NSMenu remount = flash).
         if reason == .present {
             applyLiveToggleFields()
-            if snap.proxyGroups.isEmpty {
-                scheduleProxyGroupsFetch()
-            }
             return
         }
 
         if menuIsOpen {
-            // Always refresh toggle rows (launch-at-login etc.) even while open.
             applyLiveToggleFields()
             if reason != .userAction {
                 pendingSnapRefresh = true
             }
-            scheduleProxyGroupsFetch()
             return
         }
 
-        let previousGroups = snap.proxyGroups
-        var next = MenuBarSnapshot.capture(from: state)
-        // Critical: never wipe groups to [] — that made the menu flash.
-        next.proxyGroups = previousGroups
+        let next = MenuBarSnapshot.capture(from: state)
         if next != snap {
             snap = next
-        }
-
-        scheduleProxyGroupsFetch()
-    }
-
-    private func scheduleProxyGroupsFetch() {
-        groupsTask?.cancel()
-        groupsTask = Task {
-            let groups = await state.fetchMenuProxyGroups().map { MenuProxyGroupSnapshot(from: $0) }
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                if menuIsOpen {
-                    pendingGroups = groups
-                } else if snap.proxyGroups != groups {
-                    snap.proxyGroups = groups
-                }
-            }
         }
     }
 
@@ -183,7 +149,9 @@ private struct MenuBarFrozenContent: View, Equatable {
 
         nodePickerSection
 
-        strategyGroupsMenu
+        Button(t("mac.menu.openGroups")) {
+            PanelPresenter.shared.open(state: state, intent: .groups)
+        }
 
         Divider()
 
@@ -279,39 +247,6 @@ private struct MenuBarFrozenContent: View, Equatable {
             state.quitApp()
         }
         .keyboardShortcut("q")
-    }
-
-    @ViewBuilder
-    private var strategyGroupsMenu: some View {
-        if snap.proxyGroups.isEmpty {
-            EmptyView()
-        } else {
-            Menu(t("mac.menu.strategyGroups")) {
-                ForEach(snap.proxyGroups) { group in
-                    Menu {
-                        ForEach(group.all.prefix(48), id: \.self) { name in
-                            Button {
-                                Task {
-                                    await state.selectGroupProxy(group: group.name, name: name)
-                                    onRefresh()
-                                }
-                            } label: {
-                                menuCheckRow(
-                                    AppConstants.shortProxyLabel(name, limit: 32),
-                                    on: name == group.now
-                                )
-                            }
-                        }
-                        if group.all.count > 48 {
-                            Text(t("mac.menu.groupMore").replacingOccurrences(of: "%@", with: "\(group.all.count)"))
-                                .foregroundStyle(.secondary)
-                        }
-                    } label: {
-                        Text(AppConstants.groupMenuTitle(group: group.name, now: group.now, limit: 18))
-                    }
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -457,19 +392,6 @@ private struct MenuBarFrozenContent: View, Equatable {
     }
 }
 
-private struct MenuProxyGroupSnapshot: Equatable, Identifiable {
-    var id: String { name }
-    var name: String
-    var now: String
-    var all: [String]
-
-    init(from info: ClashCore.ProxyGroupInfo) {
-        name = info.name
-        now = info.now
-        all = info.all
-    }
-}
-
 private struct MenuBarSnapshot: Equatable {
     var lang: AppLanguage
     var status: String
@@ -496,7 +418,6 @@ private struct MenuBarSnapshot: Equatable {
     var logoStyleTitle: String
     var subscriptionMenuTitle: String
     var selectedHint: String
-    var proxyGroups: [MenuProxyGroupSnapshot]
 
     static let empty = MenuBarSnapshot(
         lang: .system,
@@ -523,8 +444,7 @@ private struct MenuBarSnapshot: Equatable {
         logoStyle: .ring,
         logoStyleTitle: LogoStyle.ring.title,
         subscriptionMenuTitle: "Subscriptions",
-        selectedHint: "",
-        proxyGroups: []
+        selectedHint: ""
     )
 
     @MainActor
@@ -583,8 +503,7 @@ private struct MenuBarSnapshot: Equatable {
             logoStyle: state.settings.logoStyle,
             logoStyleTitle: state.settings.logoStyle.title,
             subscriptionMenuTitle: subTitle,
-            selectedHint: hint,
-            proxyGroups: []
+            selectedHint: hint
         )
     }
 

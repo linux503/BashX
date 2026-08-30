@@ -259,7 +259,7 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         block["enhanced-mode"] = "fake-ip"
         block["fake-ip-range"] = "198.18.0.1/16"
         block["use-system-hosts"] = false
-        block["respect-rules"] = false
+        block["respect-rules"] = true
         block["fake-ip-filter"] = [
             "*.lan", "*.local", "+.local", "+.lan",
             // Apple：Push/系统服务需要真实 IP；分流靠下方 IP-CIDR + DOMAIN 规则。
@@ -293,7 +293,7 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "geoip": false,
             "ipcidr": ["240.0.0.0/4"],
         ]
-        // MATCH,DIRECT + fake-ip: re-resolve domain via DoH (not system).
+        // MATCH,PROXY + fake-ip: foreign DNS via proxy path; DIRECT re-resolve via DoH.
         block["direct-nameserver"] = bootstrapNS
         block["direct-nameserver-follow-policy"] = true
         block["nameserver-policy"] = policy

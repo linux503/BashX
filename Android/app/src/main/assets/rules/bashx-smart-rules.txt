@@ -1,7 +1,8 @@
-# BashX Smart Rules v27
+# BashX Smart Rules v28
 # 参考 LingJingMaster/Shadowrocket-Rules 分流优先级 + ACL4SSR / Clash Verge
 # https://github.com/LingJingMaster/Shadowrocket-Rules
-# v27: 国内优先 — B站/抖音直连；去掉泛 .com PROXY；iOS MATCH,DIRECT；Cursor Helper(Network)
+# v28: ACL4SSR 兜底 MATCH,PROXY；假 IP 下勿用 MATCH,DIRECT
+# v27: 国内优先 — B站/抖音直连；去掉泛 .com PROXY；Cursor Helper(Network)
 # v26: 业务策略组 — ChatGPT/Copilot/Netflix/TikTok/Twitter/WhatsApp/微软/苹果/B站/抖音/Steam 可选手动
 # v25: 政务/银行/.org 一律本地直连；扩大微信 CDN 旁路
 # v20: Cursor 进程整树 + CDN/VM 域名 → sticky CURSOR（美国优先）；修复启动 BashX 时 Cursor 卡顿
@@ -381,5 +382,5 @@ GEOIP,!CN,PROXY,no-resolve
 
 # ========== 漏网之鱼 ==========
 # Mac（有 GeoIP）：上面 GEOIP,!CN 已覆盖；此处兜底代理
-# iOS 运行时由 RoutingGeoRules 注入 MATCH,DIRECT（国内优先，避免未知 .com CDN 误走节点）
+# iOS 运行时由 RoutingGeoRules 注入 MATCH,PROXY（假 IP 下勿用 MATCH,DIRECT）
 MATCH,PROXY

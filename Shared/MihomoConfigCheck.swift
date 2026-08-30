@@ -103,7 +103,7 @@ enum MihomoConfigCheck {
     /// Mihomo refuses configs where select groups reference each other (e.g. PROXY↔AI).
     static func detectProxyGroupLoop(at url: URL = Paths.mihomoConfigURL) -> String? {
         guard let yaml = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let groups = ["PROXY", "GOOGLE", "AI", "AUTO", "JP", "HK", "US", "TW", "TELEGRAM", "CURSOR", "OPENAI", "ANTHROPIC", "GOOGLE-AUTO", "TELEGRAM-AUTO"]
+        let groups = ["PROXY", "GOOGLE", "AI", "AUTO", "BALANCE", "FALLBACK", "JP", "HK", "US", "TW", "TELEGRAM", "CURSOR", "OPENAI", "ANTHROPIC", "GOOGLE-AUTO", "TELEGRAM-AUTO"]
         var edges: [String: Set<String>] = [:]
         let lines = yaml.components(separatedBy: .newlines)
         var current: String?

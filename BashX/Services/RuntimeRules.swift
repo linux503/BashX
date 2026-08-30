@@ -32,7 +32,7 @@ enum RuntimeRules {
         rules.compactMap { rule in
             let trimmed = rule.trimmingCharacters(in: .whitespaces)
             let upper = trimmed.uppercased()
-            if upper.hasPrefix("PROCESS-NAME,") { return nil }
+            if upper.hasPrefix("PROCESS-NAME,") || upper.hasPrefix("PROCESS-PATH,") { return nil }
             if upper.hasPrefix("GEOSITE,") { return nil }
             if upper.hasPrefix("GEOIP,") { return nil }
             return rule

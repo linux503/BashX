@@ -211,7 +211,14 @@ final class VPNManager: ObservableObject {
         }
         do {
             #if os(iOS)
-            _ = IOSConfigWriter.prepareForConnect()
+            let prepared = IOSConfigWriter.prepareForConnect()
+            if !prepared {
+                lastError = MihomoConfigCheck.preflight()
+                    ?? "请先更新订阅后再连接"
+                setUserWantsConnection(false)
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                return
+            }
             #endif
             if let issue = MihomoConfigCheck.preflight() {
                 lastError = issue

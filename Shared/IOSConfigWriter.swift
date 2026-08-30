@@ -20,13 +20,25 @@ enum IOSConfigWriter {
             settings.selectedNodeName = nil
             changed = true
         }
+        // Prefer TUN capture for normal connect (HTTP-proxy experiment is opt-in only).
+        if !settings.iosTunnelCapture {
+            settings.iosTunnelCapture = true
+            changed = true
+        }
         if changed {
             _ = SettingsStore.save(settings)
         }
         let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
         ud?.set(settings.secret, forKey: "apiSecret")
         ud?.set(settings.proxyMode.rawValue, forKey: "proxyMode")
+        ud?.set(true, forKey: AppConstants.iosTunnelCaptureKey)
         let nodes = loadCachedNodes(from: settings)
+        guard !nodes.isEmpty else { return false }
+        let pick = settings.selectedNodeName.flatMap { name in
+            nodes.first(where: { $0.name == name && ClashConfigParser.isSpeedTestable($0) })?.name
+        } ?? nodes.first(where: { ClashConfigParser.isSpeedTestable($0) })?.name
+            ?? nodes.first(where: { !ClashConfigParser.isPlaceholderNodeName($0.name) })?.name
+            ?? nodes.first?.name
         let rules = RuntimeRules.effective(
             base: settings.rules,
             prepend: settings.rulesPrepend,
@@ -34,13 +46,25 @@ enum IOSConfigWriter {
         )
         return write(
             nodes: nodes,
-            selectedName: settings.selectedNodeName ?? nodes.first?.name,
-            mode: settings.proxyMode,
+            selectedName: pick,
+            mode: .rule,
             rules: rules,
             secret: settings.secret,
             dnsPreference: settings.dnsPreference,
-            tunnelCapture: settings.iosTunnelCapture
+            tunnelCapture: true,
+            profileRoot: loadPassthroughProfileRoot(from: settings)
         )
+    }
+
+    /// Single enabled Clash YAML with native proxy-groups.
+    static func loadPassthroughProfileRoot(from settings: AppSettings) -> [String: Any]? {
+        let enabled = settings.subscriptions.filter(\.enabled)
+        guard enabled.count == 1, let sub = enabled.first else { return nil }
+        let url = Paths.subscriptionCacheURL(id: sub.id)
+        guard let data = try? Data(contentsOf: url),
+              let parsed = try? ClashConfigParser.parse(data),
+              ClashConfigParser.isCompleteProfile(parsed.rawRoot) else { return nil }
+        return parsed.rawRoot
     }
 
     private static func loadCachedNodes(from settings: AppSettings) -> [ProxyNode] {
@@ -67,24 +91,42 @@ enum IOSConfigWriter {
         rules: [String],
         secret: String = "",
         dnsPreference: DnsPreference = .smart,
-        tunnelCapture: Bool = true
+        tunnelCapture: Bool = true,
+        profileRoot: [String: Any]? = nil
     ) -> Bool {
-        let yaml = ClashConfigParser.buildConfig(
-            nodes: nodes,
-            selectedName: selectedName,
-            mixedPort: AppConstants.mixedPort,
-            controller: AppConstants.externalController,
-            secret: secret,
-            rules: rules,
-            tunEnabled: tunnelCapture,
-            tunStack: "gvisor",
-            mode: mode,
-            allowLan: false,
-            turboMode: false,
-            domainSniffing: true,
-            dnsPreference: dnsPreference,
-            forIOS: true
-        )
+        let yaml: String
+        if let profileRoot {
+            yaml = ClashConfigParser.buildPassthroughConfig(
+                from: profileRoot,
+                mixedPort: AppConstants.mixedPort,
+                controller: AppConstants.externalController,
+                secret: secret,
+                tunEnabled: tunnelCapture,
+                tunStack: "gvisor",
+                mode: mode,
+                allowLan: false,
+                dnsPreference: dnsPreference,
+                forIOS: true,
+                domainSniffing: true
+            )
+        } else {
+            yaml = ClashConfigParser.buildConfig(
+                nodes: nodes,
+                selectedName: selectedName,
+                mixedPort: AppConstants.mixedPort,
+                controller: AppConstants.externalController,
+                secret: secret,
+                rules: rules,
+                tunEnabled: tunnelCapture,
+                tunStack: "gvisor",
+                mode: mode,
+                allowLan: false,
+                turboMode: false,
+                domainSniffing: true,
+                dnsPreference: dnsPreference,
+                forIOS: true
+            )
+        }
         let patched = tunnelCapture ? patchForPacketTunnel(yaml) : patchForProxyOnly(yaml)
         do {
             try patched.write(to: Paths.mihomoConfigURL, atomically: true, encoding: .utf8)

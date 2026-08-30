@@ -1,9 +1,9 @@
 {
   "name": "BashX Smart Rules",
   "id": "bashx-smart",
-  "version": 27,
+  "version": 28,
   "updated": "2026-08-31",
-  "description": "国内优先分流 · B站/抖音直连 · iOS MATCH,DIRECT · Cursor 进程整树 · 政务/银行直连",
+  "description": "iOS 启动修复：剔除 GEOSITE/PROCESS · 国内优先分流",
   "ruleCount": 360,
   "source": "https://github.com/LingJingMaster/Shadowrocket-Rules",
   "files": {

@@ -18,13 +18,12 @@ struct MainView: View {
     @State private var isLoadingProxyGroups = false
 
     private enum DetailTab: CaseIterable, Identifiable {
-        case nodes, groups, apps, subscriptions, monitor, rules
+        case nodes, groups, subscriptions, monitor, rules
         var id: String { String(describing: self) }
         func title(lang: AppLanguage) -> String {
             switch self {
             case .nodes: return L10n.t("mac.panel.nodes", lang)
             case .groups: return L10n.t("mac.panel.groups", lang)
-            case .apps: return L10n.t("mac.panel.apps", lang)
             case .subscriptions: return L10n.t("mac.panel.subscriptions", lang)
             case .monitor: return L10n.t("mac.panel.monitor", lang)
             case .rules: return L10n.t("mac.panel.rules", lang)
@@ -138,6 +137,10 @@ struct MainView: View {
             detailTab = .subscriptions
             state.panelIntent = .none
             AddSubscriptionOpener.open(state: state)
+        case .groups:
+            detailTab = .groups
+            state.panelIntent = .none
+            Task { await refreshPanelProxyGroups() }
         }
     }
 
@@ -330,6 +333,16 @@ struct MainView: View {
                     isOn: Binding(
                         get: { state.launchAtLoginOn },
                         set: { state.setLaunchAtLogin($0) }
+                    )
+                )
+                sidebarToggleTile(
+                    icon: "play.slash.fill",
+                    tint: Color(red: 0.92, green: 0.42, blue: 0.48),
+                    title: L10n.t("mac.nodes.adblock", lang),
+                    subtitle: L10n.t("mac.nodes.adblock.sub", lang),
+                    isOn: Binding(
+                        get: { state.settings.videoAdBlockEnabled },
+                        set: { v in Task { await state.setVideoAdBlock(v) } }
                     )
                 )
             }
@@ -824,8 +837,6 @@ struct MainView: View {
                     nodesPane
                 case .groups:
                     groupsPane
-                case .apps:
-                    AppRoutingPane()
                 case .subscriptions:
                     subscriptionsPane
                 case .monitor:
@@ -1062,203 +1073,201 @@ struct MainView: View {
     }
 
     private var nodesSmartSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "wand.and.stars")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                Text(L10n.t("mac.nodes.smart", lang))
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
-                // Big speed-test button
+        let testingAll = state.isTesting && state.speedTestScopeKey == nil
+        let canTest = !state.nodes.isEmpty && !state.isTesting
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(L10n.t("mac.nodes.smart", lang))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                    Text(L10n.t("mac.nodes.hubHint", lang))
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                }
+                Spacer(minLength: 8)
                 Button {
-                    Task {
-                        if let key = state.selectedCategoryKey {
-                            await state.runSpeedTest(forCategoryKey: key)
-                        } else {
-                            await state.runSpeedTest()
+                    guard canTest else {
+                        if state.nodes.isEmpty {
+                            state.statusText = "请先更新订阅加载节点"
                         }
-                        await state.selectFastestNodeIfAvailable()
+                        return
+                    }
+                    Task {
+                        await state.runSpeedTest()
+                        if state.settings.proxyHubMode == .smart || state.settings.autoSelectFastest {
+                            await state.selectFastestNodeIfAvailable()
+                        }
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        if state.isTesting {
+                        if testingAll {
                             ProgressView()
                                 .controlSize(.small)
+                                .tint(.white)
                         } else {
                             Image(systemName: "gauge.with.dots.needle.67percent")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: 13, weight: .bold))
                         }
-                        Text(state.isTesting
+                        Text(testingAll
                              ? L10n.t("mac.nodes.speedBigBusy", lang)
-                             : L10n.t("mac.nodes.speedBig", lang))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                             : L10n.t("mac.nodes.speedAll", lang))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
                     }
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
                     .background {
                         Capsule(style: .continuous)
-                            .fill(BashXTheme.accent(for: appearance))
+                            .fill(
+                                canTest || testingAll
+                                    ? AnyShapeStyle(
+                                        LinearGradient(
+                                            colors: [
+                                                BashXTheme.accent(for: appearance),
+                                                BashXTheme.accent(for: appearance).opacity(0.75),
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    : AnyShapeStyle(BashXTheme.secondaryFill(for: appearance))
+                            )
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(state.isTesting || state.nodes.isEmpty)
-                .help("测速当前列表并自动选用最快节点")
+                .opacity(canTest || testingAll ? 1 : 0.55)
+                .help(state.nodes.isEmpty ? "没有可测速节点" : "测速全部节点")
             }
 
-            // 智能线路 / 负载均衡 / 故障转移
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 ForEach([ProxyHubMode.smart, .loadBalance, .failover], id: \.self) { mode in
-                    nodesHubModeButton(mode)
+                    nodesHubModeCard(mode)
                 }
-            }
-
-            HStack(spacing: 8) {
-                nodesSmartCard(
-                    icon: "gauge.with.dots.needle.67percent",
-                    tint: Color(red: 0.95, green: 0.62, blue: 0.22),
-                    title: L10n.t("mac.nodes.autoSpeed", lang),
-                    subtitle: L10n.t("mac.nodes.autoSpeed.sub", lang),
-                    isOn: Binding(
-                        get: { state.settings.autoSpeedTestEnabled },
-                        set: { state.setAutoSpeedTestEnabled($0) }
-                    ),
-                    disabled: state.nodes.isEmpty
-                )
-                nodesSmartCard(
-                    icon: "bolt.fill",
-                    tint: Color(red: 0.98, green: 0.72, blue: 0.20),
-                    title: L10n.t("mac.nodes.autoFastest", lang),
-                    subtitle: L10n.t("mac.nodes.autoFastest.sub", lang),
-                    isOn: Binding(
-                        get: { state.settings.autoSelectFastest },
-                        set: { state.setAutoSelectFastest($0) }
-                    ),
-                    disabled: state.nodes.isEmpty
-                )
-                nodesSmartCard(
-                    icon: "play.slash.fill",
-                    tint: Color(red: 0.92, green: 0.42, blue: 0.48),
-                    title: L10n.t("mac.nodes.adblock", lang),
-                    subtitle: L10n.t("mac.nodes.adblock.sub", lang),
-                    isOn: Binding(
-                        get: { state.settings.videoAdBlockEnabled },
-                        set: { v in Task { await state.setVideoAdBlock(v) } }
-                    )
-                )
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(BashXTheme.card(for: appearance).opacity(0.55))
+        .padding(.vertical, 14)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            BashXTheme.card(for: appearance).opacity(appearance == .dark ? 0.88 : 0.95),
+                            BashXTheme.card(for: appearance).opacity(appearance == .dark ? 0.55 : 0.78),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(appearance == .dark ? 0.12 : 0.55),
+                                    BashXTheme.hairline(for: appearance),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.8
+                        )
+                )
+                .shadow(color: Color.black.opacity(appearance == .dark ? 0.28 : 0.06), radius: 12, y: 4)
+        }
     }
 
-    private func nodesHubModeButton(_ mode: ProxyHubMode) -> some View {
+    private func nodesHubModeTint(_ mode: ProxyHubMode) -> Color {
+        switch mode {
+        case .smart:
+            return Color(red: 0.22, green: 0.58, blue: 1.0)
+        case .loadBalance:
+            return Color(red: 0.18, green: 0.78, blue: 0.58)
+        case .failover:
+            return Color(red: 1.0, green: 0.52, blue: 0.22)
+        case .manual:
+            return BashXTheme.secondaryLabel(for: appearance)
+        }
+    }
+
+    private func nodesHubModeCard(_ mode: ProxyHubMode) -> some View {
         let on = state.settings.proxyHubMode == mode
-        let tint: Color = {
-            switch mode {
-            case .smart: return Color(red: 0.25, green: 0.72, blue: 0.95)
-            case .loadBalance: return Color(red: 0.45, green: 0.78, blue: 0.42)
-            case .failover: return Color(red: 0.95, green: 0.55, blue: 0.28)
-            case .manual: return BashXTheme.secondaryLabel(for: appearance)
-            }
-        }()
+        let tint = nodesHubModeTint(mode)
         return Button {
             Task { await state.setProxyHubMode(mode) }
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: mode.systemImage)
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(mode.title(lang: lang))
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: on
+                                        ? [tint, tint.opacity(0.72)]
+                                        : [tint.opacity(appearance == .dark ? 0.32 : 0.18),
+                                           tint.opacity(appearance == .dark ? 0.16 : 0.08)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 34, height: 34)
+                            .shadow(color: on ? tint.opacity(0.45) : .clear, radius: 8, y: 2)
+                        Image(systemName: mode.systemImage)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(on ? Color.white : tint)
+                    }
                     Spacer(minLength: 0)
                     if on {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(tint)
+                            .transition(.scale.combined(with: .opacity))
                     }
                 }
-                Text(mode.subtitle(lang: lang))
-                    .font(.system(size: 9, design: .rounded))
-                    .foregroundStyle(on ? .white.opacity(0.9) : BashXTheme.secondaryLabel(for: appearance))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(mode.title(lang: lang))
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(on ? tint : .primary)
+                        .lineLimit(1)
+                    Text(mode.subtitle(lang: lang))
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(on ? tint.opacity(0.88) : BashXTheme.secondaryLabel(for: appearance))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(minHeight: 28, alignment: .top)
+                }
             }
-            .foregroundStyle(on ? .white : .primary)
-            .padding(10)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(on ? tint : BashXTheme.secondaryFill(for: appearance).opacity(0.7))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        on
+                            ? tint.opacity(appearance == .dark ? 0.20 : 0.11)
+                            : BashXTheme.field(for: appearance)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(
+                                on
+                                    ? tint.opacity(0.9)
+                                    : BashXTheme.hairline(for: appearance),
+                                lineWidth: on ? 2 : 0.6
+                            )
+                    )
+                    .shadow(
+                        color: on ? tint.opacity(0.22) : Color.black.opacity(appearance == .dark ? 0.18 : 0.04),
+                        radius: on ? 10 : 3,
+                        y: on ? 3 : 1
+                    )
             }
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(on ? tint.opacity(0.9) : BashXTheme.hairline(for: appearance), lineWidth: on ? 1.2 : 0.5)
-            )
         }
         .buttonStyle(.plain)
         .disabled(state.nodes.isEmpty)
         .opacity(state.nodes.isEmpty ? 0.5 : 1)
-    }
-
-    private func nodesSmartCard(
-        icon: String,
-        tint: Color,
-        title: String,
-        subtitle: String,
-        isOn: Binding<Bool>,
-        disabled: Bool = false
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(tint.opacity(appearance == .dark ? 0.24 : 0.16))
-                    Image(systemName: icon)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(tint)
-                }
-                .frame(width: 30, height: 30)
-
-                Spacer(minLength: 0)
-
-                Toggle("", isOn: isOn)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .disabled(disabled)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(disabled ? BashXTheme.tertiaryLabel(for: appearance) : .primary)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.system(size: 9, design: .rounded))
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isOn.wrappedValue
-                      ? tint.opacity(appearance == .dark ? 0.12 : 0.08)
-                      : BashXTheme.secondaryFill(for: appearance).opacity(0.65))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(
-                            isOn.wrappedValue ? tint.opacity(0.35) : BashXTheme.separator(for: appearance),
-                            lineWidth: isOn.wrappedValue ? 1 : 0.5
-                        )
-                )
-        }
-        .opacity(disabled ? 0.55 : 1)
-        .transaction { $0.animation = nil }
+        .help(mode.subtitle(lang: lang))
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: on)
     }
 
     private var nodesEmptyState: some View {
@@ -1503,15 +1512,9 @@ struct MainView: View {
             }
             Divider()
             Button {
-                Task {
-                    if let key = state.selectedCategoryKey {
-                        await state.runSpeedTest(forCategoryKey: key)
-                    } else {
-                        await state.runSpeedTest()
-                    }
-                }
+                Task { await state.runSpeedTest() }
             } label: {
-                Label(state.isTesting ? "测速中…" : "节点测速", systemImage: "gauge.with.dots.needle.67percent")
+                Label(state.isTesting ? "测速中…" : "全部测速", systemImage: "gauge.with.dots.needle.67percent")
             }
             .disabled(state.isTesting || state.nodes.isEmpty)
         } label: {
@@ -1923,7 +1926,9 @@ private struct PanelNodesHost<Content: View>: View {
             .onReceive(state.$nodeListRevision.receive(on: RunLoop.main)) { _ in
                 revision &+= 1
             }
-            // Intentionally ignore chromeRevision — node switch / proxy toggles must not remount the list.
+            .onReceive(state.$isTesting.receive(on: RunLoop.main)) { _ in
+                revision &+= 1
+            }
     }
 }
 
@@ -1938,8 +1943,10 @@ private struct NodesCategoriesView: View {
 
     @State private var collapsed: Set<String> = []
     @State private var groups: [NodeCategory.Group] = []
+    @State private var testingTick = 0
 
     var body: some View {
+        let _ = testingTick
         Group {
             if displayMode == .card {
                 cardPane
@@ -1951,6 +1958,9 @@ private struct NodesCategoriesView: View {
         .onAppear(perform: reload)
         .onReceive(state.$nodeListRevision.receive(on: RunLoop.main)) { _ in
             reload()
+        }
+        .onReceive(state.$isTesting.receive(on: RunLoop.main)) { _ in
+            testingTick &+= 1
         }
     }
 

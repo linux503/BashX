@@ -150,6 +150,43 @@ enum ClashCore {
         var all: [String]
     }
 
+    /// All policy groups from `GET /proxies` (includes subscription 策略组).
+    static func fetchAllProxyGroups(
+        controller: String,
+        secret: String
+    ) async -> [ProxyGroupInfo] {
+        guard let url = URL(string: "http://\(controller)/proxies") else { return [] }
+        var request = URLRequest(url: url, timeoutInterval: 4)
+        request.httpMethod = "GET"
+        if !secret.isEmpty {
+            request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, response) = try? await localAPISession.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let proxies = json["proxies"] as? [String: Any] else {
+            return []
+        }
+
+        var byName: [String: ProxyGroupInfo] = [:]
+        for (name, value) in proxies {
+            if AppConstants.hiddenProxyGroupNames.contains(name.uppercased()) { continue }
+            guard let dict = value as? [String: Any],
+                  let type = dict["type"] as? String,
+                  AppConstants.selectableProxyGroupTypes.contains(type) else { continue }
+            let all = (dict["all"] as? [String]) ?? []
+            guard !all.isEmpty else { continue }
+            byName[name] = ProxyGroupInfo(
+                name: name,
+                type: type,
+                now: dict["now"] as? String ?? "",
+                all: all
+            )
+        }
+        return AppConstants.orderedProxyGroupNames(Array(byName.keys)).compactMap { byName[$0] }
+    }
+
     static func fetchProxyGroup(
         controller: String,
         secret: String,

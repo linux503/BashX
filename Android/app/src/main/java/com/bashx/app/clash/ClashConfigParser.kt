@@ -34,7 +34,17 @@ object ClashConfigParser {
     )
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    data class ParseResult(val nodes: List<ProxyNode>)
+    data class ParseResult(
+        val nodes: List<ProxyNode>,
+        val rawRoot: Map<String, Any>? = null,
+    )
+
+    fun isCompleteProfile(root: Map<String, Any>?): Boolean {
+        if (root == null) return false
+        val groups = root["proxy-groups"] as? List<*>
+            ?: root["Proxy Group"] as? List<*>
+        return !groups.isNullOrEmpty()
+    }
 
     fun parse(bytes: ByteArray): ParseResult {
         if (bytes.isEmpty()) throw ConfigError("订阅内容为空")
@@ -44,7 +54,7 @@ object ClashConfigParser {
 
         val fromLinks = ShareLinkParser.parseLines(text)
         if (fromLinks.isNotEmpty() && (looksLikeURIList(text) || !looksLikeYamlOrJson(text))) {
-            return ParseResult(nodesFromProxies(fromLinks))
+            return ParseResult(nodesFromProxies(fromLinks), mapOf("proxies" to fromLinks))
         }
 
         val root = loadDocument(text)
@@ -53,9 +63,20 @@ object ClashConfigParser {
             is List<*> -> collectFromList(root)
             else -> emptyList()
         }
-        if (proxyList.isNotEmpty()) return ParseResult(nodesFromProxies(proxyList))
-        if (fromLinks.isNotEmpty()) return ParseResult(nodesFromProxies(fromLinks))
+        val rawRoot = (root as? Map<*, *>)?.let { asStringKeyedMap(it) }
+        if (proxyList.isNotEmpty()) return ParseResult(nodesFromProxies(proxyList), rawRoot)
+        if (fromLinks.isNotEmpty()) return ParseResult(nodesFromProxies(fromLinks), mapOf("proxies" to fromLinks))
         throw ConfigError("无法解析订阅内容")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun asStringKeyedMap(map: Map<*, *>): Map<String, Any> {
+        val out = linkedMapOf<String, Any>()
+        for ((k, v) in map) {
+            val key = k?.toString() ?: continue
+            if (v != null) out[key] = v as Any
+        }
+        return out
     }
 
     private fun looksLikeYamlOrJson(text: String): Boolean {

@@ -28,12 +28,11 @@ enum RoutingGeoRules {
         "MATCH,PROXY",
     ]
 
-    /// iOS NE: no geo DB — **never** blanket `DOMAIN-SUFFIX,com/net,PROXY`
-    /// (breaks Alipay/WeChat/bank CDN on obscure .com hosts). Shadowrocket-style:
-    /// proxyFirst already lists overseas services; unknown → DIRECT (国内优先).
+    /// iOS NE: no geo DB — foreign TLD catch-all + MATCH,PROXY (ACL4SSR / Clash Verge).
+    /// Never MATCH,DIRECT: with fake-ip, unknown hosts would blackhole when DIRECT path flaps.
     static let iosLite: [String] = foreignTLDProxy + [
         "DOMAIN-SUFFIX,bank,DIRECT",
-        "MATCH,DIRECT",
+        "MATCH,PROXY",
     ]
 
     /// Foreign TLD catch-all when GEOSITE,tld-!cn unavailable.

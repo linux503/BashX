@@ -15,20 +15,80 @@ object ConfigWriter {
         rules: List<String>,
         dnsPreference: DnsPreference,
         tunnelCapture: Boolean,
+        profileRoot: Map<String, Any>? = null,
     ): Boolean {
-        val yaml = build(
-            nodes = nodes,
-            selectedName = selectedName,
-            mode = mode,
-            rules = rules,
-            dnsPreference = dnsPreference,
-            tunnelCapture = tunnelCapture,
-        )
+        val yaml = if (profileRoot != null && ClashConfigParser.isCompleteProfile(profileRoot)) {
+            buildPassthrough(
+                root = profileRoot,
+                mode = mode,
+                dnsPreference = dnsPreference,
+                tunnelCapture = tunnelCapture,
+            )
+        } else {
+            build(
+                nodes = nodes,
+                selectedName = selectedName,
+                mode = mode,
+                rules = rules,
+                dnsPreference = dnsPreference,
+                tunnelCapture = tunnelCapture,
+            )
+        }
         return runCatching {
             atomicWrite(Paths.configFile, yaml)
             atomicWrite(Paths.mihomoConfig, yaml)
             true
         }.getOrDefault(false)
+    }
+
+    /** Keep subscription proxy-groups + rules; inject ports / TUN / controller. */
+    fun buildPassthrough(
+        root: Map<String, Any>,
+        mode: ProxyMode,
+        dnsPreference: DnsPreference,
+        tunnelCapture: Boolean,
+    ): String {
+        val mutable = linkedMapOf<String, Any>().also { out ->
+            root.forEach { (k, v) -> out[k] = v }
+        }
+        listOf(
+            "mixed-port", "port", "socks-port", "redir-port", "tproxy-port",
+            "allow-lan", "bind-address", "mode", "log-level",
+            "external-controller", "secret", "external-ui", "external-ui-name", "external-ui-url",
+            "tun",
+        ).forEach { mutable.remove(it) }
+
+        val mixed = if (tunnelCapture) 0 else AppConstants.mixedPort
+        mutable["mixed-port"] = mixed
+        mutable["allow-lan"] = false
+        mutable["bind-address"] = "127.0.0.1"
+        mutable["mode"] = mode.name
+        mutable["log-level"] = "warning"
+        mutable["external-controller"] = AppConstants.externalController
+        mutable["secret"] = ""
+        if (!mutable.containsKey("ipv6")) mutable["ipv6"] = true
+        mutable["geodata-mode"] = false
+        mutable["geo-auto-update"] = false
+        mutable["find-process-mode"] = "off"
+        if (!mutable.containsKey("tcp-concurrent")) mutable["tcp-concurrent"] = true
+        if (tunnelCapture) {
+            mutable["tun"] = linkedMapOf(
+                "enable" to true,
+                "stack" to "gvisor",
+                "auto-route" to false,
+                "auto-detect-interface" to false,
+                "strict-route" to false,
+                "mtu" to AppConstants.defaultMTU,
+                "dns-hijack" to listOf("${AppConstants.tunDNS}:53", "any:53"),
+            )
+        }
+        val needsDns = !mutable.containsKey("dns")
+        val dumped = org.yaml.snakeyaml.Yaml().dump(mutable).trimEnd()
+        return if (needsDns) {
+            dumped + "\n" + DnsProfile.yaml(dnsPreference, AppConstants.dnsListen).trimEnd() + "\n"
+        } else {
+            dumped + "\n"
+        }
     }
 
     private fun atomicWrite(file: File, text: String) {
