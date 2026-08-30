@@ -85,6 +85,11 @@ final class VPNManager: ObservableObject {
         status == .connecting || status == .reasserting || status == .disconnecting
     }
 
+    /// Soft busy: only connecting/reasserting — UI can still cancel.
+    var isConnectingOrReasserting: Bool {
+        status == .connecting || status == .reasserting
+    }
+
     var statusText: String {
         switch status {
         case .invalid: return L10n.t("vpn.disconnected")
@@ -197,13 +202,20 @@ final class VPNManager: ObservableObject {
         lastError = nil
         userInitiatedDisconnect = false
         reconnectTask?.cancel()
+        connectWatchTask?.cancel()
+        connectWatchTask = nil
         conflictVPNHint = nil
+        // Fresh user connect — reset failure budget so we don't inherit a give-up state.
+        if reconnectAttempt >= 3 {
+            reconnectAttempt = 0
+        }
         do {
             #if os(iOS)
             _ = IOSConfigWriter.prepareForConnect()
             #endif
             if let issue = MihomoConfigCheck.preflight() {
                 lastError = issue
+                setUserWantsConnection(false)
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 return
             }
@@ -223,24 +235,25 @@ final class VPNManager: ObservableObject {
                 mgr.protocolConfiguration = proto
             }
             _ = refreshProfileMetadata(mgr)
-            // On-demand Connect keeps the tunnel up across sleep / network flaps.
-            applyOnDemand(to: mgr, enabled: true)
+            // On-demand only when user opted in — always-on Connect caused fail/retry storms.
+            let onDemand = SettingsStore.load().iosOnDemandEnabled
+            applyOnDemand(to: mgr, enabled: onDemand)
             try await mgr.saveToPreferences()
             try await mgr.loadFromPreferences()
             try mgr.connection.startVPNTunnel()
             setUserWantsConnection(true)
-            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?.set(true, forKey: "iosOnDemandEnabled")
-            if !SettingsStore.load().iosOnDemandEnabled {
-                var s = SettingsStore.load()
-                s.iosOnDemandEnabled = true
-                SettingsStore.save(s)
-            }
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?.set(onDemand, forKey: "iosOnDemandEnabled")
             status = mgr.connection.status
             beginConnectWatch()
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             syncTrafficPolling()
         } catch {
             lastError = error.localizedDescription
+            setUserWantsConnection(false)
+            if let mgr = manager {
+                applyOnDemand(to: mgr, enabled: false)
+                Task { try? await mgr.saveToPreferences() }
+            }
             UINotificationFeedbackGenerator().notificationOccurred(.error)
         }
     }
@@ -342,8 +355,8 @@ final class VPNManager: ObservableObject {
     private func beginConnectWatch() {
         connectWatchTask?.cancel()
         connectWatchTask = Task { [weak self] in
-            // Give NE + mihomo more room on cold start (geo scrub / parse) before abort+retry.
-            for tick in 0..<90 {
+            // Fail fast: 35s is enough for NE + mihomo; longer feels like a dead loop.
+            for tick in 0..<40 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 let s = self.status
@@ -362,24 +375,42 @@ final class VPNManager: ObservableObject {
                                 ?? L10n.t("vpn.fail")
                         }
                     }
-                    // Unexpected drop mid-connect → soft reconnect (not stop+loop stampede).
                     if Self.userWantsConnection(), !self.userInitiatedDisconnect {
                         self.scheduleAutoReconnect()
                     }
                     return
                 }
-                if tick >= 75 {
+                if tick >= 35 {
                     await MainActor.run {
                         self.lastError = TunnelLogReader.lastErrorHint() ?? L10n.t("vpn.timeout")
                     }
                     self.connectWatchTask?.cancel()
                     self.connectWatchTask = nil
-                    self.userInitiatedDisconnect = false
-                    self.manager?.connection.stopVPNTunnel()
-                    self.scheduleAutoReconnect()
+                    // Give up this attempt cleanly — disable on-demand so system doesn't re-arm.
+                    await self.abortConnectingAttempt(scheduleRetry: true)
                     return
                 }
             }
+        }
+    }
+
+    /// Stop a stuck connecting state without looking like a user disconnect (unless giving up).
+    private func abortConnectingAttempt(scheduleRetry: Bool) async {
+        if let mgr = manager {
+            applyOnDemand(to: mgr, enabled: false)
+            try? await mgr.saveToPreferences()
+            mgr.connection.stopVPNTunnel()
+        }
+        // Wait until NE leaves connecting/disconnecting so reconnect isn't a no-op.
+        for _ in 0..<20 {
+            if status == .disconnected || status == .invalid { break }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            if let st = manager?.connection.status {
+                status = st
+            }
+        }
+        if scheduleRetry, Self.userWantsConnection(), !userInitiatedDisconnect {
+            scheduleAutoReconnect()
         }
     }
 
@@ -389,6 +420,7 @@ final class VPNManager: ObservableObject {
         reconnectTask?.cancel()
         connectWatchTask?.cancel()
         connectWatchTask = nil
+        reconnectAttempt = 0
         if let mgr = manager {
             applyOnDemand(to: mgr, enabled: false)
             Task {
@@ -524,27 +556,43 @@ final class VPNManager: ObservableObject {
         reconnectTask?.cancel()
         guard Self.userWantsConnection() else { return }
         let stopLabel = (TunnelDiagnostics.lastStopLabel() ?? "").lowercased()
-        // Don't fight another VPN taking over, or an explicit user stop.
         if stopLabel == "user" || stopLabel.contains("superced") {
             return
         }
         reconnectAttempt = min(reconnectAttempt + 1, 6)
-        // Sleep / idle / networkChange: reconnect promptly — user still wants VPN up.
+        // Cap retries — endless connecting is worse than asking the user to tap again.
+        if reconnectAttempt >= 3 {
+            setUserWantsConnection(false)
+            if let mgr = manager {
+                applyOnDemand(to: mgr, enabled: false)
+                Task { try? await mgr.saveToPreferences() }
+            }
+            if lastError == nil {
+                lastError = TunnelLogReader.lastErrorHint() ?? L10n.t("vpn.fail")
+            }
+            return
+        }
         let base: UInt64 = {
             if stopLabel == "sleep" || stopLabel == "idletimeout" || stopLabel == "nonetwork" {
                 return 1_200_000_000
             }
             if stopLabel.contains("providerfailed") || stopLabel.contains("connectionfailed") {
-                return 5_000_000_000
+                return 3_000_000_000
             }
-            return 2_000_000_000
+            return 1_500_000_000
         }()
-        let delay = base * UInt64(max(1, reconnectAttempt / 2 + 1))
+        let delay = base * UInt64(max(1, reconnectAttempt))
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: min(delay, 20_000_000_000))
+            try? await Task.sleep(nanoseconds: min(delay, 12_000_000_000))
             guard let self, !Task.isCancelled else { return }
             guard !self.userInitiatedDisconnect, Self.userWantsConnection() else { return }
-            guard !self.isConnected, !self.isBusyConnecting else { return }
+            // Wait out disconnecting so we don't no-op on isBusyConnecting.
+            for _ in 0..<25 {
+                if !self.isBusyConnecting { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            guard !self.isConnected else { return }
+            guard !self.userInitiatedDisconnect, Self.userWantsConnection() else { return }
             await self.connect()
         }
     }

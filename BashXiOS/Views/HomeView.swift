@@ -676,52 +676,53 @@ struct HomeView: View {
 
     @ViewBuilder
     private var proxyGroupsBar: some View {
-        if !vpn.isConnected {
-            EmptyView()
-        } else {
-            Button {
-                showPolicyGroups = true
+        Button {
+            showPolicyGroups = true
+            if vpn.isConnected {
                 state.scheduleProxyGroupsRefresh()
-            } label: {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(t("home.groups"))
-                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text(groupsSummaryText)
-                            .font(.system(.caption, design: .rounded))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    if state.proxyGroups.isEmpty {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Text("\(state.proxyGroups.count)")
-                            .font(.system(.caption, design: .rounded).weight(.bold))
-                            .foregroundStyle(IOSTheme.accent)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(IOSTheme.accent.opacity(0.12))
-                            )
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 14)
-                .background(groupBarBackground)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(t("home.groupsOpen"))
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(t("home.groups"))
+                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(groupsSummaryText)
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if vpn.isConnected, state.proxyGroups.isEmpty {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if !state.proxyGroups.isEmpty {
+                    Text("\(state.proxyGroups.count)")
+                        .font(.system(.caption, design: .rounded).weight(.bold))
+                        .foregroundStyle(IOSTheme.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(IOSTheme.accent.opacity(0.12))
+                        )
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(groupBarBackground)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(t("home.groupsOpen"))
     }
 
     private var groupsSummaryText: String {
+        if !vpn.isConnected {
+            return t("home.groupsEmpty")
+        }
         if state.proxyGroups.isEmpty {
             return t("home.loadingGroups")
         }

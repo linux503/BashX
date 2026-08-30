@@ -79,9 +79,12 @@ struct PolicyGroupsView: View {
             }
             .toolbarBackground(.hidden, for: .navigationBar)
         }
-        .onAppear {
-            if vpn.isConnected {
-                state.scheduleProxyGroupsRefresh()
+        .task(id: vpn.isConnected) {
+            guard vpn.isConnected else { return }
+            for attempt in 0..<4 {
+                await state.refreshProxyGroups()
+                if !state.proxyGroups.isEmpty { break }
+                try? await Task.sleep(nanoseconds: UInt64(400_000_000 * (attempt + 1)))
             }
         }
     }

@@ -52,7 +52,8 @@ enum ClashConfigParser {
         dnsPreference: DnsPreference = .smart,
         forIOS: Bool = false,
         stableAINodeName: String? = nil,
-        excludedNodeNames: Set<String> = []
+        excludedNodeNames: Set<String> = [],
+        proxyHubMode: ProxyHubMode = .smart
     ) -> String {
         let exportNodes: [ProxyNode] = {
             guard forIOS else { return nodes }
@@ -99,14 +100,24 @@ enum ClashConfigParser {
         )
         let finalRules = rewrittenRules.isEmpty ? AppSettings.defaultRules : rewrittenRules
 
+        // Leaves for PROXY hub (no nested strategy groups — avoids loops).
+        let proxyLeaves: [String] = {
+            if poolSource.isEmpty { return ["DIRECT"] }
+            let capped = forIOS
+                ? Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
+                : Self.urlTestPool(from: poolSource, selected: selected, limit: 48)
+            return capped.isEmpty ? ["DIRECT"] : capped
+        }()
+
         let proxyGroupList: [String] = {
             var list: [String]
             if names.isEmpty {
                 list = ["DIRECT"]
+            } else if !forIOS, proxyHubMode != .manual {
+                // Smart / LB / failover: PROXY is the auto hub — only concrete leaves.
+                list = proxyLeaves
             } else {
                 // Leaf hubs only — never nest GOOGLE/AI here (they may reference PROXY → loop).
-                // iOS must only list region groups that are actually emitted below (incl. TW).
-                // Cap leaf nodes on iOS — full airport lists blow NE memory and jetsam the tunnel.
                 let leaves: [String]
                 if forIOS {
                     leaves = Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
@@ -115,15 +126,38 @@ enum ClashConfigParser {
                 }
                 list = ["AUTO", "JP", "HK", "US", "TW"] + leaves + ["DIRECT"]
             }
-            if let selected {
+            if let selected, proxyHubMode == .manual || forIOS {
                 list.removeAll { $0 == selected }
                 list.insert(selected, at: 0)
             }
-            // Deduplicate while preserving order.
             var seen = Set<String>()
             return list.filter { seen.insert($0).inserted }
         }()
 
+        let proxyHubGroup: [String: Any] = {
+            if forIOS || proxyHubMode == .manual {
+                return [
+                    "name": "PROXY",
+                    "type": "select",
+                    "proxies": proxyGroupList
+                ]
+            }
+            var g: [String: Any] = [
+                "name": "PROXY",
+                "type": proxyHubMode.clashType,
+                "proxies": proxyGroupList,
+                "url": "https://www.gstatic.com/generate_204",
+                "interval": turboMode ? 300 : 180,
+                "lazy": true,
+            ]
+            if proxyHubMode == .smart {
+                g["tolerance"] = turboMode ? 80 : 50
+            }
+            if proxyHubMode == .loadBalance {
+                g["strategy"] = "consistent-hashing"
+            }
+            return g
+        }()
         // Prefer Asia hubs for TELEGRAM/GOOGLE url-test; cap so health checks finish.
         // iOS NE has a tight RAM budget: keep pools small or jetsam kills the tunnel.
         let urlTestLimit = forIOS ? 8 : 36
@@ -273,11 +307,7 @@ enum ClashConfigParser {
                 : DnsPreference.dnsBlock(for: dnsPreference),
             "proxies": proxies,
             "proxy-groups": [
-                [
-                    "name": "PROXY",
-                    "type": "select",
-                    "proxies": proxyGroupList
-                ],
+                proxyHubGroup,
                 [
                     "name": "GLOBAL",
                     "type": "select",

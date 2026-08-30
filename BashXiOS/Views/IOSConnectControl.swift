@@ -154,9 +154,13 @@ struct IOSConnectControl: View {
             .scaleEffect(pressScale)
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled || isBusy)
+        .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.42)
-        .accessibilityLabel(isConnected ? t("connect.a11y.disconnect") : t("connect.a11y.connect"))
+        .accessibilityLabel(
+            isConnected || isBusy
+                ? t("connect.a11y.disconnect")
+                : t("connect.a11y.connect")
+        )
         .onAppear { syncAnimations() }
         .onChange(of: isConnected) { _ in syncAnimations() }
         .onChange(of: isBusy) { busy in
@@ -225,7 +229,7 @@ struct IOSConnectControl: View {
 
     private var centerLabel: String {
         if isConnected { return t("connect.protected") }
-        if isBusy { return t("connect.connecting") }
+        if isBusy { return t("connect.cancel") }
         return t("connect.connect")
     }
 }

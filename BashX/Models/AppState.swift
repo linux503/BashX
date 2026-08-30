@@ -878,6 +878,9 @@ final class AppState: ObservableObject {
         if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
             await ensureUsableProxy(forceProbe: false, verifyGoogle: true)
         }
+        // Hot reconnect path: still prefer a fresh probe + fastest.
+        await runSpeedTest()
+        await selectFastestNodeIfAvailable()
     }
 
     /// Avoid colliding with Stash/ClashX default 7890/9090; also bump if OUR ports are occupied by others.
@@ -923,13 +926,7 @@ final class AppState: ObservableObject {
     /// Drop rules that crash mihomo (missing GeoSite lists, etc.).
     private func sanitizeRulesForCore() {
         var before = settings.rules
-        before = before.map { rule in
-            let t = rule.trimmingCharacters(in: .whitespaces)
-            if t.uppercased() == "DOMAIN-SUFFIX,LOCAL,DIRECT" {
-                return "DOMAIN-SUFFIX,local,REJECT"
-            }
-            return rule
-        }
+        // Keep DOMAIN-SUFFIX,local,DIRECT — never rewrite to REJECT (breaks mDNS / local).
         let cleaned = GeoSiteRules.sanitize(before)
         if cleaned != settings.rules {
             settings.rules = cleaned
@@ -2068,6 +2065,13 @@ final class AppState: ObservableObject {
     }
 
     func selectNode(_ name: String, pinAIStable: Bool = true) async {
+        // Manual pick → leave auto hub modes so the choice sticks.
+        var needHubReload = false
+        if name != "AUTO", name != "DIRECT", settings.proxyHubMode != .manual {
+            settings.proxyHubMode = .manual
+            needHubReload = true
+            scheduleWriteConfig()
+        }
         guard settings.selectedNodeName != name else {
             if pinAIStable, name != "AUTO", name != "DIRECT", settings.stableAINodeName != name {
                 settings.stableAINodeName = name
@@ -2089,6 +2093,10 @@ final class AppState: ObservableObject {
 
         if coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) {
             applyCoreRunning(true)
+            if needHubReload {
+                writeConfig()
+                await applyConfig(reloadIfRunning: true)
+            }
             await syncSelectedOutbound()
             if pinAIStable {
                 await syncAIStableGroups()
@@ -2107,6 +2115,34 @@ final class AppState: ObservableObject {
             statusText = "已选择：\(name)"
             outboundIP = "—"
             runtimeOutboundName = nil
+        }
+    }
+
+    /// Switch PROXY hub between smart / load-balance / failover / manual.
+    func setProxyHubMode(_ mode: ProxyHubMode) async {
+        guard settings.proxyHubMode != mode else { return }
+        settings.proxyHubMode = mode
+        if mode != .manual {
+            settings.selectedNodeName = "AUTO"
+            settings.autoSelectFastest = true
+        }
+        bumpChromeRevision()
+        statusText = "\(mode.title)…"
+        schedulePersist()
+        writeConfig()
+        if coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) {
+            applyCoreRunning(true)
+            await applyConfig(reloadIfRunning: true)
+            if mode == .manual {
+                await syncSelectedOutbound()
+            } else {
+                await runSpeedTest()
+                await selectFastestNodeIfAvailable()
+            }
+            statusText = "已启用\(mode.title)"
+            scheduleOutboundIPRefresh()
+        } else {
+            statusText = "已选择\(mode.title)（下次连接生效）"
         }
     }
 
@@ -2860,6 +2896,7 @@ final class AppState: ObservableObject {
         let tunEnabled = effectiveTunInConfig()
         let tunStack = settings.tunStack
         let mode = settings.proxyMode
+        let hubMode = settings.proxyHubMode
         let allowLan = settings.allowLan
         let turboMode = settings.turboMode
         let domainSniffing = settings.domainSniffing
@@ -2884,7 +2921,8 @@ final class AppState: ObservableObject {
                     domainSniffing: domainSniffing,
                     dnsPreference: dnsPreference,
                     stableAINodeName: stableAI,
-                    excludedNodeNames: excluded
+                    excludedNodeNames: excluded,
+                    proxyHubMode: hubMode
                 )
             }.value
             guard !Task.isCancelled, let self else { return }
@@ -3519,6 +3557,10 @@ final class AppState: ObservableObject {
                         : (settings.tunEnabled
                             ? "内核运行中 · \(settings.mixedPort)（TUN 待开启）"
                             : "内核运行中 · \(settings.mixedPort) · \(settings.proxyMode.title)")
+                    // Every connect: probe + pick fastest so the bottom selection updates immediately.
+                    statusText = "连接成功 · 正在测速优选…"
+                    await runSpeedTest()
+                    await selectFastestNodeIfAvailable()
                     if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
                         await ensureUsableProxy(forceProbe: true, verifyGoogle: true)
                     }

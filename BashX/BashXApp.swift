@@ -510,6 +510,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stripDownloadQuarantineIfNeeded()
         AppActivation.preferDockIcon = state?.settings.showDockIcon ?? false
         AppActivation.applyPolicy()
+        // No macOS application menu strip — panel + menu-bar extra are enough.
+        NSApp.mainMenu = NSMenu()
         IconManager.applyBundledAppIcon()
         IconManager.refreshDockIconCacheIfNeeded()
         LogoRenderer.warmCache()

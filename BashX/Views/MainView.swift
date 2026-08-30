@@ -892,8 +892,6 @@ struct MainView: View {
                         .frame(width: 96)
                         .help("卡片 / 列表")
 
-                        nodesOptionsMenu
-
                         Text("\(state.filteredNodes.count)/\(state.nodes.count)")
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .monospacedDigit()
@@ -1072,10 +1070,47 @@ struct MainView: View {
                 Text(L10n.t("mac.nodes.smart", lang))
                     .font(.caption.weight(.semibold))
                 Spacer(minLength: 0)
-                if state.nodes.isEmpty {
-                    Text(L10n.t("mac.nodes.smartNeedNodes", lang))
-                        .font(.caption2)
-                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                // Big speed-test button
+                Button {
+                    Task {
+                        if let key = state.selectedCategoryKey {
+                            await state.runSpeedTest(forCategoryKey: key)
+                        } else {
+                            await state.runSpeedTest()
+                        }
+                        await state.selectFastestNodeIfAvailable()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        if state.isTesting {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "gauge.with.dots.needle.67percent")
+                                .font(.system(size: 14, weight: .bold))
+                        }
+                        Text(state.isTesting
+                             ? L10n.t("mac.nodes.speedBigBusy", lang)
+                             : L10n.t("mac.nodes.speedBig", lang))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background {
+                        Capsule(style: .continuous)
+                            .fill(BashXTheme.accent(for: appearance))
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(state.isTesting || state.nodes.isEmpty)
+                .help("测速当前列表并自动选用最快节点")
+            }
+
+            // 智能线路 / 负载均衡 / 故障转移
+            HStack(spacing: 8) {
+                ForEach([ProxyHubMode.smart, .loadBalance, .failover], id: \.self) { mode in
+                    nodesHubModeButton(mode)
                 }
             }
 
@@ -1117,6 +1152,54 @@ struct MainView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(BashXTheme.card(for: appearance).opacity(0.55))
+    }
+
+    private func nodesHubModeButton(_ mode: ProxyHubMode) -> some View {
+        let on = state.settings.proxyHubMode == mode
+        let tint: Color = {
+            switch mode {
+            case .smart: return Color(red: 0.25, green: 0.72, blue: 0.95)
+            case .loadBalance: return Color(red: 0.45, green: 0.78, blue: 0.42)
+            case .failover: return Color(red: 0.95, green: 0.55, blue: 0.28)
+            case .manual: return BashXTheme.secondaryLabel(for: appearance)
+            }
+        }()
+        return Button {
+            Task { await state.setProxyHubMode(mode) }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: mode.systemImage)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(mode.title(lang: lang))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                    Spacer(minLength: 0)
+                    if on {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+                Text(mode.subtitle(lang: lang))
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(on ? .white.opacity(0.9) : BashXTheme.secondaryLabel(for: appearance))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(on ? .white : .primary)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(on ? tint : BashXTheme.secondaryFill(for: appearance).opacity(0.7))
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(on ? tint.opacity(0.9) : BashXTheme.hairline(for: appearance), lineWidth: on ? 1.2 : 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(state.nodes.isEmpty)
+        .opacity(state.nodes.isEmpty ? 0.5 : 1)
     }
 
     private func nodesSmartCard(
@@ -1997,25 +2080,26 @@ private struct NodesCategoriesView: View {
             Button {
                 Task {
                     await state.runSpeedTest(nodes: group.nodes, label: group.title, groupKey: group.key)
+                    await state.selectFastestNodeIfAvailable()
                 }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     if state.isTesting && state.speedTestScopeKey == group.key {
                         ProgressView()
-                            .controlSize(.mini)
+                            .controlSize(.small)
                     } else {
                         Image(systemName: "gauge.with.dots.needle.67percent")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 12, weight: .bold))
                     }
                     Text(state.isTesting && state.speedTestScopeKey == group.key ? "测速中" : "测速")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
                 }
-                .foregroundStyle(BashXTheme.accent(for: appearance))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
                 .background {
                     Capsule(style: .continuous)
-                        .fill(BashXTheme.accentSoft(for: appearance))
+                        .fill(BashXTheme.accent(for: appearance))
                 }
             }
             .buttonStyle(.plain)

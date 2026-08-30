@@ -37,6 +37,60 @@ enum ProxyMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// How the PROXY hub picks leaves (Clash Verge / mihomo group types).
+enum ProxyHubMode: String, Codable, CaseIterable, Identifiable {
+    /// url-test — continuously pick lowest latency.
+    case smart
+    /// load-balance — spread / swap when a node fails.
+    case loadBalance
+    /// fallback — try members in order until one works.
+    case failover
+    /// Manual select (default Clash select).
+    case manual
+
+    var id: String { rawValue }
+
+    var title: String { title(lang: .current) }
+
+    func title(lang: AppLanguage) -> String {
+        switch self {
+        case .smart: return L10n.t("mac.nodes.hubSmart", lang)
+        case .loadBalance: return L10n.t("mac.nodes.hubLB", lang)
+        case .failover: return L10n.t("mac.nodes.hubFO", lang)
+        case .manual: return L10n.t("mac.nodes.hubManual", lang)
+        }
+    }
+
+    var subtitle: String { subtitle(lang: .current) }
+
+    func subtitle(lang: AppLanguage) -> String {
+        switch self {
+        case .smart: return L10n.t("mac.nodes.hubSmart.sub", lang)
+        case .loadBalance: return L10n.t("mac.nodes.hubLB.sub", lang)
+        case .failover: return L10n.t("mac.nodes.hubFO.sub", lang)
+        case .manual: return L10n.t("mac.nodes.hubManual.sub", lang)
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .smart: return "bolt.horizontal.circle.fill"
+        case .loadBalance: return "arrow.triangle.2.circlepath"
+        case .failover: return "arrow.right.to.line.circle.fill"
+        case .manual: return "hand.tap.fill"
+        }
+    }
+
+    var clashType: String {
+        switch self {
+        case .smart: return "url-test"
+        case .loadBalance: return "load-balance"
+        case .failover: return "fallback"
+        case .manual: return "select"
+        }
+    }
+}
+
 /// Panel node list layout.
 enum NodeDisplayMode: String, Codable, CaseIterable, Identifiable {
     case card
@@ -238,6 +292,8 @@ struct AppSettings: Codable {
     var closeConnectionsOnSwitch: Bool = true
     /// Clash-like: rule / global / direct
     var proxyMode: ProxyMode = .rule
+    /// PROXY hub strategy: smart (url-test) / load-balance / failover / manual select.
+    var proxyHubMode: ProxyHubMode = .smart
     /// Menu bar / panel logo style.
     var logoStyle: LogoStyle = .default
     /// Panel nodes tab: list or card grid.
@@ -267,7 +323,7 @@ struct AppSettings: Codable {
         case systemProxyEnabled, userDisabledSystemProxy, tunEnabled, iosTunnelCapture, tunStack, videoAdBlockEnabled
         case launchAtLoginEnabled, menuNodeLimit, showMenuBarTraffic, showDockIcon, allowInsecureHTTPSubscriptions
         case autoSpeedTestEnabled, autoSpeedTestIntervalMinutes, autoSelectFastest, turboMode, domainSniffing, dnsPreference
-        case rules, rulesPrepend, rulesVersion, closeConnectionsOnSwitch, proxyMode
+        case rules, rulesPrepend, rulesVersion, closeConnectionsOnSwitch, proxyMode, proxyHubMode
         case logoStyle, nodeDisplayMode, appearance, nodeDelayCache, stableAINodeName, isolatedNodeKeys
         case iosDisguiseEnabled, iosOnDemandEnabled, uiLanguage
         case appRoutingRules
@@ -310,6 +366,7 @@ struct AppSettings: Codable {
         rulesVersion = try c.decodeIfPresent(Int.self, forKey: .rulesVersion) ?? 0
         closeConnectionsOnSwitch = try c.decodeIfPresent(Bool.self, forKey: .closeConnectionsOnSwitch) ?? true
         proxyMode = try c.decodeIfPresent(ProxyMode.self, forKey: .proxyMode) ?? .rule
+        proxyHubMode = try c.decodeIfPresent(ProxyHubMode.self, forKey: .proxyHubMode) ?? .smart
         logoStyle = Self.decodeLogoStyle(from: c)
         nodeDisplayMode = try c.decodeIfPresent(NodeDisplayMode.self, forKey: .nodeDisplayMode) ?? .card
         appearance = try c.decodeIfPresent(AppAppearance.self, forKey: .appearance) ?? .light
