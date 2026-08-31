@@ -28,8 +28,8 @@ targets:
         PRODUCT_NAME: BashXTunHelper
         SKIP_INSTALL: true
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
-        MARKETING_VERSION: "1.0.38"
-        CURRENT_PROJECT_VERSION: "38"
+        MARKETING_VERSION: "1.0.39"
+        CURRENT_PROJECT_VERSION: "39"
         MACOSX_DEPLOYMENT_TARGET: "13.0"
         ENABLE_HARDENED_RUNTIME: true
         ARCHS: "$(ARCHS_STANDARD)"
@@ -70,8 +70,8 @@ targets:
         GENERATE_INFOPLIST_FILE: false
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         PRODUCT_NAME: BashX
-        MARKETING_VERSION: "1.0.38"
-        CURRENT_PROJECT_VERSION: "38"
+        MARKETING_VERSION: "1.0.39"
+        CURRENT_PROJECT_VERSION: "39"
         ENABLE_HARDENED_RUNTIME: true
         ARCHS: "$(ARCHS_STANDARD)"
         ONLY_ACTIVE_ARCH: NO
@@ -133,8 +133,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: BashXiOS/BashXiOS.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: BashX
-        MARKETING_VERSION: "1.0.38"
-        CURRENT_PROJECT_VERSION: "38"
+        MARKETING_VERSION: "1.0.39"
+        CURRENT_PROJECT_VERSION: "39"
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: false
         DEVELOPMENT_TEAM: NFYZYS2VLL
@@ -205,8 +205,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: BashXControls/BashXControls.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: BashXControls
-        MARKETING_VERSION: "1.0.38"
-        CURRENT_PROJECT_VERSION: "38"
+        MARKETING_VERSION: "1.0.39"
+        CURRENT_PROJECT_VERSION: "39"
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: true
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
@@ -242,8 +242,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: PacketTunnel/PacketTunnel.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: PacketTunnel
-        MARKETING_VERSION: "1.0.38"
-        CURRENT_PROJECT_VERSION: "38"
+        MARKETING_VERSION: "1.0.39"
+        CURRENT_PROJECT_VERSION: "39"
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: true
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"

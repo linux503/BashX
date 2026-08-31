@@ -1516,6 +1516,8 @@ enum ClashConfigParser {
         if n.contains("expire") || n.contains("到期") || n.contains("剩余") { return true }
         if n.contains("流量") || n.contains("traffic") || n.contains("重置") { return true }
         if n.contains("官网") || n.contains("套餐") || n.contains("通知") { return true }
+        if n.contains("仅作展示") || n.contains("测速备用") || n.contains("公告") { return true }
+        if n.contains("gb/") || n.contains("gb /") || n.contains("days") { return true }
         if n.hasPrefix("http://") || n.hasPrefix("https://") { return true }
         return false
     }
@@ -1775,9 +1777,10 @@ enum ClashConfigParser {
         if node.port <= 0 || node.port > 65535 { return false }
         let upper = node.name.uppercased()
         if upper == "DIRECT" || upper == "REJECT" { return false }
+        if isPlaceholderNodeName(node.name) { return false }
         let infoNeedles = [
             "剩余流量", "套餐到期", "距离下次", "Traffic:", "Expire:", "GB /", "GB/", "流量：", "流量:",
-            "重置剩余", "套餐剩余", "已用流量", "到期时间",
+            "重置剩余", "套餐剩余", "已用流量", "到期时间", "用不完", "无限流量", "点击星辰",
         ]
         if infoNeedles.contains(where: { node.name.contains($0) }) { return false }
         return true

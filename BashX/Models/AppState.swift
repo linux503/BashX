@@ -1876,6 +1876,9 @@ final class AppState: ObservableObject {
             settings.tunEnabled = wantTun
         }
 
+        // Like iOS「测速并选最快」: always pick lowest-latency real leaf, never traffic banners.
+        await ensureMinimalFastestNode()
+
         // Never prompt again here — ensureReady already asked once if needed.
         systemProxyTask?.cancel()
         systemProxyOn = true
@@ -1891,7 +1894,17 @@ final class AppState: ObservableObject {
         )
         if ok {
             systemProxyOn = true
-            statusText = "已连接 → 127.0.0.1:\(port)"
+            let nodeNote: String = {
+                if let name = settings.selectedNodeName,
+                   let ms = nodes.first(where: { $0.name == name })?.delayMs, ms > 0 {
+                    return " · \(name) \(ms)ms"
+                }
+                if let name = settings.selectedNodeName, !name.isEmpty {
+                    return " · \(name)"
+                }
+                return ""
+            }()
+            statusText = "已连接 → 127.0.0.1:\(port)\(nodeNote)"
             Task { await syncSelectedOutbound() }
         } else {
             systemProxyOn = false
@@ -1966,7 +1979,15 @@ final class AppState: ObservableObject {
 
     /// Pick the current lowest-latency node (delayMs > 0). Does not retarget AI stable groups.
     func selectFastestNodeIfAvailable() async {
-        await selectFastestNode(from: nodes)
+        await selectFastestNode(from: usableOutboundNodes())
+    }
+
+    /// Real outbound nodes only — skip traffic / expiry / banner placeholders (iOS-aligned).
+    func usableOutboundNodes() -> [ProxyNode] {
+        nodes.filter {
+            ClashConfigParser.isSpeedTestable($0)
+                && !ClashConfigParser.isPlaceholderNodeName($0.name)
+        }
     }
 
     /// Pick the fastest node within a tested pool (regional speed test).
@@ -1974,7 +1995,13 @@ final class AppState: ObservableObject {
         let names = Set(pool.map(\.name))
         let excluded = Set(settings.isolatedNodeKeys)
         guard let best = nodes
-            .filter({ names.contains($0.name) && ($0.delayMs ?? -1) > 0 && !excluded.contains($0.delayCacheKey) })
+            .filter({
+                names.contains($0.name)
+                    && ClashConfigParser.isSpeedTestable($0)
+                    && !ClashConfigParser.isPlaceholderNodeName($0.name)
+                    && ($0.delayMs ?? -1) > 0
+                    && !excluded.contains($0.delayCacheKey)
+            })
             .sorted(by: delaySort)
             .first else {
             return
@@ -1983,6 +2010,39 @@ final class AppState: ObservableObject {
             await selectNode(best.name, pinAIStable: false)
             statusText = "已切换到最快节点：\(best.name)（\(best.delayMs ?? 0) ms）"
         }
+    }
+
+    /// Minimal home connect: always land on lowest-latency real node (never traffic banners).
+    private func ensureMinimalFastestNode() async {
+        if let sel = settings.selectedNodeName,
+           ClashConfigParser.isPlaceholderNodeName(sel)
+            || nodes.first(where: { $0.name == sel }).map({ !ClashConfigParser.isSpeedTestable($0) }) == true {
+            settings.selectedNodeName = nil
+            schedulePersist()
+        }
+
+        let usable = usableOutboundNodes()
+        guard !usable.isEmpty else {
+            statusText = "没有可用节点（已跳过流量/到期占位）"
+            return
+        }
+
+        let withDelay = usable.filter { ($0.delayMs ?? -1) > 0 }
+        if withDelay.isEmpty, !isTesting {
+            statusText = "测速中，将自动选最快节点…"
+            await runSpeedTest(nodes: usable, label: "精简连接", groupKey: "minimal-connect")
+        }
+        await selectFastestNode(from: usable)
+
+        if settings.selectedNodeName == nil
+            || ClashConfigParser.isPlaceholderNodeName(settings.selectedNodeName ?? "") {
+            // No measured leaf yet — stay on AUTO url-test pool (still skips placeholders).
+            if settings.proxyHubMode == .manual {
+                await setProxyHubMode(.smart)
+            }
+            statusText = "暂无测速结果，已用智能选路"
+        }
+        await syncSelectedOutbound()
     }
 
     func restartAutoSpeedLoop() {
