@@ -21,15 +21,22 @@ enum AppConstants {
 
     /// App Group: full TUN capture (default) vs HTTP-proxy-only experiment.
     static let iosTunnelCaptureKey = "iosTunnelCapture"
+    /// App Group: include Apple Push (APNs) in the VPN tunnel for Telegram / overseas notifications.
+    static let iosTelegramPushKey = "iosTelegramPushEnabled"
+    /// App Group: selected proxy node host/IP — required as NE `serverAddress` when includeAllNetworks is on
+    /// so iOS excludes the node from the tunnel (otherwise dials loop into utun → no network).
+    static let selectedNodeServerKey = "selectedNodeServer"
 
     /// Strategy groups preferred in menu / iOS (shown first when present).
+    /// Order: messaging → cloud/services → AI → regions → media → hub modes.
     static let menuProxyGroups: [String] = [
         "PROXY",
-        "OPENAI", "COPILOT", "AUTO", "BALANCE", "FALLBACK",
-        "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK",
         "TELEGRAM", "TWITTER", "WHATSAPP",
-        "MICROSOFT", "APPLE", "GOOGLE", "STEAM",
-        "AI", "JP", "HK", "TW", "US",
+        "GOOGLE", "MICROSOFT", "APPLE", "STEAM",
+        "AI", "OPENAI", "ANTHROPIC", "CURSOR", "COPILOT",
+        "JP", "HK", "TW", "US",
+        "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK",
+        "AUTO", "BALANCE", "FALLBACK",
     ]
 
     /// Mihomo group types shown in the policy-group UI.
@@ -37,21 +44,42 @@ enum AppConstants {
         "Selector", "URLTest", "Fallback", "LoadBalance",
     ]
 
+    /// System / implementation groups — never shown in 策略组 UI.
+    /// `*-AUTO` / `*-FAILOVER` are kernel internals behind TELEGRAM / CURSOR / GOOGLE.
     static let hiddenProxyGroupNames: Set<String> = [
         "GLOBAL", "COMPATIBLE", "PASS", "DIRECT", "REJECT",
+        "GOOGLE-AUTO",
+        "TELEGRAM-AUTO", "TELEGRAM-FAILOVER",
+        "CURSOR-AUTO", "CURSOR-FAILOVER",
     ]
+
+    /// True when a group is an internal helper (url-test / failover behind a select).
+    static func isInternalProxyGroupName(_ name: String) -> Bool {
+        let upper = name.uppercased()
+        if hiddenProxyGroupNames.contains(upper) { return true }
+        if upper.hasSuffix("-AUTO") || upper.hasSuffix("-FAILOVER") { return true }
+        return false
+    }
 
     /// Prefer built-in service order, then keep subscription extras (机场策略组).
     static func orderedProxyGroupNames(_ names: [String]) -> [String] {
-        var remaining = names
+        let visible = names.filter { !isInternalProxyGroupName($0) }
+        var remaining = visible
         var ordered: [String] = []
         for preferred in menuProxyGroups {
             if let idx = remaining.firstIndex(of: preferred) {
                 ordered.append(remaining.remove(at: idx))
             }
         }
+        // Case-insensitive match for leftover preferred names (airport renames).
+        for preferred in menuProxyGroups {
+            let key = preferred.uppercased()
+            if let idx = remaining.firstIndex(where: { $0.uppercased() == key }) {
+                ordered.append(remaining.remove(at: idx))
+            }
+        }
         ordered.append(contentsOf: remaining.sorted {
-            $0.localizedStandardCompare($1) == .orderedAscending
+            groupDisplayName($0).localizedStandardCompare(groupDisplayName($1)) == .orderedAscending
         })
         return ordered
     }
@@ -70,6 +98,7 @@ enum AppConstants {
         case "WHATSAPP": return "WhatsApp"
         case "MICROSOFT": return "微软服务"
         case "APPLE": return "苹果服务"
+        case "APNS": return "苹果推送"
         case "STEAM": return "Steam"
         case "GOOGLE": return "谷歌服务"
         case "TELEGRAM": return "电报"
@@ -131,7 +160,7 @@ enum AppConstants {
         guard !raw.isEmpty else { return "—" }
         let upper = raw.uppercased()
         let knownGroups: Set<String> = [
-            "GOOGLE", "TELEGRAM", "AI", "JP", "HK", "TW", "US", "AUTO", "BALANCE", "FALLBACK", "PROXY", "DIRECT",
+            "GOOGLE", "TELEGRAM", "APNS", "AI", "JP", "HK", "TW", "US", "AUTO", "BALANCE", "FALLBACK", "PROXY", "DIRECT",
             "TELEGRAM-FAILOVER", "TELEGRAM-AUTO", "CURSOR", "CURSOR-FAILOVER", "CURSOR-AUTO",
             "GOOGLE-AUTO", "OPENAI", "ANTHROPIC", "COPILOT",
             "NETFLIX", "BILIBILI", "DOUYIN", "TIKTOK", "TWITTER", "WHATSAPP",

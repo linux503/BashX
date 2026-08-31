@@ -29,7 +29,11 @@ final class VPNManager: ObservableObject {
     private var connectWatchTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var userInitiatedDisconnect = false
+    /// Soft reconnect is stopping the tunnel on purpose — do not treat as unexpected drop.
+    private var softRestartInProgress = false
     private var reconnectAttempt = 0
+    /// Cooldown so on-demand + app reconnect cannot thrash the tunnel.
+    private var lastAutoReconnectAt: Date = .distantPast
     private var lastTrafficTotals: (up: Int64, down: Int64, at: Date)?
 
     init() {
@@ -40,29 +44,40 @@ final class VPNManager: ObservableObject {
         ) { [weak self] note in
             guard let conn = note.object as? NEVPNConnection else { return }
             Task { @MainActor in
-                let previous = self?.status
-                self?.status = conn.status
-                self?.updateConnectedSince(for: conn.status)
-                self?.syncTrafficPolling()
-                if conn.status == .connected || conn.status == .disconnected || conn.status == .invalid {
-                    self?.connectWatchTask?.cancel()
-                    self?.connectWatchTask = nil
+                guard let self else { return }
+                // CRITICAL: NEVPNStatusDidChange fires for EVERY VPN (IKEv2 / other apps).
+                // Ignoring foreign sessions prevents false "drop → reconnect" loops.
+                if let ours = self.manager?.connection, conn !== ours {
+                    return
                 }
-                // Unexpected drop after a successful connect — surface tunnel stop reason.
-                if previous == .connected,
+                let previous = self.status
+                self.status = conn.status
+                self.updateConnectedSince(for: conn.status)
+                self.syncTrafficPolling()
+                if conn.status == .connected || conn.status == .disconnected || conn.status == .invalid {
+                    self.connectWatchTask?.cancel()
+                    self.connectWatchTask = nil
+                }
+                // Unexpected drop after we were up (connected or reasserting).
+                let wasUp = previous == .connected || previous == .reasserting
+                if wasUp,
                    conn.status == .disconnected || conn.status == .invalid {
-                    if self?.lastError == nil,
+                    let soft = self.softRestartInProgress
+                    if !soft,
+                       self.lastError == nil,
                        let hint = TunnelDiagnostics.lastFailureMessage(), !hint.isEmpty {
-                        self?.lastError = hint
+                        self.lastError = hint
                     }
-                    if self?.userInitiatedDisconnect == false {
-                        self?.scheduleAutoReconnect()
+                    if !soft, !self.userInitiatedDisconnect {
+                        self.scheduleAutoReconnect()
                     }
-                    self?.userInitiatedDisconnect = false
+                    if !soft {
+                        self.userInitiatedDisconnect = false
+                    }
                 }
                 if conn.status == .connected {
-                    self?.lastError = nil
-                    self?.reconnectAttempt = 0
+                    self.lastError = nil
+                    self.reconnectAttempt = 0
                 }
                 VPNQuickControl.reloadControlWidget()
             }
@@ -112,7 +127,11 @@ final class VPNManager: ObservableObject {
                 manager = existing
                 status = existing.connection.status
                 updateConnectedSince(for: status)
-                if refreshProfileMetadata(existing) {
+                let active = status == .connected || status == .connecting
+                    || status == .reasserting || status == .disconnecting
+                // Saving protocol prefs while the tunnel is up can make iOS tear it down
+                // and restart — looks like frequent disconnect/reconnect.
+                if !active, refreshProfileMetadata(existing) {
                     try? await existing.saveToPreferences()
                 }
             } else {
@@ -166,6 +185,21 @@ final class VPNManager: ObservableObject {
     /// Reconnect after foreground / unexpected drop when the user had VPN enabled.
     func recoverIfNeeded() async {
         guard Self.userWantsConnection(), !isConnected, !isBusyConnecting else { return }
+        let onDemand = manager?.isOnDemandEnabled == true || SettingsStore.load().iosOnDemandEnabled
+        if onDemand {
+            // On-Demand alone often leaves a stuck state: wantsConnected=true, tunnel
+            // down, lastStop=user (Control Center / profile rewrite / brief NE bounce).
+            // iOS may never re-arm — nudge connect() once after a short cooldown.
+            let stopLabel = (TunnelDiagnostics.lastStopLabel() ?? "").lowercased()
+            let successAt = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .double(forKey: "lastTunnelSuccessAt") ?? 0
+            let downFor = successAt > 0
+                ? Date().timeIntervalSince1970 - successAt
+                : 60
+            let stuck = stopLabel == "user" || stopLabel.isEmpty || downFor >= 8
+            guard stuck, Date().timeIntervalSince(lastAutoReconnectAt) >= 6 else { return }
+            lastAutoReconnectAt = Date()
+        }
         await connect()
     }
 
@@ -176,10 +210,21 @@ final class VPNManager: ObservableObject {
             changed = true
         }
         if let proto = mgr.protocolConfiguration as? NETunnelProviderProtocol {
+            let oldServer = proto.serverAddress
+            let oldIncludeAll: Bool = {
+                if #available(iOS 14.2, *) { return proto.includeAllNetworks }
+                return false
+            }()
+            // applyExclusiveProtocolOptions already sets the correct serverAddress
+            // (real node host when Telegram push / includeAllNetworks is on).
+            // Never force "Apple Inc." — that loops node dials into utun and drops VPN.
             Self.applyExclusiveProtocolOptions(proto)
-            if proto.serverAddress != Self.profileServerAddress {
-                proto.serverAddress = Self.profileServerAddress
-                mgr.protocolConfiguration = proto
+            mgr.protocolConfiguration = proto
+            let newIncludeAll: Bool = {
+                if #available(iOS 14.2, *) { return proto.includeAllNetworks }
+                return false
+            }()
+            if oldServer != proto.serverAddress || oldIncludeAll != newIncludeAll {
                 changed = true
             }
         }
@@ -231,10 +276,10 @@ final class VPNManager: ObservableObject {
             if let foreign {
                 conflictVPNHint = foreign
             }
-            if let name = SettingsStore.load().selectedNodeName, !name.isEmpty {
-                UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
-                    .set(name, forKey: "selectedNode")
-            }
+            // prepareForConnect already wrote the resolved leaf into App Group.
+            // Do NOT re-apply settings.selectedNodeName here — it can be a stale
+            // "懒人" name that was remapped, and would poison PROXY again.
+            Self.syncSelectedNodeServerToDefaults()
             let mgr = try await ensureManager()
             mgr.isEnabled = true
             if let proto = mgr.protocolConfiguration as? NETunnelProviderProtocol {
@@ -320,15 +365,86 @@ final class VPNManager: ObservableObject {
     }
 
     private static func applyExclusiveProtocolOptions(_ proto: NETunnelProviderProtocol) {
-        proto.serverAddress = profileServerAddress
         proto.providerBundleIdentifier = AppConstants.tunnelBundleIdentifier
         proto.disconnectOnSleep = false
-        // Do NOT set includeAllNetworks — it re-captures mihomo DIRECT/DoH dials into utun
-        // (baidu DIAG jumped from ~50ms to 4.5s; core down≈0). Default IPv4 default-route is enough.
+
+        let wantPush = telegramPushEnabledFromDefaults()
+        let nodeServer = selectedNodeServerFromDefaults()
+        // includeAllNetworks requires a literal IP that iOS can exclude from the tunnel.
+        // Hostnames (e.g. oss-xxx.com) often fail exclusion → dials loop into utun →
+        // no network → jetsam/On-Demand flap (looks like auto-disconnect).
+        let literalIP = nodeServer.flatMap { Self.literalIPAddress($0) }
+        let canIncludeAll = wantPush && literalIP != nil
+        if canIncludeAll, let literalIP {
+            proto.serverAddress = literalIP
+        } else {
+            proto.serverAddress = profileServerAddress
+        }
+
         if #available(iOS 14.2, *) {
-            proto.includeAllNetworks = false
+            proto.includeAllNetworks = canIncludeAll
             proto.excludeLocalNetworks = true
         }
+        if #available(iOS 16.4, *) {
+            // excludeAPNs only applies when includeAllNetworks is true.
+            proto.excludeAPNs = !canIncludeAll
+            proto.excludeCellularServices = true
+        }
+        if #available(iOS 17.4, *) {
+            proto.excludeDeviceCommunication = true
+        }
+    }
+
+    /// True only for IPv4/IPv6 literals suitable as NE serverAddress exclusions.
+    private static func literalIPAddress(_ raw: String) -> String? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        var sin = sockaddr_in()
+        var sin6 = sockaddr_in6()
+        if s.withCString({ inet_pton(AF_INET, $0, &sin.sin_addr) }) == 1 { return s }
+        if s.withCString({ inet_pton(AF_INET6, $0, &sin6.sin6_addr) }) == 1 { return s }
+        return nil
+    }
+
+    /// App Group / settings: Telegram message push (include APNs in tunnel).
+    private static func telegramPushEnabledFromDefaults() -> Bool {
+        let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+        if ud?.object(forKey: AppConstants.iosTelegramPushKey) != nil {
+            return ud?.bool(forKey: AppConstants.iosTelegramPushKey) ?? true
+        }
+        return SettingsStore.load().iosTelegramPushEnabled
+    }
+
+    private static func selectedNodeServerFromDefaults() -> String? {
+        let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+        if let s = ud?.string(forKey: AppConstants.selectedNodeServerKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            return s
+        }
+        return syncSelectedNodeServerToDefaults()
+    }
+
+    /// Resolve selected node host/IP into App Group (needed before includeAllNetworks connect).
+    @discardableResult
+    static func syncSelectedNodeServerToDefaults() -> String? {
+        let settings = SettingsStore.load()
+        guard let name = settings.selectedNodeName, !name.isEmpty else {
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .removeObject(forKey: AppConstants.selectedNodeServerKey)
+            return nil
+        }
+        for sub in settings.subscriptions where sub.enabled {
+            let url = Paths.subscriptionCacheURL(id: sub.id)
+            guard let data = try? Data(contentsOf: url),
+                  let parsed = try? ClashConfigParser.parse(data),
+                  let node = parsed.nodes.first(where: { $0.name == name }),
+                  !node.server.isEmpty else { continue }
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set(node.server, forKey: AppConstants.selectedNodeServerKey)
+            return node.server
+        }
+        return UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .string(forKey: AppConstants.selectedNodeServerKey)
     }
 
     /// Heuristic: multiple utun / ipsec interfaces with non-BashX addresses while disconnected from us.
@@ -382,7 +498,10 @@ final class VPNManager: ObservableObject {
                                 ?? L10n.t("vpn.fail")
                         }
                     }
-                    if Self.userWantsConnection(), !self.userInitiatedDisconnect {
+                    // On-Demand will re-arm; app-side reconnect races it.
+                    let onDemand = self.manager?.isOnDemandEnabled == true
+                        || SettingsStore.load().iosOnDemandEnabled
+                    if !onDemand, Self.userWantsConnection(), !self.userInitiatedDisconnect {
                         self.scheduleAutoReconnect()
                     }
                     return
@@ -453,6 +572,26 @@ final class VPNManager: ObservableObject {
             applyOnDemand(to: mgr, enabled: false)
         }
         try? await mgr.saveToPreferences()
+    }
+
+    /// Apply Telegram push (APNs-in-tunnel) preference; reconnect if already connected.
+    func syncTelegramPushPreference(enabled: Bool) async {
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(enabled, forKey: AppConstants.iosTelegramPushKey)
+        var mgr = manager
+        if mgr == nil {
+            mgr = try? await ensureManager()
+        }
+        guard let mgr else { return }
+        if let proto = mgr.protocolConfiguration as? NETunnelProviderProtocol {
+            Self.applyExclusiveProtocolOptions(proto)
+            mgr.protocolConfiguration = proto
+        }
+        try? await mgr.saveToPreferences()
+        try? await mgr.loadFromPreferences()
+        if status == .connected || status == .connecting || status == .reasserting {
+            await reconnect()
+        }
     }
 
     func toggle() async {
@@ -550,20 +689,59 @@ final class VPNManager: ObservableObject {
     }
 
     func reconnect() async {
-        guard isConnected || status == .connecting else {
+        guard isConnected || status == .connecting || status == .reasserting else {
             await connect()
             return
         }
-        disconnect()
-        try? await Task.sleep(nanoseconds: 600_000_000)
+        // Soft restart — do NOT call disconnect() (it clears userWants + on-demand → VPN stays off).
+        reconnectTask?.cancel()
+        connectWatchTask?.cancel()
+        connectWatchTask = nil
+        userInitiatedDisconnect = false
+        softRestartInProgress = true
+        setUserWantsConnection(true)
+        defer { softRestartInProgress = false }
+        if let mgr = manager {
+            applyOnDemand(to: mgr, enabled: SettingsStore.load().iosOnDemandEnabled)
+            if let proto = mgr.protocolConfiguration as? NETunnelProviderProtocol {
+                Self.applyExclusiveProtocolOptions(proto)
+                mgr.protocolConfiguration = proto
+            }
+            try? await mgr.saveToPreferences()
+            mgr.connection.stopVPNTunnel()
+        }
+        try? await Task.sleep(nanoseconds: 700_000_000)
         await connect()
     }
 
     private func scheduleAutoReconnect() {
         reconnectTask?.cancel()
         guard Self.userWantsConnection() else { return }
+        guard !softRestartInProgress, !userInitiatedDisconnect else { return }
         let stopLabel = (TunnelDiagnostics.lastStopLabel() ?? "").lowercased()
-        if stopLabel == "user" || stopLabel.contains("superced") {
+        // App disconnect() clears wantsConnected. A "user" stop with wants still true
+        // usually means Control Center / Settings / profile bounce — do not give up.
+        if stopLabel.contains("superced") {
+            return
+        }
+        if stopLabel == "user", userInitiatedDisconnect {
+            return
+        }
+        // On-Demand already tells iOS to bring the tunnel back. App-side connect()
+        // racing it is the main "连上又断、断了又连" loop — unless we're already stuck
+        // disconnected with wantsConnected (On-Demand never fired).
+        if manager?.isOnDemandEnabled == true || SettingsStore.load().iosOnDemandEnabled {
+            let successAt = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .double(forKey: "lastTunnelSuccessAt") ?? 0
+            let downFor = successAt > 0
+                ? Date().timeIntervalSince1970 - successAt
+                : 60
+            if downFor < 12 {
+                return
+            }
+        }
+        let now = Date()
+        if now.timeIntervalSince(lastAutoReconnectAt) < 8 {
             return
         }
         reconnectAttempt = min(reconnectAttempt + 1, 6)
@@ -579,26 +757,32 @@ final class VPNManager: ObservableObject {
             }
             return
         }
+        lastAutoReconnectAt = now
         let base: UInt64 = {
             if stopLabel == "sleep" || stopLabel == "idletimeout" || stopLabel == "nonetwork" {
-                return 1_200_000_000
+                return 2_000_000_000
             }
             if stopLabel.contains("providerfailed") || stopLabel.contains("connectionfailed") {
-                return 3_000_000_000
+                return 4_000_000_000
             }
-            return 1_500_000_000
+            return 2_500_000_000
         }()
         let delay = base * UInt64(max(1, reconnectAttempt))
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: min(delay, 12_000_000_000))
+            try? await Task.sleep(nanoseconds: min(delay, 15_000_000_000))
             guard let self, !Task.isCancelled else { return }
             guard !self.userInitiatedDisconnect, Self.userWantsConnection() else { return }
+            guard !self.softRestartInProgress else { return }
             // Wait out disconnecting so we don't no-op on isBusyConnecting.
             for _ in 0..<25 {
                 if !self.isBusyConnecting { break }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
-            guard !self.isConnected else { return }
+            // Re-read from NE — stale @Published status caused phantom reconnects.
+            if let live = self.manager?.connection.status {
+                self.status = live
+            }
+            guard !self.isConnected, !self.isBusyConnecting else { return }
             guard !self.userInitiatedDisconnect, Self.userWantsConnection() else { return }
             await self.connect()
         }

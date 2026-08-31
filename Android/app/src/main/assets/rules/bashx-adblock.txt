@@ -1,7 +1,8 @@
-# BashX video / streaming / e-commerce redirect ad blocklist
-# Domain-level REJECT only — does not block main shopping sites (taobao.com / jd.com etc.)
+# BashX ad-block REJECT list (prepended at runtime when 去广告 is ON)
+# Domain-level only — cannot strip ads served from the same CDN as video/content.
+# Do NOT reject main shopping / IM domains (jd.com / taobao.com / weixin.qq.com).
 
-# —— Global video / streaming ——
+# —— Global video / search ads ——
 DOMAIN-SUFFIX,doubleclick.net,REJECT
 DOMAIN-SUFFIX,googleadservices.com,REJECT
 DOMAIN-SUFFIX,googlesyndication.com,REJECT
@@ -33,34 +34,6 @@ DOMAIN-SUFFIX,innovid.com,REJECT
 DOMAIN-SUFFIX,serving-sys.com,REJECT
 DOMAIN-SUFFIX,fwmrm.net,REJECT
 DOMAIN-SUFFIX,tidaltv.com,REJECT
-DOMAIN-SUFFIX,ads.netflix.com,REJECT
-DOMAIN-SUFFIX,ads-api.netflix.com,REJECT
-DOMAIN-SUFFIX,ads.hulu.com,REJECT
-DOMAIN-SUFFIX,ads-static.hulu.com,REJECT
-DOMAIN-SUFFIX,ads.disneyplus.com,REJECT
-DOMAIN-SUFFIX,ads.hbo.com,REJECT
-DOMAIN-SUFFIX,ads.max.com,REJECT
-DOMAIN-SUFFIX,ads.paramountplus.com,REJECT
-DOMAIN-SUFFIX,ads.peacocktv.com,REJECT
-DOMAIN-SUFFIX,ads.roku.com,REJECT
-DOMAIN-SUFFIX,ads.vimeo.com,REJECT
-DOMAIN-SUFFIX,dmads.dailymotion.com,REJECT
-DOMAIN-SUFFIX,ads.crunchyroll.com,REJECT
-DOMAIN-SUFFIX,ads.spotify.com,REJECT
-DOMAIN-SUFFIX,adeventtracker.spotify.com,REJECT
-DOMAIN-SUFFIX,ads.reddit.com,REJECT
-DOMAIN-SUFFIX,ads.snapchat.com,REJECT
-DOMAIN-SUFFIX,ads.microsoft.com,REJECT
-DOMAIN-SUFFIX,bingads.microsoft.com,REJECT
-DOMAIN-SUFFIX,iad.apple.com,REJECT
-DOMAIN-SUFFIX,ads.apple.com,REJECT
-DOMAIN-SUFFIX,advertising.apple.com,REJECT
-DOMAIN-SUFFIX,ads.vevo.com,REJECT
-DOMAIN-SUFFIX,ads.pluto.tv,REJECT
-DOMAIN-SUFFIX,ads.tubitv.com,REJECT
-DOMAIN-SUFFIX,ads.iheart.com,REJECT
-DOMAIN-SUFFIX,ads.pandora.com,REJECT
-DOMAIN-SUFFIX,ads.soundcloud.com,REJECT
 
 DOMAIN-SUFFIX,an.facebook.com,REJECT
 DOMAIN-SUFFIX,ads.facebook.com,REJECT
@@ -73,26 +46,20 @@ DOMAIN-SUFFIX,advertising.amazon.com,REJECT
 DOMAIN-SUFFIX,twitchads.com,REJECT
 DOMAIN-SUFFIX,ads.twitch.tv,REJECT
 
-# —— 抖音 / 头条 / TikTok / 西瓜 ——
+# —— 抖音 / 头条 / TikTok / 西瓜 / 穿山甲开屏 ——
 DOMAIN-SUFFIX,ads.tiktok.com,REJECT
 DOMAIN-SUFFIX,ads-api.tiktok.com,REJECT
 DOMAIN-KEYWORD,pangolin-sdk-toutiao,REJECT
 DOMAIN-SUFFIX,pglstatp-toutiao.com,REJECT
 DOMAIN-SUFFIX,pangolin-sdk-toutiao.com,REJECT
 DOMAIN-SUFFIX,pangolin-sdk-toutiao1.com,REJECT
-DOMAIN-SUFFIX,api-access.pangolin-sdk-toutiao.com,REJECT
-DOMAIN-SUFFIX,is.snssdk.com,REJECT
 DOMAIN-SUFFIX,ad.toutiao.com,REJECT
 DOMAIN-SUFFIX,dm.toutiao.com,REJECT
-DOMAIN-SUFFIX,lf.snssdk.com,REJECT
-DOMAIN-SUFFIX,i.snssdk.com,REJECT
-DOMAIN-SUFFIX,bds.snssdk.com,REJECT
-DOMAIN-SUFFIX,dig.bdurl.net,REJECT
 DOMAIN-SUFFIX,ad.zijieapi.com,REJECT
-DOMAIN-SUFFIX,ad.oceanengine.com,REJECT
 DOMAIN-SUFFIX,luckycat-dypay.ixigua.com,REJECT
-DOMAIN-SUFFIX,ad.ixigua.com,REJECT
-DOMAIN-SUFFIX,adapi.ixigua.com,REJECT
+DOMAIN-SUFFIX,ad.oceanengine.com,REJECT
+DOMAIN-SUFFIX,analytics.oceanengine.com,REJECT
+DOMAIN-SUFFIX,clue.oceanengine.com,REJECT
 
 # —— Bilibili ——
 DOMAIN-SUFFIX,cm.bilibili.com,REJECT
@@ -123,7 +90,7 @@ DOMAIN-SUFFIX,ykad-data.youku.com,REJECT
 DOMAIN-SUFFIX,pl-ali.youku.com,REJECT
 DOMAIN-SUFFIX,ad.tudou.com,REJECT
 
-# —— 腾讯视频 / 微视 ——
+# —— 腾讯视频 / 广点通开屏 / 微视 ——
 DOMAIN-SUFFIX,l.qq.com,REJECT
 DOMAIN-SUFFIX,t.l.qq.com,REJECT
 DOMAIN-SUFFIX,livep.l.qq.com,REJECT
@@ -140,60 +107,32 @@ DOMAIN-SUFFIX,wa.gtimg.com,REJECT
 DOMAIN-SUFFIX,adsense.html5.qq.com,REJECT
 DOMAIN-SUFFIX,otheve.beacon.qq.com,REJECT
 DOMAIN-SUFFIX,tpns.qq.com,REJECT
-DOMAIN-SUFFIX,mi.gdt.qq.com,REJECT
-DOMAIN-SUFFIX,c.gdt.qq.com,REJECT
-DOMAIN-SUFFIX,ads.video.qq.com,REJECT
+DOMAIN-SUFFIX,ad.qq.com,REJECT
+DOMAIN-SUFFIX,adping.qq.com,REJECT
+DOMAIN-SUFFIX,beacon.qq.com,REJECT
+DOMAIN-SUFFIX,wxsnsdy.wxs.qq.com,REJECT
+DOMAIN-SUFFIX,wxsnsdythumb.wxs.qq.com,REJECT
+DOMAIN-SUFFIX,adpm.app.qq.com,REJECT
+DOMAIN-SUFFIX,v.gdt.qq.com,REJECT
+DOMAIN-SUFFIX,xiuxiu.mobile.qq.com,REJECT
 
-# —— 芒果 TV ——
+# —— 芒果 / 快手 / 搜狐 / PPTV / 乐视 / 咪咕 ——
 DOMAIN-SUFFIX,da.mgtv.com,REJECT
 DOMAIN-SUFFIX,adx.mgtv.com,REJECT
 DOMAIN-SUFFIX,figment-adx.mgtv.com,REJECT
 DOMAIN-SUFFIX,mobilesummit.mgtv.com,REJECT
 DOMAIN-SUFFIX,credits.bz.mgtv.com,REJECT
-
-# —— 快手 ——
 DOMAIN-SUFFIX,ad.kuaishou.com,REJECT
 DOMAIN-SUFFIX,gdfp.kuaishou.com,REJECT
 DOMAIN-SUFFIX,adeng.kuaishou.com,REJECT
 DOMAIN-SUFFIX,ali-ad.a.yximgs.com,REJECT
 DOMAIN-SUFFIX,js-ad.a.yximgs.com,REJECT
-
-# —— 搜狐 / 搜狗 / 凤凰 ——
+DOMAIN-SUFFIX,open.kuaishou.com,REJECT
 DOMAIN-SUFFIX,at.sohu.com,REJECT
 DOMAIN-SUFFIX,pv.sohu.com,REJECT
 DOMAIN-SUFFIX,athena.wan.sogou.com,REJECT
 DOMAIN-SUFFIX,imp.as.sohu.com,REJECT
 DOMAIN-SUFFIX,ads.sohu.com,REJECT
-DOMAIN-SUFFIX,adse.w.ifeng.com,REJECT
-
-# —— 百度 / 好看视频 ——
-DOMAIN-SUFFIX,ad.haokan.baidu.com,REJECT
-DOMAIN-SUFFIX,afd.baidu.com,REJECT
-DOMAIN-SUFFIX,afdconf.baidu.com,REJECT
-DOMAIN-SUFFIX,mobads.baidu.com,REJECT
-DOMAIN-SUFFIX,cpro2.baidu.com,REJECT
-DOMAIN-SUFFIX,union.baidu.com,REJECT
-DOMAIN-SUFFIX,ubmcmm.baidustatic.com,REJECT
-DOMAIN-SUFFIX,pos.baidu.com,REJECT
-DOMAIN-SUFFIX,cpro.baidu.com,REJECT
-
-# —— 网易 / 新浪 / 微博 ——
-DOMAIN-SUFFIX,g.163.com,REJECT
-DOMAIN-SUFFIX,ad.163.com,REJECT
-DOMAIN-SUFFIX,adm.163.com,REJECT
-DOMAIN-SUFFIX,ad.sina.com.cn,REJECT
-DOMAIN-SUFFIX,sbeacon.sina.com.cn,REJECT
-DOMAIN-SUFFIX,beacon.sina.com.cn,REJECT
-DOMAIN-SUFFIX,adbox.sina.com.cn,REJECT
-
-# —— 虎牙 / 斗鱼 / 直播 ——
-DOMAIN-SUFFIX,ads.douyu.com,REJECT
-DOMAIN-SUFFIX,ad.douyu.com,REJECT
-DOMAIN-SUFFIX,applog.douyucdn.cn,REJECT
-DOMAIN-SUFFIX,ad.huajiao.com,REJECT
-DOMAIN-SUFFIX,ads.huajiao.com,REJECT
-
-# —— PPTV / 乐视 / 风行 / 华数 ——
 DOMAIN-SUFFIX,asimgs.pplive.cn,REJECT
 DOMAIN-SUFFIX,g1.pplive.cn,REJECT
 DOMAIN-SUFFIX,ark.letv.com,REJECT
@@ -201,57 +140,65 @@ DOMAIN-SUFFIX,i2.le.com,REJECT
 DOMAIN-SUFFIX,ad.funshion.com,REJECT
 DOMAIN-SUFFIX,adm.wasu.cn,REJECT
 DOMAIN-SUFFIX,adx.yidianzixun.com,REJECT
-DOMAIN-SUFFIX,ad.izuiyou.com,REJECT
-DOMAIN-SUFFIX,ad.1905.com,REJECT
-
-# —— 咪咕 / CNTV ——
 DOMAIN-SUFFIX,ggic.cmvideo.cn,REJECT
 DOMAIN-SUFFIX,ggic2.cmvideo.cn,REJECT
-DOMAIN-SUFFIX,ggic3.cmvideo.cn,REJECT
-DOMAIN-SUFFIX,ad.cmvideo.cn,REJECT
 DOMAIN-SUFFIX,admdg.cctv.com,REJECT
 DOMAIN-SUFFIX,a.cctv.com,REJECT
+DOMAIN-SUFFIX,adsfile.bssdlbig.kugou.com,REJECT
+DOMAIN-SUFFIX,adserviceretry.kugou.com,REJECT
+DOMAIN-SUFFIX,adse.w.ifeng.com,REJECT
 
-# —— 电商跳转 / 联盟广告（不影响正常购物主站）——
-DOMAIN-SUFFIX,alimama.com,REJECT
-DOMAIN-SUFFIX,click.taobao.com,REJECT
-DOMAIN-SUFFIX,redirect.simba.taobao.com,REJECT
-DOMAIN-SUFFIX,uland.taobao.com,REJECT
-DOMAIN-SUFFIX,s.click.taobao.com,REJECT
-DOMAIN-SUFFIX,union.alibaba.com,REJECT
-DOMAIN-SUFFIX,union.jd.com,REJECT
-DOMAIN-SUFFIX,cps.jd.com,REJECT
-DOMAIN-SUFFIX,ad.jd.com,REJECT
-DOMAIN-SUFFIX,ads.jd.com,REJECT
-DOMAIN-SUFFIX,union-click.jd.com,REJECT
-DOMAIN-SUFFIX,kepler.jd.com,REJECT
-DOMAIN-SUFFIX,cps.360buy.com,REJECT
-DOMAIN-SUFFIX,click.u.jd.com,REJECT
-DOMAIN-SUFFIX,u.jd.com,REJECT
-DOMAIN-SUFFIX,jrclick.jd.com,REJECT
-DOMAIN-SUFFIX,tui.jd.com,REJECT
-DOMAIN-SUFFIX,c-nfa.jd.com,REJECT
-DOMAIN-SUFFIX,ad.pinduoduo.com,REJECT
-DOMAIN-SUFFIX,mobads-logs.cn,REJECT
-DOMAIN-SUFFIX,ad.suning.com,REJECT
-DOMAIN-SUFFIX,adservice.suning.com,REJECT
-DOMAIN-SUFFIX,ad.vip.com,REJECT
-DOMAIN-SUFFIX,ad.dangdang.com,REJECT
-DOMAIN-SUFFIX,ads.xiaohongshu.com,REJECT
-DOMAIN-SUFFIX,ad.xiaohongshu.com,REJECT
-DOMAIN-SUFFIX,click.meituan.com,REJECT
-DOMAIN-SUFFIX,ad.meituan.com,REJECT
-DOMAIN-SUFFIX,dsp.meituan.com,REJECT
-DOMAIN-SUFFIX,dsp.youdao.com,REJECT
-DOMAIN-KEYWORD,union-click,REJECT
-
-# —— 国内通用广告联盟 / SDK ——
-DOMAIN-SUFFIX,tanx.com,REJECT
-DOMAIN-SUFFIX,mmstat.com,REJECT
-DOMAIN-SUFFIX,cnzz.com,REJECT
+# —— App 开屏 / 插屏广告 SDK（国内外） ——
 DOMAIN-SUFFIX,umeng.com,REJECT
 DOMAIN-SUFFIX,umengcloud.com,REJECT
 DOMAIN-SUFFIX,uyunad.com,REJECT
+DOMAIN-SUFFIX,mobads.baidu.com,REJECT
+DOMAIN-SUFFIX,mobads-logs.baidu.com,REJECT
+DOMAIN-SUFFIX,cpro.baidu.com,REJECT
+DOMAIN-SUFFIX,pos.baidu.com,REJECT
+DOMAIN-SUFFIX,cps.baidu.com,REJECT
+DOMAIN-SUFFIX,dup.baidustatic.com,REJECT
+DOMAIN-SUFFIX,afd.baidu.com,REJECT
+DOMAIN-SUFFIX,sigmob.com,REJECT
+DOMAIN-SUFFIX,sigmob.cn,REJECT
+DOMAIN-SUFFIX,adview.cn,REJECT
+DOMAIN-SUFFIX,adview.com,REJECT
+DOMAIN-SUFFIX,mintegral.com,REJECT
+DOMAIN-SUFFIX,mintegral.net,REJECT
+DOMAIN-SUFFIX,rayjump.com,REJECT
+DOMAIN-SUFFIX,mbridge.online,REJECT
+DOMAIN-SUFFIX,applovin.com,REJECT
+DOMAIN-SUFFIX,applvn.com,REJECT
+DOMAIN-SUFFIX,unityads.unity3d.com,REJECT
+DOMAIN-SUFFIX,vungle.com,REJECT
+DOMAIN-SUFFIX,liftoff.io,REJECT
+DOMAIN-SUFFIX,ironsrc.com,REJECT
+DOMAIN-SUFFIX,supersonicads.com,REJECT
+DOMAIN-SUFFIX,chartboost.com,REJECT
+DOMAIN-SUFFIX,fyber.com,REJECT
+DOMAIN-SUFFIX,inner-active.mobi,REJECT
+DOMAIN-SUFFIX,adcolony.com,REJECT
+DOMAIN-SUFFIX,admob.com,REJECT
+DOMAIN-SUFFIX,inmobi.com,REJECT
+DOMAIN-SUFFIX,inmobicdn.net,REJECT
+DOMAIN-SUFFIX,tapjoy.com,REJECT
+DOMAIN-SUFFIX,mopub.com,REJECT
+DOMAIN-SUFFIX,ads.mopub.com,REJECT
+DOMAIN-SUFFIX,smaato.com,REJECT
+DOMAIN-SUFFIX,smaato.net,REJECT
+DOMAIN-SUFFIX,ad.163.com,REJECT
+DOMAIN-SUFFIX,iad.apple.com,REJECT
+DOMAIN-SUFFIX,iadsdk.apple.com,REJECT
+DOMAIN-SUFFIX,ads.apple.com,REJECT
+DOMAIN-SUFFIX,tobid.cn,REJECT
+DOMAIN-SUFFIX,windmill.syg.com,REJECT
+DOMAIN-SUFFIX,beizi.biz,REJECT
+DOMAIN-SUFFIX,hubcloud.com.cn,REJECT
+
+# —— 国内联盟 / 监测 ——
+DOMAIN-SUFFIX,tanx.com,REJECT
+DOMAIN-SUFFIX,mmstat.com,REJECT
+DOMAIN-SUFFIX,cnzz.com,REJECT
 DOMAIN-SUFFIX,mediav.com,REJECT
 DOMAIN-SUFFIX,ipinyou.com,REJECT
 DOMAIN-SUFFIX,gridsumdissector.com,REJECT
@@ -262,34 +209,68 @@ DOMAIN-SUFFIX,reachmax.cn,REJECT
 DOMAIN-SUFFIX,kejet.net,REJECT
 DOMAIN-SUFFIX,gentags.net,REJECT
 DOMAIN-SUFFIX,mtty.com,REJECT
-DOMAIN-SUFFIX,beacon.qq.com,REJECT
-DOMAIN-SUFFIX,wxsnsdy.wxs.qq.com,REJECT
-DOMAIN-SUFFIX,wxsnsdythumb.wxs.qq.com,REJECT
-DOMAIN-SUFFIX,adpm.app.qq.com,REJECT
-DOMAIN-SUFFIX,duomai.com,REJECT
 DOMAIN-SUFFIX,allyes.com,REJECT
-DOMAIN-SUFFIX,ad.qq.com,REJECT
-DOMAIN-SUFFIX,adping.qq.com,REJECT
-DOMAIN-SUFFIX,adsfile.bssdlbig.kugou.com,REJECT
-DOMAIN-SUFFIX,adserviceretry.kugou.com,REJECT
-DOMAIN-SUFFIX,ad.10086.cn,REJECT
-DOMAIN-SUFFIX,smartad.10010.com,REJECT
+DOMAIN-SUFFIX,adroll.com,REJECT
 DOMAIN-KEYWORD,adservice,REJECT
 DOMAIN-KEYWORD,adserver,REJECT
 
-# —— Global ad / tracking CDNs ——
-DOMAIN-SUFFIX,adnxs.com,REJECT
+# —— 电商开屏 / 联盟跳转 / 导流（京东 天猫 淘宝 拼多多 等，仅广告域） ——
+DOMAIN,s.click.taobao.com,REJECT
+DOMAIN,uland.taobao.com,REJECT
+DOMAIN,click.tanx.com,REJECT
+DOMAIN,ef-site.tanx.com,REJECT
+DOMAIN,agoodm.m.taobao.com,REJECT
+DOMAIN,wgo.mmstat.com,REJECT
+DOMAIN,log.mmstat.com,REJECT
+DOMAIN,acjs.aliyun.com,REJECT
+DOMAIN-SUFFIX,simba.taobao.com,REJECT
+DOMAIN-SUFFIX,alimama.com,REJECT
+DOMAIN,u.jd.com,REJECT
+DOMAIN,ccc-x.jd.com,REJECT
+DOMAIN,x.jd.com,REJECT
+DOMAIN,mercury.jd.com,REJECT
+DOMAIN,blackhole.m.jd.com,REJECT
+DOMAIN,jwad.jd.com,REJECT
+DOMAIN,ads.union.jd.com,REJECT
+DOMAIN,union-click.jd.com,REJECT
+DOMAIN,click.union.jd.com,REJECT
+DOMAIN,im-x.jd.com,REJECT
+DOMAIN,ads.pinduoduo.com,REJECT
+DOMAIN,meta.pinduoduo.com,REJECT
+DOMAIN,t.meituan.net,REJECT
+DOMAIN,wreport.meituan.net,REJECT
+DOMAIN,dreport.meituan.net,REJECT
+DOMAIN-SUFFIX,ads.suning.com,REJECT
+DOMAIN-SUFFIX,ads-img.vip.com,REJECT
+DOMAIN-SUFFIX,ads.vip.com,REJECT
+DOMAIN-SUFFIX,duomai.com,REJECT
+DOMAIN-SUFFIX,linktech.cn,REJECT
+DOMAIN-SUFFIX,yiqifa.com,REJECT
+DOMAIN-SUFFIX,chanet.com.cn,REJECT
+DOMAIN-SUFFIX,linkstars.com,REJECT
+DOMAIN-SUFFIX,multimatic.com.cn,REJECT
+DOMAIN-SUFFIX,go.uc.cn,REJECT
+DOMAIN-SUFFIX,ads.uc.cn,REJECT
+DOMAIN-SUFFIX,woodpecker.uc.cn,REJECT
+DOMAIN-SUFFIX,trackerns.com,REJECT
+DOMAIN-SUFFIX,trackingio.com,REJECT
+DOMAIN-SUFFIX,lnk0.com,REJECT
+DOMAIN-SUFFIX,jmlk.co,REJECT
+DOMAIN-SUFFIX,tuiguang.meituan.com,REJECT
+
+# —— 平台跳转 / 唤醒类广告落地页常见域 ——
+DOMAIN-SUFFIX,app-measurement.com,REJECT
+DOMAIN-SUFFIX,firebaselogging.googleapis.com,REJECT
+DOMAIN-SUFFIX,dualstack.admrvr.com,REJECT
+DOMAIN-SUFFIX,admrvr.com,REJECT
 DOMAIN-SUFFIX,adsrvr.org,REJECT
 DOMAIN-SUFFIX,advertising.com,REJECT
 DOMAIN-SUFFIX,adsafeprotected.com,REJECT
 DOMAIN-SUFFIX,adform.net,REJECT
-DOMAIN-SUFFIX,adcolony.com,REJECT
-DOMAIN-SUFFIX,admob.com,REJECT
-DOMAIN-SUFFIX,applovin.com,REJECT
+DOMAIN-SUFFIX,adnxs.com,REJECT
 DOMAIN-SUFFIX,criteo.com,REJECT
 DOMAIN-SUFFIX,criteo.net,REJECT
 DOMAIN-SUFFIX,exoclick.com,REJECT
-DOMAIN-SUFFIX,inmobi.com,REJECT
 DOMAIN-SUFFIX,media.net,REJECT
 DOMAIN-SUFFIX,moatads.com,REJECT
 DOMAIN-SUFFIX,outbrain.com,REJECT
@@ -300,7 +281,6 @@ DOMAIN-SUFFIX,sharethrough.com,REJECT
 DOMAIN-SUFFIX,taboola.com,REJECT
 DOMAIN-SUFFIX,tapad.com,REJECT
 DOMAIN-SUFFIX,tremorhub.com,REJECT
-DOMAIN-SUFFIX,unityads.unity3d.com,REJECT
 DOMAIN-SUFFIX,smartadserver.com,REJECT
 DOMAIN-SUFFIX,casalemedia.com,REJECT
 DOMAIN-SUFFIX,openx.net,REJECT
@@ -310,21 +290,10 @@ DOMAIN-SUFFIX,spotx.tv,REJECT
 DOMAIN-SUFFIX,teads.tv,REJECT
 DOMAIN-SUFFIX,flashtalking.com,REJECT
 DOMAIN-SUFFIX,imrworldwide.com,REJECT
-DOMAIN-SUFFIX,tapjoy.com,REJECT
-DOMAIN-SUFFIX,supersonicads.com,REJECT
-DOMAIN-SUFFIX,ironsrc.com,REJECT
-DOMAIN-SUFFIX,chartboost.com,REJECT
-DOMAIN-SUFFIX,vungle.com,REJECT
-DOMAIN-SUFFIX,inner-active.mobi,REJECT
-DOMAIN-SUFFIX,mopub.com,REJECT
-DOMAIN-SUFFIX,mintegral.com,REJECT
-DOMAIN-SUFFIX,propellerads.com,REJECT
-DOMAIN-SUFFIX,popads.net,REJECT
-DOMAIN-SUFFIX,adroll.com,REJECT
-DOMAIN-SUFFIX,quantserve.com,REJECT
-DOMAIN-SUFFIX,yieldmo.com,REJECT
 DOMAIN-SUFFIX,bat.bing.com,REJECT
 DOMAIN-SUFFIX,ads.linkedin.com,REJECT
 DOMAIN-SUFFIX,ads.pinterest.com,REJECT
 DOMAIN-SUFFIX,ads.yahoo.com,REJECT
 DOMAIN-SUFFIX,advertising.yahoo.com,REJECT
+DOMAIN-SUFFIX,ads.reddit.com,REJECT
+DOMAIN-SUFFIX,advertising.microsoft.com,REJECT

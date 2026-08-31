@@ -8,14 +8,13 @@ DMG="$ROOT/dist/BashX-${VERSION}.dmg"
 STABLE="$ROOT/dist/BashX.dmg"
 TAG="v${VERSION}"
 RELEASES_PAGE="https://github.com/linux503/BashX/releases"
-RELEASE_NOTES="$(cat <<'EOF'
-## BashX 1.0.14
+RELEASE_NOTES="$(cat <<EOF
+## BashX ${VERSION}
 
-- Mac：移除面板「应用」分组页；菜单栏策略组改为打开面板
-- Mac：修复线路策略选中后被自动切回手动的问题，并优化卡片展示
-- Mac：修复节点测速按钮状态不刷新 / 一直灰的问题
-- 完整 Clash YAML 订阅保留原策略组与规则（passthrough）
-- iOS：策略组展示订阅全部组；连接中改为太极双鱼动效；谷歌/Telegram 分流修复
+- Mac 极简首页：当前节点更突出；域名规则默认打开「基础规则」
+- Mac 完整面板：策略组/分流菜单整理为一排；监控与布局优化
+- Mac 极简：iOS 同款 hero、可切规则模式与节点
+- iOS：订阅卡片色差、更紧凑；连接 URL 默认隐藏可点展开
 EOF
 )"
 

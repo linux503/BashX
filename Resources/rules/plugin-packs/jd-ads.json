@@ -1,0 +1,20 @@
+{
+  "id": "jd-ads",
+  "name": "京东去广告",
+  "summary": "规则拦截开屏跳转、联盟与广告投放域名（不拦主站 API）。",
+  "tag": "去广告",
+  "symbol": "cart.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,u.jd.com,REJECT",
+    "DOMAIN,union-click.jd.com,REJECT",
+    "DOMAIN,ccc-x.jd.com,REJECT",
+    "DOMAIN,dsp-x.jd.com,REJECT",
+    "DOMAIN,ads.jd.com,REJECT",
+    "DOMAIN,x.jd.com,REJECT",
+    "DOMAIN,blackhole.m.jd.com,REJECT",
+    "DOMAIN-SUFFIX,jddebug.com,REJECT",
+    "DOMAIN-KEYWORD,jd.ad,REJECT",
+    "DOMAIN-KEYWORD,jdads,REJECT"
+  ]
+}

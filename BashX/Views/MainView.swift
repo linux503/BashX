@@ -2,7 +2,7 @@ import Combine
 import SwiftUI
 
 struct MainView: View {
-    let state: AppState
+    @ObservedObject var state: AppState
     let monitor: TrafficMonitor
     let rates: MenuBarRateStore
     @Environment(\.bashxAppearance) private var appearance
@@ -12,21 +12,39 @@ struct MainView: View {
     @State private var renameTarget: Subscription?
     @State private var renameDraft = ""
     @State private var switchingNodeName: String?
+    @State private var pendingHubMode: ProxyHubMode?
     /// Instant chip highlight before chromeRevision lands.
     @State private var pendingProxyMode: ProxyMode?
-    @State private var panelProxyGroups: [ClashCore.ProxyGroupInfo] = []
-    @State private var isLoadingProxyGroups = false
+    @State private var minimalToggling = false
+    @State private var showMinimalNodePicker = false
+    @State private var minimalNodeQuery = ""
+    @State private var minimalSwitchingNode = false
+    @State private var showMinimalModePicker = false
+    @State private var minimalBrandAppear = false
+    @State private var minimalHeroBreath = false
+    @State private var minimalRingSpin: Double = 0
+    @State private var minimalShimmer: CGFloat = -0.4
 
+    /// Single-row panel menus: 订阅 · 节点 · 应用分流 · 域名规则 · 监控
     private enum DetailTab: CaseIterable, Identifiable {
-        case nodes, groups, subscriptions, monitor, rules
+        case subscriptions, nodes, apps, rules, monitor
         var id: String { String(describing: self) }
         func title(lang: AppLanguage) -> String {
             switch self {
-            case .nodes: return L10n.t("mac.panel.nodes", lang)
-            case .groups: return L10n.t("mac.panel.groups", lang)
             case .subscriptions: return L10n.t("mac.panel.subscriptions", lang)
-            case .monitor: return L10n.t("mac.panel.monitor", lang)
+            case .nodes: return L10n.t("mac.panel.nodes", lang)
+            case .apps: return L10n.t("mac.panel.apps", lang)
             case .rules: return L10n.t("mac.panel.rules", lang)
+            case .monitor: return L10n.t("mac.panel.monitor", lang)
+            }
+        }
+        var systemImage: String {
+            switch self {
+            case .subscriptions: return "link.circle.fill"
+            case .nodes: return "server.rack"
+            case .apps: return "app.badge.fill"
+            case .rules: return "list.bullet.rectangle"
+            case .monitor: return "waveform.path.ecg"
             }
         }
     }
@@ -61,6 +79,8 @@ struct MainView: View {
             Text("修改显示名称，不影响订阅链接。")
         }
         .task {
+            // 极简首页：用户点连接再启动；完整版才自动保活内核。
+            guard !state.settings.macMinimalHome else { return }
             _ = await state.ensureCoreRunning()
         }
         .onAppear {
@@ -80,33 +100,629 @@ struct MainView: View {
             if tab == .rules {
                 state.ensureRulesTextLoaded()
             }
-            if tab == .groups {
-                Task { await refreshPanelProxyGroups() }
-            }
             syncMonitorExtras()
         }
     }
 
     private var panelContent: some View {
         ZStack {
-            PanelAtmosphere()
-            VStack(spacing: 0) {
-                PanelTopBarHost(state: state) {
-                    topBar
-                }
-                GlassDivider()
-                HStack(spacing: 0) {
-                    PanelSidebarHost(state: state) {
-                        sidebar
+            if state.settings.macMinimalHome {
+                MinimalHomeBackdrop()
+            } else {
+                PanelAtmosphere()
+            }
+            if state.settings.macMinimalHome {
+                minimalHome
+            } else {
+                VStack(spacing: 0) {
+                    PanelTopBarHost(state: state) {
+                        topBar
                     }
-                    .frame(width: 240)
-                    Rectangle()
-                        .fill(BashXTheme.hairline(for: appearance))
-                        .frame(width: 1)
-                    detail
+                    GlassDivider()
+                    HStack(spacing: 0) {
+                        PanelSidebarHost(state: state) {
+                            sidebar
+                        }
+                        .frame(width: PanelMetrics.sidebarWidth)
+                        Rectangle()
+                            .fill(BashXTheme.hairline(for: appearance))
+                            .frame(width: 1)
+                        detail
+                    }
                 }
             }
         }
+    }
+
+    // MARK: - Minimal home (iOS-like)
+
+    private var minimalConnected: Bool {
+        state.isCoreVisiblyAlive || state.systemProxyOn
+    }
+
+    private var minimalBusy: Bool {
+        minimalToggling
+    }
+
+    private var minimalDisplayNodeName: String {
+        if let runtime = state.runtimeOutboundName, !runtime.isEmpty { return runtime }
+        if let selected = state.settings.selectedNodeName, !selected.isEmpty { return selected }
+        return L10n.t("mac.minimal.pickNode", lang)
+    }
+
+    private var minimalHeroAccent: Color {
+        if minimalConnected { return BashXTheme.good(for: appearance) }
+        if minimalBusy { return BashXTheme.warn(for: appearance) }
+        return BashXTheme.accent(for: appearance)
+    }
+
+    private var minimalHeroSubtitle: String {
+        if minimalConnected { return L10n.t("home.hero.connected", lang) }
+        if minimalBusy { return L10n.t("home.hero.connecting", lang) }
+        if state.nodes.isEmpty { return L10n.t("home.hero.empty", lang) }
+        return L10n.t("home.hero.ready", lang)
+    }
+
+    private var minimalStatusText: String {
+        if minimalBusy { return L10n.t("mac.minimal.connecting", lang) }
+        if minimalConnected { return L10n.t("mac.minimal.protected", lang) }
+        if state.nodes.isEmpty { return L10n.t("mac.minimal.needSub", lang) }
+        if state.settings.selectedNodeName == nil {
+            return L10n.t("mac.minimal.pickNode", lang)
+        }
+        return L10n.t("mac.minimal.ready", lang)
+    }
+
+    private var minimalHome: some View {
+        VStack(spacing: 0) {
+            // Toolbar chrome only — brand lives in hero (iOS-like)
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                PanelHomeModeToggle(
+                    isMinimal: true,
+                    lang: lang,
+                    onSelectMinimal: { state.setMacMinimalHome($0) }
+                )
+                Button {
+                    SettingsOpener.open(state: state)
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(BashXTheme.card(for: appearance).opacity(0.85))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("设置")
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+            .zIndex(2)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 12) {
+                    minimalHeroSection
+                        .padding(.top, 4)
+
+                    minimalNodePickerBar
+                        .padding(.horizontal, 18)
+                        .padding(.top, 2)
+                        .padding(.bottom, 20)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .zIndex(1)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onAppear {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+                minimalBrandAppear = true
+            }
+            withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) {
+                minimalHeroBreath = true
+            }
+            withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) {
+                minimalRingSpin = 360
+            }
+            withAnimation(.linear(duration: 3.6).repeatForever(autoreverses: false)) {
+                minimalShimmer = 1.2
+            }
+        }
+    }
+
+    private var minimalHeroSection: some View {
+        VStack(spacing: 10) {
+            VStack(spacing: 4) {
+                minimalHeroLogoMark
+                    .scaleEffect(minimalBrandAppear ? 1 : 0.82)
+                    .opacity(minimalBrandAppear ? 1 : 0)
+                    .scaleEffect(minimalHeroBreath ? 1.03 : 1)
+
+                minimalBrandTitle
+                    .opacity(minimalBrandAppear ? 1 : 0)
+                    .offset(y: minimalBrandAppear ? 0 : 10)
+
+                Text(minimalHeroSubtitle)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(BashXTheme.card(for: appearance).opacity(0.72))
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .strokeBorder(minimalHeroAccent.opacity(0.18), lineWidth: 0.6)
+                            )
+                    )
+                    .opacity(minimalBrandAppear ? 1 : 0)
+                    .padding(.top, 2)
+            }
+
+            HStack(spacing: 8) {
+                minimalStatusPill
+                minimalModePill
+            }
+            .scaleEffect(minimalBrandAppear ? 1 : 0.9)
+            .opacity(minimalBrandAppear ? 1 : 0)
+
+            MacConnectControl(
+                isConnected: minimalConnected,
+                isBusy: minimalBusy,
+                appearance: appearance,
+                language: lang
+            ) {
+                guard !minimalToggling else { return }
+                minimalToggling = true
+                Task {
+                    await state.toggleMinimalConnection()
+                    await MainActor.run { minimalToggling = false }
+                }
+            }
+            .padding(.top, 2)
+
+            if !state.settings.subscriptions.contains(where: \.enabled), !minimalConnected {
+                Text(L10n.t("mac.minimal.needSub", lang))
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 2)
+            }
+
+            if !state.statusText.isEmpty,
+               state.statusText != "就绪",
+               !state.statusText.contains("代理已") {
+                Text(state.statusText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 16)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var minimalHeroLogoMark: some View {
+        ZStack {
+            Circle()
+                .fill(minimalHeroAccent.opacity(minimalHeroBreath ? 0.22 : 0.10))
+                .frame(width: 78, height: 78)
+                .blur(radius: 10)
+                .scaleEffect(minimalHeroBreath ? 1.12 : 0.92)
+
+            ForEach(0..<2, id: \.self) { i in
+                Circle()
+                    .strokeBorder(
+                        AngularGradient(
+                            colors: [
+                                minimalHeroAccent.opacity(0),
+                                minimalHeroAccent.opacity(0.55),
+                                BashXTheme.accent(for: appearance).opacity(0.35),
+                                minimalHeroAccent.opacity(0),
+                            ],
+                            center: .center
+                        ),
+                        lineWidth: i == 0 ? 1.3 : 1
+                    )
+                    .frame(width: 64 + CGFloat(i) * 12, height: 64 + CGFloat(i) * 12)
+                    .rotationEffect(.degrees(minimalRingSpin * (i == 0 ? 1 : -0.7)))
+                    .opacity(0.7)
+            }
+
+            LogoIconView(style: state.settings.logoStyle, size: 46, colored: true, panel: true)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.55),
+                                    minimalHeroAccent.opacity(0.35),
+                                    Color.white.opacity(0.15),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.1
+                        )
+                )
+                .shadow(color: minimalHeroAccent.opacity(0.32), radius: minimalHeroBreath ? 14 : 8, y: 4)
+        }
+        .frame(width: 88, height: 88)
+    }
+
+    private var minimalBrandTitle: some View {
+        Text("BashX")
+            .font(.system(size: 32, weight: .heavy, design: .rounded))
+            .tracking(-1.0)
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [
+                        BashXTheme.primaryLabel(for: appearance),
+                        BashXTheme.accent(for: appearance).opacity(0.92),
+                        BashXTheme.primaryLabel(for: appearance),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        Color.clear,
+                        Color.white.opacity(appearance == .dark ? 0.35 : 0.55),
+                        Color.clear,
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 48)
+                .offset(x: minimalShimmer * 130)
+                .blendMode(.softLight)
+                .mask(
+                    Text("BashX")
+                        .font(.system(size: 32, weight: .heavy, design: .rounded))
+                        .tracking(-1.0)
+                )
+            }
+    }
+
+    private var minimalStatusPill: some View {
+        let tone = minimalConnected
+            ? BashXTheme.good(for: appearance)
+            : (minimalBusy ? BashXTheme.warn(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
+        return HStack(spacing: 6) {
+            Circle()
+                .fill(tone)
+                .frame(width: 7, height: 7)
+            Text(minimalStatusText)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            Capsule(style: .continuous)
+                .fill(tone.opacity(0.12))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(tone.opacity(0.22), lineWidth: 0.8)
+                )
+        )
+    }
+
+    private var minimalModePill: some View {
+        let current = pendingProxyMode ?? state.settings.proxyMode
+        let color = BashXTheme.proxyModeColor(current, appearance: appearance)
+        return Button { showMinimalModePicker.toggle() } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 7, height: 7)
+                Text(current.title(lang: lang))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(color.opacity(0.12))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(color.opacity(0.22), lineWidth: 0.8)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showMinimalModePicker, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(ProxyMode.allCases) { mode in
+                    let selected = mode == current
+                    let color = BashXTheme.proxyModeColor(mode, appearance: appearance)
+                    Button {
+                        showMinimalModePicker = false
+                        guard current != mode else { return }
+                        pendingProxyMode = mode
+                        Task {
+                            await state.setProxyMode(mode)
+                            if pendingProxyMode == mode {
+                                pendingProxyMode = nil
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: mode.systemImage)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(color)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(mode.title(lang: lang))
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                Text(mode.subtitle(lang: lang))
+                                    .font(.system(size: 10, design: .rounded))
+                                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                            }
+                            Spacer(minLength: 4)
+                            if selected {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(color)
+                            }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(selected ? color.opacity(0.12) : Color.clear)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(8)
+            .frame(width: 260)
+            .background(BashXTheme.card(for: appearance))
+        }
+        .help(current.subtitle(lang: lang))
+    }
+
+    private var minimalNodePickerBar: some View {
+        let accent = BashXTheme.accent(for: appearance)
+        let hasNode = !(state.settings.selectedNodeName ?? "").isEmpty
+            || !(state.runtimeOutboundName ?? "").isEmpty
+        let delayNode: ProxyNode? = {
+            if let name = state.runtimeOutboundName,
+               let n = state.nodes.first(where: { $0.name == name }) { return n }
+            if let name = state.settings.selectedNodeName,
+               let n = state.nodes.first(where: { $0.name == name }) { return n }
+            return nil
+        }()
+
+        return Button {
+            showMinimalNodePicker = true
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "location.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(L10n.t("mac.currentNode.title", lang))
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                    Spacer(minLength: 0)
+                    if let ms = delayNode?.delayMs {
+                        Text(delayNode?.delayText(lang: lang) ?? "")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundStyle(BashXTheme.delayColor(ms, appearance: appearance))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(BashXTheme.delayColor(ms, appearance: appearance).opacity(0.14))
+                            )
+                    }
+                }
+                .foregroundStyle(accent)
+
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent, accent.opacity(0.72)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 46, height: 46)
+                            .shadow(color: accent.opacity(0.35), radius: 8, y: 3)
+                        Image(systemName: "mappin.and.ellipse")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(minimalDisplayNodeName)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                        if let node = delayNode {
+                            Text("\(node.type.uppercased()) · \(L10n.t("home.location", lang))")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        } else if state.nodes.isEmpty {
+                            Text(L10n.t("mac.minimal.needSub", lang))
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        } else {
+                            Text(L10n.t("mac.minimal.pickNode", lang))
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        }
+                    }
+
+                    Spacer(minLength: 4)
+
+                    if minimalSwitchingNode {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(
+                                Circle()
+                                    .fill(accent)
+                                    .shadow(color: accent.opacity(0.35), radius: 4, y: 1)
+                            )
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(BashXTheme.card(for: appearance).opacity(0.95))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        accent.opacity(hasNode ? 0.55 : 0.22),
+                                        accent.opacity(hasNode ? 0.22 : 0.10),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: hasNode ? 1.4 : 0.8
+                            )
+                    )
+                    .shadow(color: accent.opacity(hasNode ? 0.18 : 0.08), radius: hasNode ? 14 : 8, y: 3)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(PanelPressButtonStyle())
+        .popover(isPresented: $showMinimalNodePicker, arrowEdge: .bottom) {
+            minimalNodePopover
+        }
+        .disabled(state.nodes.isEmpty)
+        .opacity(state.nodes.isEmpty ? 0.72 : 1)
+        .help(state.nodes.isEmpty ? L10n.t("mac.minimal.needSub", lang) : L10n.t("mac.minimal.pickNode", lang))
+    }
+
+    private var minimalNodePopover: some View {
+        let q = minimalNodeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nodes: [ProxyNode] = {
+            var list = state.nodes.filter { !ClashConfigParser.isPlaceholderNodeName($0.name) }
+            if !q.isEmpty {
+                list = list.filter {
+                    $0.name.localizedCaseInsensitiveContains(q)
+                        || $0.type.localizedCaseInsensitiveContains(q)
+                        || $0.server.localizedCaseInsensitiveContains(q)
+                }
+            }
+            return Array(list.prefix(120))
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .font(.system(size: 11, weight: .semibold))
+                TextField(L10n.t("mac.minimal.pickNode", lang), text: $minimalNodeQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .rounded))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(BashXTheme.field(for: appearance))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                    )
+            }
+
+            if nodes.isEmpty {
+                Text(state.nodes.isEmpty ? L10n.t("mac.minimal.needSub", lang) : "无匹配节点")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(nodes) { node in
+                            let selected = node.name == state.settings.selectedNodeName
+                                || node.name == state.runtimeOutboundName
+                            Button {
+                                guard !minimalSwitchingNode else { return }
+                                minimalSwitchingNode = true
+                                showMinimalNodePicker = false
+                                Task {
+                                    await state.selectNode(node.name)
+                                    await MainActor.run { minimalSwitchingNode = false }
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(node.name)
+                                            .font(.system(size: 12, weight: selected ? .bold : .semibold, design: .rounded))
+                                            .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+                                            .lineLimit(1)
+                                        Text(node.type.uppercased())
+                                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                                            .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                                    }
+                                    Spacer(minLength: 4)
+                                    Text(node.delayText(lang: lang))
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(BashXTheme.delayColor(node.delayMs, appearance: appearance))
+                                    if selected {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(BashXTheme.accent(for: appearance))
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 7)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(selected
+                                              ? BashXTheme.accentSoft(for: appearance)
+                                              : Color.clear)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+        }
+        .padding(10)
+        .frame(width: 300)
+        .background(BashXTheme.card(for: appearance))
+        .onDisappear { minimalNodeQuery = "" }
     }
 
     /// Panel toggles connections/logs; traffic SSE is owned by BashXApp.
@@ -138,125 +754,52 @@ struct MainView: View {
             state.panelIntent = .none
             AddSubscriptionOpener.open(state: state)
         case .groups:
-            detailTab = .groups
+            detailTab = .nodes
             state.panelIntent = .none
-            Task { await refreshPanelProxyGroups() }
         }
     }
 
     // MARK: - Top bar
 
     private var topBar: some View {
-        HStack(spacing: 12) {
+        ZStack {
             HStack(spacing: 10) {
-                Button {
-                    showLogoPicker.toggle()
-                } label: {
-                    LogoIconView(style: state.settings.logoStyle, size: 42, colored: true, panel: true)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(BashXTheme.accent(for: appearance).opacity(0.35), lineWidth: 1)
-                        )
-                        .shadow(color: BashXTheme.accentGlow(for: appearance), radius: 8, y: 2)
-                }
-                .buttonStyle(.plain)
-                .frame(width: 42, height: 42)
-                .accessibilityLabel("切换 Logo 风格")
-                .popover(isPresented: $showLogoPicker, arrowEdge: .bottom) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Logo 风格")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
-                        LogoStylePicker(
-                            selection: Binding(
-                                get: { state.settings.logoStyle },
-                                set: {
-                                    state.setLogoStyle($0)
-                                    showLogoPicker = false
-                                }
-                            ),
-                            appearance: appearance
-                        )
-                    }
-                    .padding(10)
-                    .frame(width: 248)
-                    .background(BashXTheme.card(for: appearance))
-                }
-                .help("切换 Logo 风格")
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("BashX")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        Text("v\(AppVersion.short)")
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.tertiary)
-                            .help("Build \(AppVersion.build)")
-                    }
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(state.isCoreVisiblyAlive ? BashXTheme.good(for: appearance) : Color.secondary.opacity(0.4))
-                            .frame(width: 5, height: 5)
-        Text(state.isCoreVisiblyAlive
-                            ? "代理已连接"
-                            : (state.coreConnecting
-                               ? "内核连接中…"
-                               : (state.coreRunning ? "内核已就绪" : "内核未启动")))
-                            .font(.caption)
-                            .foregroundStyle(state.isCoreVisiblyAlive ? BashXTheme.good(for: appearance) : .secondary)
-                            .lineLimit(1)
-                    }
-                }
-                .fixedSize(horizontal: true, vertical: false)
+                topBarBrand
+                Spacer(minLength: 8)
+                PanelStatusLine(state: state)
+                PanelHomeModeToggle(
+                    isMinimal: false,
+                    lang: lang,
+                    onSelectMinimal: { state.setMacMinimalHome($0) }
+                )
+                topBarSettingsButton
             }
 
-            Spacer(minLength: 8)
-
-            PanelStatusLine(state: state)
-
-            Button {
-                SettingsOpener.open(state: state)
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                    .frame(width: 28, height: 28)
-                    .background {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(BashXTheme.secondaryFill(for: appearance))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
-                            )
-                    }
+            HStack(spacing: 5) {
+                StatusPill(title: state.isCoreVisiblyAlive ? "内核" : "内核关", active: state.isCoreVisiblyAlive)
+                StatusPill(title: state.systemProxyOn ? "系统代理" : "代理关", active: state.systemProxyOn)
+                StatusPill(
+                    title: state.settings.proxyMode.title,
+                    active: state.settings.proxyMode != .direct,
+                    activeColor: state.settings.proxyMode == .global ? BashXTheme.warn : BashXTheme.accent(for: appearance)
+                )
+                if state.settings.tunEnabled {
+                    StatusPill(title: "TUN", active: true)
+                }
+                if let nodePill = currentNodePillTitle {
+                    StatusPill(title: nodePill, active: state.isCoreVisiblyAlive)
+                }
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut(",", modifiers: .command)
-            .help("设置 (⌘,)")
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background {
+                Capsule(style: .continuous)
+                    .fill(BashXTheme.secondaryFill(for: appearance).opacity(0.55))
+            }
+            .allowsHitTesting(false)
         }
-        .overlay(alignment: .center) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    StatusPill(title: state.isCoreVisiblyAlive ? "内核" : "内核关", active: state.isCoreVisiblyAlive)
-                    StatusPill(title: state.systemProxyOn ? "系统代理" : "代理关", active: state.systemProxyOn)
-                    StatusPill(
-                        title: state.settings.proxyMode.title,
-                        active: state.settings.proxyMode != .direct,
-                        activeColor: state.settings.proxyMode == .global ? BashXTheme.warn : BashXTheme.accent(for: appearance)
-                    )
-                    if state.settings.tunEnabled {
-                        StatusPill(title: "TUN", active: true)
-                    }
-                    if let nodePill = currentNodePillTitle {
-                        StatusPill(title: nodePill, active: state.isCoreVisiblyAlive)
-                    }
-                }
-            }
-            .fixedSize(horizontal: true, vertical: false)
-        }
-        .frame(height: 56)
-        .padding(.horizontal, 16)
+        .frame(height: PanelMetrics.topBarHeight)
+        .padding(.horizontal, 12)
         .background {
             Rectangle()
                 .fill(BashXTheme.card(for: appearance))
@@ -269,11 +812,97 @@ struct MainView: View {
         .transaction { $0.animation = nil }
     }
 
+    private var topBarBrand: some View {
+        HStack(spacing: 8) {
+            Button {
+                showLogoPicker.toggle()
+            } label: {
+                LogoIconView(style: state.settings.logoStyle, size: 22, colored: true, panel: true)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(BashXTheme.accent(for: appearance).opacity(0.28), lineWidth: 0.8)
+                    )
+            }
+            .buttonStyle(.plain)
+            .frame(width: 30, height: 30)
+            .accessibilityLabel("切换 Logo 风格")
+            .popover(isPresented: $showLogoPicker, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Logo 风格")
+                        .font(PanelMetrics.sectionTitle)
+                        .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+                    LogoStylePicker(
+                        selection: Binding(
+                            get: { state.settings.logoStyle },
+                            set: {
+                                state.setLogoStyle($0)
+                                showLogoPicker = false
+                            }
+                        ),
+                        appearance: appearance
+                    )
+                }
+                .padding(10)
+                .frame(width: 248)
+                .background(BashXTheme.card(for: appearance))
+            }
+            .help("切换 Logo 风格")
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text("BashX")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                    Text("v\(AppVersion.short)")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                        .help("Build \(AppVersion.build)")
+                }
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(state.isCoreVisiblyAlive ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance).opacity(0.55))
+                        .frame(width: 4.5, height: 4.5)
+                    Text(state.isCoreVisiblyAlive
+                          ? "代理已连接"
+                          : (state.coreConnecting
+                             ? "内核连接中…"
+                             : (state.coreRunning ? "内核已就绪" : "内核未启动")))
+                        .font(PanelMetrics.micro)
+                        .foregroundStyle(state.isCoreVisiblyAlive ? BashXTheme.good(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
+                        .lineLimit(1)
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var topBarSettingsButton: some View {
+        Button {
+            SettingsOpener.open(state: state)
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                .frame(width: 26, height: 26)
+                .background {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(BashXTheme.secondaryFill(for: appearance))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                        )
+                }
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(",", modifiers: .command)
+        .help("设置 (⌘,)")
+    }
+
     // MARK: - Sidebar
 
     private var sidebar: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: PanelMetrics.sidebarStack) {
                 PanelSidebarTraffic(
                     panel: rates.panel,
                     coreRunning: state.isCoreVisiblyAlive || state.coreRunning
@@ -286,25 +915,18 @@ struct MainView: View {
                 sidebarSubsSummary
                 sidebarSettingsCard
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
+            .padding(.horizontal, PanelMetrics.sidebarInset)
+            .padding(.vertical, PanelMetrics.sidebarInset)
         }
-        .frame(width: 240)
+        .frame(width: PanelMetrics.sidebarWidth)
         .background(BashXTheme.sidebarTint(for: appearance))
     }
 
     private var sidebarSettingsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "link.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                Text("连接")
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
-            }
+        VStack(alignment: .leading, spacing: 7) {
+            SidebarSectionHeader(title: "连接", systemImage: "link.circle.fill")
 
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 sidebarToggleTile(
                     icon: "network",
                     tint: BashXTheme.accent(for: appearance),
@@ -319,7 +941,7 @@ struct MainView: View {
                     icon: "point.3.connected.trianglepath.dotted",
                     tint: Color(red: 0.36, green: 0.72, blue: 0.88),
                     title: "TUN",
-                    subtitle: "可与系统代理同时开",
+                    subtitle: TunPrivilege.isReady ? "已授权 · Telegram 稳" : "首次需管理员密码",
                     isOn: Binding(
                         get: { state.settings.tunEnabled },
                         set: { v in Task { await state.setTUN(v) } }
@@ -361,27 +983,28 @@ struct MainView: View {
                     guard !starting else { return }
                     Task { await state.ensureCoreRunning() }
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         if starting {
                             ProgressView()
                                 .controlSize(.small)
                                 .tint(.white)
                         } else {
                             Image(systemName: "play.fill")
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: 10, weight: .bold))
                         }
                         Text(starting ? "正在启动…" : "启动内核")
-                            .font(.caption.weight(.semibold))
+                            .font(PanelMetrics.caption)
+                            .fontWeight(.semibold)
                         Spacer(minLength: 0)
                         Text(starting ? "请稍候" : "开始代理")
-                            .font(.caption2)
+                            .font(PanelMetrics.micro)
                             .opacity(0.85)
                     }
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                     .background {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
                             .fill(
                                 LinearGradient(
                                     colors: [
@@ -399,13 +1022,13 @@ struct MainView: View {
                 .transaction { $0.animation = nil }
             }
         }
-        .padding(12)
+        .padding(PanelMetrics.cardPad)
         .transaction { $0.animation = nil }
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                         .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
                 )
         }
@@ -419,22 +1042,22 @@ struct MainView: View {
         isOn: Binding<Bool>,
         disabled: Bool = false
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(tint.opacity(appearance == .dark ? 0.22 : 0.14))
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(tint)
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 24, height: 24)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(disabled ? BashXTheme.tertiaryLabel(for: appearance) : .primary)
+                    .font(PanelMetrics.body)
+                    .foregroundStyle(disabled ? BashXTheme.tertiaryLabel(for: appearance) : BashXTheme.primaryLabel(for: appearance))
                 Text(subtitle)
-                    .font(.system(size: 10, design: .rounded))
+                    .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                     .lineLimit(1)
             }
@@ -446,10 +1069,10 @@ struct MainView: View {
                 .controlSize(.mini)
                 .disabled(disabled)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
                 .fill(isOn.wrappedValue
                       ? tint.opacity(appearance == .dark ? 0.10 : 0.06)
                       : BashXTheme.secondaryFill(for: appearance).opacity(0.55))
@@ -498,28 +1121,26 @@ struct MainView: View {
     }
 
     private var proxyModeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                Text("代理模式")
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            SidebarSectionHeader(title: L10n.t("proxy.outbound", lang), systemImage: "arrow.triangle.branch")
 
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 ForEach(ProxyMode.allCases) { mode in
                     proxyModeChip(mode)
                 }
             }
+
+            Text((pendingProxyMode ?? state.settings.proxyMode).subtitle(lang: lang))
+                .font(PanelMetrics.micro)
+                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
+        .padding(PanelMetrics.cardPad)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                         .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
                 )
         }
@@ -539,33 +1160,27 @@ struct MainView: View {
                 }
             }
         } label: {
-            VStack(spacing: 6) {
-                ZStack {
-                    Circle()
-                        .fill(selected ? color.opacity(0.22) : BashXTheme.secondaryFill(for: appearance))
-                        .frame(width: 28, height: 28)
-                    Image(systemName: mode.systemImage)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(selected ? color : BashXTheme.secondaryLabel(for: appearance))
-                }
+            HStack(spacing: 4) {
+                Image(systemName: mode.systemImage)
+                    .font(.system(size: 10, weight: .semibold))
                 Text(mode.title)
-                    .font(.system(size: 12, weight: selected ? .bold : .semibold, design: .rounded))
-                    .foregroundStyle(selected ? color : .primary)
+                    .font(.system(size: 11, weight: selected ? .bold : .semibold, design: .rounded))
             }
+            .foregroundStyle(selected ? color : BashXTheme.secondaryLabel(for: appearance))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .padding(.vertical, 7)
             .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
                     .fill(selected ? color.opacity(appearance == .dark ? 0.16 : 0.10) : BashXTheme.secondaryFill(for: appearance).opacity(0.55))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
                             .strokeBorder(
-                                selected ? color.opacity(0.55) : Color.clear,
-                                lineWidth: selected ? 1.2 : 0
+                                selected ? color.opacity(0.50) : Color.clear,
+                                lineWidth: selected ? 1 : 0
                             )
                     )
             }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous))
         }
         .buttonStyle(PanelPressButtonStyle())
         .help(mode.subtitle)
@@ -595,19 +1210,19 @@ struct MainView: View {
     }
 
     private var selectedNodeCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
                 Label(L10n.t("mac.currentNode.title", lang), systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                    .font(.caption.weight(.medium))
+                    .font(PanelMetrics.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                Spacer()
+                Spacer(minLength: 0)
                 if let name = effectiveNodeDelayName,
                    let node = state.nodes.first(where: { $0.name == name }),
                    let ms = node.delayMs {
                     Text(ms < 0 ? L10n.t("probe.timeout", lang) : "\(ms) ms")
-                        .font(.caption2.monospaced().weight(.semibold))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(BashXTheme.delayColor(ms, appearance: appearance))
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(
                             Capsule(style: .continuous)
@@ -618,36 +1233,36 @@ struct MainView: View {
 
             if let runtime = state.runtimeOutboundName, !runtime.isEmpty {
                 Text(runtime)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(PanelMetrics.body)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
                 let selected = state.settings.selectedNodeName ?? "AUTO"
                 if selected != runtime {
                     Text(L10n.t("mac.currentNode.selected", lang)
                         .replacingOccurrences(of: "%@", with: selected))
-                        .font(.caption2)
+                        .font(PanelMetrics.micro)
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                         .lineLimit(1)
                 }
             } else {
                 Text(state.settings.selectedNodeName ?? L10n.t("mac.currentNode.auto", lang))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(PanelMetrics.body)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
             }
         }
-        .padding(12)
+        .padding(PanelMetrics.cardPad)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                         .strokeBorder(
                             state.coreRunning
                                 ? LinearGradient(
                                     colors: [
-                                        BashXTheme.accent(for: appearance).opacity(0.5),
-                                        BashXTheme.accentGlow(for: appearance).opacity(0.3)
+                                        BashXTheme.accent(for: appearance).opacity(0.45),
+                                        BashXTheme.accentGlow(for: appearance).opacity(0.25)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
@@ -660,7 +1275,7 @@ struct MainView: View {
                             lineWidth: state.coreRunning ? 1 : 0.5
                         )
                 )
-                .shadow(color: state.coreRunning ? BashXTheme.accent(for: appearance).opacity(0.08) : .clear, radius: 6, y: 2)
+                .shadow(color: state.coreRunning ? BashXTheme.accent(for: appearance).opacity(0.06) : .clear, radius: 4, y: 1)
         }
         .task(id: "\(state.settings.selectedNodeName ?? "")|\(state.coreRunning)") {
             guard state.coreRunning else { return }
@@ -696,16 +1311,15 @@ struct MainView: View {
         let enabledCount = subs.filter(\.enabled).count
         let totalCount = subs.count
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Label("订阅", systemImage: "tray.full")
-                .font(.caption.weight(.semibold))
+        return VStack(alignment: .leading, spacing: 6) {
+            SidebarSectionHeader(title: "订阅", systemImage: "tray.full")
 
             if totalCount == 0 {
                 Text("还没有订阅")
-                    .font(.caption2)
+                    .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
             } else {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     subSummaryMetric(
                         value: "\(enabledCount)/\(totalCount)",
                         label: enabledCount == totalCount ? "已全部启用" : "已启用"
@@ -718,17 +1332,18 @@ struct MainView: View {
                 }
                 if enabledCount < totalCount {
                     Text("还有 \(totalCount - enabledCount) 个未启用")
-                        .font(.system(size: 9, design: .rounded))
+                        .font(PanelMetrics.micro)
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                 }
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Button {
                     detailTab = .subscriptions
                 } label: {
                     Text("管理")
-                        .font(.caption.weight(.semibold))
+                        .font(PanelMetrics.caption)
+                        .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -738,7 +1353,8 @@ struct MainView: View {
                     openAddSubscription()
                 } label: {
                     Label("添加", systemImage: "plus")
-                        .font(.caption.weight(.semibold))
+                        .font(PanelMetrics.caption)
+                        .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -749,7 +1365,7 @@ struct MainView: View {
                     Task { await state.updateAllSubscriptions() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -762,7 +1378,7 @@ struct MainView: View {
                     Task { await state.enableAllSubscriptions() }
                 } label: {
                     Text("启用全部并合并")
-                        .font(.caption2.weight(.medium))
+                        .font(PanelMetrics.micro)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
@@ -770,36 +1386,36 @@ struct MainView: View {
                 .disabled(state.isBusy)
             } else if subs.isEmpty {
                 Text("添加订阅后点 ↻ 拉取节点")
-                    .font(.caption2)
+                    .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
             }
         }
-        .padding(10)
+        .padding(PanelMetrics.cardPad)
         .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                         .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
                 )
         }
     }
 
     private func subSummaryMetric(value: String, label: String, accent: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .font(.system(size: 15, weight: .bold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(accent ? BashXTheme.accent(for: appearance) : .primary)
+                .foregroundStyle(accent ? BashXTheme.accent(for: appearance) : BashXTheme.primaryLabel(for: appearance))
             Text(label)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .font(PanelMetrics.micro)
                 .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(accent
                       ? BashXTheme.accentSoft(for: appearance)
                       : BashXTheme.secondaryFill(for: appearance))
@@ -835,8 +1451,11 @@ struct MainView: View {
                 switch detailTab {
                 case .nodes:
                     nodesPane
-                case .groups:
-                    groupsPane
+                case .apps:
+                    AppRoutingPane()
+                case .rules:
+                    RulesEditorPane()
+                        .padding(12)
                 case .subscriptions:
                     subscriptionsPane
                 case .monitor:
@@ -850,8 +1469,6 @@ struct MainView: View {
                             Task { await monitor.closeAllConnections() }
                         }
                     )
-                case .rules:
-                    RulesEditorPane()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -862,27 +1479,20 @@ struct MainView: View {
 
     private var detailHeader: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                Picker("", selection: $detailTab) {
-                    ForEach(DetailTab.allCases) { tab in
-                        Text(tab.title(lang: lang)).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 420)
-                .fixedSize(horizontal: false, vertical: true)
-
-                Spacer(minLength: 8)
+            HStack {
+                Spacer(minLength: 0)
+                detailTabBar
+                Spacer(minLength: 0)
             }
 
             if detailTab == .nodes {
                 PanelNodesHost(state: state) {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 7) {
                         SoftField {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 5) {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: 10, weight: .semibold))
                                 TextField("搜索节点", text: searchTextBinding)
                                     .textFieldStyle(.plain)
                                     .font(.system(size: 12, design: .rounded))
@@ -900,15 +1510,15 @@ struct MainView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
-                        .frame(width: 96)
+                        .frame(width: 90)
                         .help("卡片 / 列表")
 
                         Text("\(state.filteredNodes.count)/\(state.nodes.count)")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .monospacedDigit()
                             .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 5)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
                             .background(
                                 Capsule(style: .continuous)
                                     .fill(BashXTheme.accentSoft(for: appearance))
@@ -917,8 +1527,63 @@ struct MainView: View {
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    private var detailTabBar: some View {
+        HStack(spacing: 2) {
+            ForEach(DetailTab.allCases) { tab in
+                detailTabChip(tab)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule(style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.6)
+                )
+                .shadow(color: Color.black.opacity(appearance == .dark ? 0.18 : 0.05), radius: 6, y: 1)
+        }
+    }
+
+    private func detailTabChip(_ tab: DetailTab) -> some View {
+        let selected = detailTab == tab
+        let accent = BashXTheme.accent(for: appearance)
+        return Button {
+            withAnimation(.easeOut(duration: 0.14)) {
+                detailTab = tab
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: tab.systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(tab.title(lang: lang))
+                    .font(.system(size: 11.5, weight: selected ? .bold : .medium, design: .rounded))
+            }
+            .foregroundStyle(selected ? Color.white : BashXTheme.secondaryLabel(for: appearance))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background {
+                Group {
+                    if selected {
+                        Capsule(style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent, accent.opacity(0.82)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.12), value: selected)
     }
 
     private var nodesPane: some View {
@@ -927,130 +1592,12 @@ struct MainView: View {
         }
     }
 
-    private var groupsPane: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t("mac.panel.groups", lang))
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    Text(L10n.t("mac.groups.subtitle", lang))
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                }
-                Spacer()
-                Button {
-                    Task { await refreshPanelProxyGroups() }
-                } label: {
-                    Label(L10n.t("mac.groups.refresh", lang), systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .disabled(isLoadingProxyGroups || !state.coreRunning)
-                .controlSize(.small)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-
-            if panelProxyGroups.isEmpty {
-                VStack(spacing: 10) {
-                    if isLoadingProxyGroups {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                    Text(L10n.t("mac.groups.empty", lang))
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(panelProxyGroups.enumerated()), id: \.element.name) { idx, group in
-                            Menu {
-                                ForEach(group.all.prefix(80), id: \.self) { name in
-                                    Button {
-                                        Task {
-                                            await state.selectGroupProxy(group: group.name, name: name)
-                                            await refreshPanelProxyGroups()
-                                        }
-                                    } label: {
-                                        HStack {
-                                            Text(AppConstants.groupSelectionLabel(name, limit: 36))
-                                            if name == group.now {
-                                                Image(systemName: "checkmark")
-                                            }
-                                        }
-                                    }
-                                }
-                                if group.all.count > 80 {
-                                    Text(L10n.t("mac.menu.groupMore", lang)
-                                        .replacingOccurrences(of: "%@", with: "\(group.all.count)"))
-                                        .foregroundStyle(.secondary)
-                                }
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Text(AppConstants.groupDisplayName(group.name))
-                                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(.primary)
-                                    Spacer(minLength: 8)
-                                    Text(AppConstants.groupSelectionLabel(group.now, limit: 22))
-                                        .font(.system(size: 12, design: .rounded))
-                                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                                        .lineLimit(1)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 11)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-
-                            if idx < panelProxyGroups.count - 1 {
-                                Rectangle()
-                                    .fill(BashXTheme.hairline(for: appearance))
-                                    .frame(height: 1)
-                                    .padding(.leading, 14)
-                            }
-                        }
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(BashXTheme.card(for: appearance))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(BashXTheme.hairline(for: appearance), lineWidth: 1)
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task(id: state.chromeRevision) {
-            guard detailTab == .groups else { return }
-            await refreshPanelProxyGroups()
-        }
-    }
-
-    private func refreshPanelProxyGroups() async {
-        guard state.coreRunning else {
-            panelProxyGroups = []
-            return
-        }
-        isLoadingProxyGroups = true
-        defer { isLoadingProxyGroups = false }
-        let groups = await state.fetchMenuProxyGroups()
-        panelProxyGroups = groups
-    }
-
     private var nodesPaneContent: some View {
         VStack(spacing: 0) {
             nodesSmartSection
-            Rectangle()
-                .fill(BashXTheme.hairline(for: appearance))
-                .frame(height: 1)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
 
             categoryBar
             Rectangle()
@@ -1073,18 +1620,40 @@ struct MainView: View {
     }
 
     private var nodesSmartSection: some View {
+        let hubMode = pendingHubMode ?? state.settings.proxyHubMode
+        let activeTint = nodesHubModeTint(hubMode)
         let testingAll = state.isTesting && state.speedTestScopeKey == nil
         let canTest = !state.nodes.isEmpty && !state.isTesting
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(L10n.t("mac.nodes.smart", lang))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                    Text(L10n.t("mac.nodes.hubHint", lang))
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .center, spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(activeTint.opacity(appearance == .dark ? 0.22 : 0.14))
+                        .frame(width: 26, height: 26)
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(activeTint)
                 }
-                Spacer(minLength: 8)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.t("mac.nodes.smart", lang))
+                        .font(PanelMetrics.body)
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(activeTint)
+                            .frame(width: 4, height: 4)
+                        Text(hubMode.title(lang: lang))
+                            .font(PanelMetrics.micro)
+                            .foregroundStyle(activeTint)
+                    }
+                    Text(L10n.t("mac.groups.hubHint", lang))
+                        .font(PanelMetrics.micro)
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 6)
+
                 Button {
                     guard canTest else {
                         if state.nodes.isEmpty {
@@ -1099,81 +1668,60 @@ struct MainView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 3) {
                         if testingAll {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(.white)
+                                .tint(BashXTheme.accent(for: appearance))
                         } else {
                             Image(systemName: "gauge.with.dots.needle.67percent")
-                                .font(.system(size: 13, weight: .bold))
+                                .font(.system(size: 9, weight: .semibold))
                         }
                         Text(testingAll
                              ? L10n.t("mac.nodes.speedBigBusy", lang)
                              : L10n.t("mac.nodes.speedAll", lang))
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .font(PanelMetrics.micro)
+                            .fontWeight(.semibold)
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background {
                         Capsule(style: .continuous)
-                            .fill(
-                                canTest || testingAll
-                                    ? AnyShapeStyle(
-                                        LinearGradient(
-                                            colors: [
-                                                BashXTheme.accent(for: appearance),
-                                                BashXTheme.accent(for: appearance).opacity(0.75),
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    : AnyShapeStyle(BashXTheme.secondaryFill(for: appearance))
-                            )
+                            .fill(BashXTheme.accentSoft(for: appearance))
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PanelPressButtonStyle())
                 .opacity(canTest || testingAll ? 1 : 0.55)
                 .help(state.nodes.isEmpty ? "没有可测速节点" : "测速全部节点")
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 4) {
                 ForEach([ProxyHubMode.smart, .loadBalance, .failover], id: \.self) { mode in
-                    nodesHubModeCard(mode)
+                    nodesHubModeCard(mode, activeMode: hubMode)
                 }
             }
+            if hubMode == .manual {
+                Text(L10n.t("mac.nodes.hubManual.hint", lang))
+                    .font(PanelMetrics.micro)
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
         .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            BashXTheme.card(for: appearance).opacity(appearance == .dark ? 0.88 : 0.95),
-                            BashXTheme.card(for: appearance).opacity(appearance == .dark ? 0.55 : 0.78),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(appearance == .dark ? 0.12 : 0.55),
-                                    BashXTheme.hairline(for: appearance),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 0.8
-                        )
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
                 )
-                .shadow(color: Color.black.opacity(appearance == .dark ? 0.28 : 0.06), radius: 12, y: 4)
+        }
+        .onReceive(state.$hubModeRevision.receive(on: RunLoop.main)) { _ in
+            // Keep optimistic highlight until settings catch up; only clear if modes match.
+            if let pending = pendingHubMode, state.settings.proxyHubMode == pending {
+                pendingHubMode = nil
+            }
         }
     }
 
@@ -1190,84 +1738,91 @@ struct MainView: View {
         }
     }
 
-    private func nodesHubModeCard(_ mode: ProxyHubMode) -> some View {
-        let on = state.settings.proxyHubMode == mode
+    private func nodesHubModeCard(_ mode: ProxyHubMode, activeMode: ProxyHubMode) -> some View {
+        let on = activeMode == mode
         let tint = nodesHubModeTint(mode)
         return Button {
-            Task { await state.setProxyHubMode(mode) }
+            pendingHubMode = mode
+            Task {
+                await state.setProxyHubMode(mode)
+                await MainActor.run {
+                    if pendingHubMode == mode {
+                        pendingHubMode = nil
+                    }
+                }
+            }
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    ZStack {
-                        Circle()
+            HStack(spacing: 5) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: on
+                                    ? [tint, tint.opacity(0.65)]
+                                    : [tint.opacity(0.42), tint.opacity(0.28)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 18, height: 18)
+                        .shadow(color: on ? tint.opacity(0.45) : .clear, radius: 3, y: 1)
+                    Image(systemName: mode.systemImage)
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(mode.title(lang: lang))
+                        .font(.system(size: 9.5, weight: on ? .bold : .semibold, design: .rounded))
+                        .foregroundStyle(on ? tint : BashXTheme.primaryLabel(for: appearance))
+                        .lineLimit(1)
+                    Text(mode.subtitle(lang: lang))
+                        .font(.system(size: 8, design: .rounded))
+                        .foregroundStyle(on ? tint.opacity(0.85) : BashXTheme.tertiaryLabel(for: appearance))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background {
+                Group {
+                    if on {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .fill(
                                 LinearGradient(
-                                    colors: on
-                                        ? [tint, tint.opacity(0.72)]
-                                        : [tint.opacity(appearance == .dark ? 0.32 : 0.18),
-                                           tint.opacity(appearance == .dark ? 0.16 : 0.08)],
+                                    colors: [
+                                        tint.opacity(appearance == .dark ? 0.38 : 0.22),
+                                        tint.opacity(appearance == .dark ? 0.22 : 0.10),
+                                    ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 34, height: 34)
-                            .shadow(color: on ? tint.opacity(0.45) : .clear, radius: 8, y: 2)
-                        Image(systemName: mode.systemImage)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(on ? Color.white : tint)
-                    }
-                    Spacer(minLength: 0)
-                    if on {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(tint)
-                            .transition(.scale.combined(with: .opacity))
+                            .shadow(color: tint.opacity(0.28), radius: 5, y: 2)
+                    } else {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(BashXTheme.secondaryFill(for: appearance).opacity(0.55))
                     }
                 }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(mode.title(lang: lang))
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundStyle(on ? tint : .primary)
-                        .lineLimit(1)
-                    Text(mode.subtitle(lang: lang))
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(on ? tint.opacity(0.88) : BashXTheme.secondaryLabel(for: appearance))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(minHeight: 28, alignment: .top)
+                .allowsHitTesting(false)
+            }
+            .overlay(alignment: .topTrailing) {
+                if on {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .background(Circle().fill(BashXTheme.card(for: appearance)).padding(-1))
+                        .offset(x: 2, y: -3)
                 }
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        on
-                            ? tint.opacity(appearance == .dark ? 0.20 : 0.11)
-                            : BashXTheme.field(for: appearance)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(
-                                on
-                                    ? tint.opacity(0.9)
-                                    : BashXTheme.hairline(for: appearance),
-                                lineWidth: on ? 2 : 0.6
-                            )
-                    )
-                    .shadow(
-                        color: on ? tint.opacity(0.22) : Color.black.opacity(appearance == .dark ? 0.18 : 0.04),
-                        radius: on ? 10 : 3,
-                        y: on ? 3 : 1
-                    )
-            }
+            .scaleEffect(on ? 1.02 : 1.0)
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .disabled(state.nodes.isEmpty)
-        .opacity(state.nodes.isEmpty ? 0.5 : 1)
-        .help(mode.subtitle(lang: lang))
-        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: on)
+        .buttonStyle(PanelPressButtonStyle())
+        .help("\(mode.subtitle(lang: lang)) — 切换 PROXY 策略（智能选路/负载均衡/故障转移）")
+        .animation(.spring(response: 0.22, dampingFraction: 0.84), value: on)
     }
 
     private var nodesEmptyState: some View {
@@ -1297,10 +1852,10 @@ struct MainView: View {
                     categoryChip(key: item.key, title: item.title, flag: item.flag, count: item.count)
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 12)
         }
-        .padding(.vertical, 8)
-        .background(BashXTheme.sidebarTint(for: appearance).opacity(0.65))
+        .padding(.vertical, 6)
+        .background(BashXTheme.sidebarTint(for: appearance).opacity(0.55))
     }
 
     private func categoryChip(key: String?, title: String, flag: String, count: Int) -> some View {
@@ -1308,23 +1863,23 @@ struct MainView: View {
         return Button {
             state.selectedCategoryKey = key
         } label: {
-            HStack(spacing: 4) {
-                Text(flag).font(.system(size: 12))
+            HStack(spacing: 3) {
+                Text(flag).font(.system(size: 11))
                 Text(title)
-                    .font(.system(size: 11, weight: selected ? .semibold : .medium, design: .rounded))
+                    .font(.system(size: 10, weight: selected ? .semibold : .medium, design: .rounded))
                 Text("\(count)")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundStyle(selected ? BashXTheme.accent(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
             }
-            .padding(.horizontal, 10)
-            .frame(height: 28)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
             .background {
                 Capsule(style: .continuous)
                     .fill(selected ? BashXTheme.accentSoft(for: appearance) : BashXTheme.card(for: appearance))
             }
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(selected ? BashXTheme.accent(for: appearance).opacity(0.45) : BashXTheme.separator(for: appearance), lineWidth: selected ? 1 : 0.5)
+                    .strokeBorder(selected ? BashXTheme.accent(for: appearance).opacity(0.40) : BashXTheme.separator(for: appearance), lineWidth: selected ? 1 : 0.5)
             )
         }
         .buttonStyle(PanelPressButtonStyle())
@@ -1343,13 +1898,13 @@ struct MainView: View {
     private var subscriptionsPane: some View {
         PanelSubscriptionsHost(state: state) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     subscriptionsHeader
 
                     if state.settings.subscriptions.isEmpty {
                         subscriptionsEmptyState
                     } else {
-                        LazyVStack(spacing: 10) {
+                        LazyVStack(spacing: 8) {
                             ForEach(state.settings.subscriptions) { sub in
                                 SubscriptionManageCard(
                                     subscriptionId: sub.id,
@@ -1360,20 +1915,20 @@ struct MainView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
             .transaction { $0.animation = nil }
         }
     }
 
     private var subscriptionsHeader: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("订阅")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
                 Text("\(state.settings.subscriptions.filter(\.enabled).count)/\(state.settings.subscriptions.count) 启用 · 勾选左侧可多选合并")
-                    .font(.system(size: 11, design: .rounded))
+                    .font(PanelMetrics.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
             Spacer()
@@ -1381,7 +1936,8 @@ struct MainView: View {
                 Task { await state.updateAllSubscriptions() }
             } label: {
                 Label(state.isBusy ? "更新中…" : "全部更新", systemImage: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(PanelMetrics.caption)
+                    .fontWeight(.semibold)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -1390,14 +1946,15 @@ struct MainView: View {
                 openAddSubscription()
             } label: {
                 Label("添加订阅", systemImage: "plus")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(PanelMetrics.caption)
+                    .fontWeight(.semibold)
             }
             .controlSize(.small)
             .buttonStyle(.borderedProminent)
             .tint(BashXTheme.accent(for: appearance))
             .contentShape(Rectangle())
         }
-        .padding(.bottom, 2)
+        .padding(.bottom, 1)
     }
 
     private var subscriptionsEmptyState: some View {
@@ -1543,7 +2100,7 @@ private struct RulesEditorPane: View {
         var id: String { rawValue }
     }
 
-    @State private var layer: Layer = .prepend
+    @State private var layer: Layer = .base
     @State private var draft = ""
     @State private var prependDraft = ""
     @State private var ready = false
@@ -1766,11 +2323,11 @@ private struct PanelStatusLine: View {
         Group {
             if !text.isEmpty {
                 Text(text)
-                    .font(.caption)
+                    .font(PanelMetrics.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(minWidth: 60, maxWidth: 140, alignment: .trailing)
+                    .frame(minWidth: 48, maxWidth: 120, alignment: .trailing)
             }
         }
         .onAppear { text = state.statusText }
@@ -1795,33 +2352,33 @@ private struct PanelSidebarTraffic: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(downTint.opacity(appearance == .dark ? 0.28 : 0.16))
-                        .frame(width: 28, height: 28)
+                        .frame(width: 24, height: 24)
                     Image(systemName: "waveform.path.ecg")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(downTint)
                 }
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text("实时流量")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .font(PanelMetrics.body)
                     Text(live ? "点击查看监控" : "等待内核连接")
-                        .font(.system(size: 9, design: .rounded))
+                        .font(PanelMetrics.micro)
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                 }
                 Spacer(minLength: 0)
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Circle()
                         .fill(live ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
-                        .frame(width: 6, height: 6)
+                        .frame(width: 5, height: 5)
                     Text(live ? "LIVE" : "OFF")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
                         .foregroundStyle(live ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
                 .background {
                     Capsule(style: .continuous)
                         .fill(live
@@ -1829,9 +2386,11 @@ private struct PanelSidebarTraffic: View {
                               : BashXTheme.secondaryFill(for: appearance))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 9)
+            .padding(.top, 9)
+            .padding(.bottom, 6)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpenMonitor)
 
             TrafficChartView(
                 samples: panel.samples,
@@ -1841,49 +2400,66 @@ private struct PanelSidebarTraffic: View {
                 live: live,
                 style: .compact
             )
-            .frame(height: 88)
-            .padding(.horizontal, 10)
+            .frame(height: 72)
+            .padding(.horizontal, 8)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpenMonitor)
 
-            HStack(spacing: 10) {
-                Text("↓ \(panel.downMbps)/s · \(ByteFormat.size(panel.downTotal))")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(downTint)
-                    .lineLimit(1)
-                Text("↑ \(panel.upMbps)/s · \(ByteFormat.size(panel.upTotal))")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(upTint)
-                    .lineLimit(1)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    ratePill(symbol: "arrow.down", value: panel.downMbps, tint: downTint)
+                    ratePill(symbol: "arrow.up", value: panel.upMbps, tint: upTint)
+                }
+                TrafficSessionTotalsView(
+                    panel: panel,
+                    downTint: downTint,
+                    upTint: upTint,
+                    appearance: appearance,
+                    compact: true
+                )
+                .padding(.horizontal, 1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 9)
+            .padding(.top, 2)
+            .padding(.bottom, 8)
         }
         .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    downTint.opacity(live ? 0.35 : 0.12),
-                                    upTint.opacity(live ? 0.18 : 0.06),
+                                    downTint.opacity(live ? 0.28 : 0.10),
+                                    upTint.opacity(live ? 0.14 : 0.05),
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
-                            lineWidth: 1
+                            lineWidth: 0.8
                         )
                 )
-                .shadow(color: downTint.opacity(live ? 0.10 : 0.04), radius: 8, y: 2)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .onTapGesture(perform: onOpenMonitor)
-        .help("点击查看流量监控")
+        .help("点击查看流量监控；累积行双击重置")
         .transaction { $0.animation = nil }
+    }
+
+    private func ratePill(symbol: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .bold))
+            Text("\(value)/s")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .monospacedDigit()
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background {
+            Capsule(style: .continuous)
+                .fill(tint.opacity(appearance == .dark ? 0.16 : 0.10))
+        }
     }
 }
 
@@ -1924,6 +2500,12 @@ private struct PanelNodesHost<Content: View>: View {
         let _ = revision
         return content()
             .onReceive(state.$nodeListRevision.receive(on: RunLoop.main)) { _ in
+                revision &+= 1
+            }
+            .onReceive(state.$chromeRevision.receive(on: RunLoop.main)) { _ in
+                revision &+= 1
+            }
+            .onReceive(state.$hubModeRevision.receive(on: RunLoop.main)) { _ in
                 revision &+= 1
             }
             .onReceive(state.$isTesting.receive(on: RunLoop.main)) { _ in
@@ -2005,21 +2587,21 @@ private struct NodesCategoriesView: View {
                             if !collapsed.contains(group.key) {
                                 ForEach(Array(group.nodes.enumerated()), id: \.element.id) { idx, node in
                                     nodeRow(node, index: idx + 1)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 2)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 1)
                                         .contentShape(Rectangle())
                                         .onTapGesture { onSelect(node.name) }
                                 }
                             }
                         } header: {
                             categoryHeader(group)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 1)
                                 .background(BashXTheme.card(for: appearance))
                         }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 2)
             }
             .contextMenu {
                 Button("复制节点信息") { state.copySelectedProxyLine() }
@@ -2030,56 +2612,57 @@ private struct NodesCategoriesView: View {
 
     private var cardPane: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 6, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 5, pinnedViews: [.sectionHeaders]) {
                 ForEach(groups) { group in
                     Section {
                         if !collapsed.contains(group.key) {
                             LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 168, maximum: 280), spacing: 10)],
-                                spacing: 10
+                                columns: [GridItem(.adaptive(minimum: 156, maximum: 260), spacing: 8)],
+                                spacing: 8
                             ) {
                                 ForEach(group.nodes) { node in
                                     nodeCard(node, group: group)
                                 }
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 4)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 2)
                         }
                     } header: {
                         categoryHeader(group)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 2)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 1)
                             .background(BashXTheme.canvas(for: appearance))
                     }
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 4)
         }
     }
 
     private func categoryHeader(_ group: NodeCategory.Group) -> some View {
         let isCollapsed = collapsed.contains(group.key)
         let best = group.nodes.lazy.compactMap(\.delayMs).filter { $0 > 0 }.min()
-        return HStack(spacing: 8) {
+        return HStack(spacing: 6) {
             Button {
                 toggle(group.key)
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                        .frame(width: 10)
+                        .frame(width: 9)
                     Text(group.flag)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                     Text(group.title)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .font(PanelMetrics.caption)
+                        .fontWeight(.semibold)
                     Text("\(group.nodes.count)")
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                     Spacer(minLength: 4)
                     if let best {
                         Text("\(best) ms")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
                             .foregroundStyle(BashXTheme.delayColor(best, appearance: appearance))
                     }
                 }
@@ -2093,20 +2676,20 @@ private struct NodesCategoriesView: View {
                     await state.selectFastestNodeIfAvailable()
                 }
             } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     if state.isTesting && state.speedTestScopeKey == group.key {
                         ProgressView()
                             .controlSize(.small)
                     } else {
                         Image(systemName: "gauge.with.dots.needle.67percent")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                     }
                     Text(state.isTesting && state.speedTestScopeKey == group.key ? "测速中" : "测速")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
                 .background {
                     Capsule(style: .continuous)
                         .fill(BashXTheme.accent(for: appearance))
@@ -2116,7 +2699,7 @@ private struct NodesCategoriesView: View {
             .disabled(state.isTesting || group.nodes.isEmpty)
             .help("仅测速「\(group.title)」分组（\(group.nodes.count) 个节点）")
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
     }
 
     private func nodeCard(_ node: ProxyNode, group: NodeCategory.Group) -> some View {
@@ -2127,23 +2710,23 @@ private struct NodesCategoriesView: View {
         return Button {
             onSelect(node.name)
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
                     Text(group.flag)
-                        .font(.system(size: 16))
-                        .frame(width: 22, alignment: .center)
+                        .font(.system(size: 14))
+                        .frame(width: 18, alignment: .center)
 
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(node.name)
-                            .font(.system(size: 12, weight: highlighted ? .semibold : .medium, design: .rounded))
-                            .foregroundStyle(.primary)
+                            .font(.system(size: 11, weight: highlighted ? .semibold : .medium, design: .rounded))
+                            .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .help(node.name)
                         Text(group.title)
-                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .font(PanelMetrics.micro)
                             .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                             .lineLimit(1)
                     }
@@ -2152,17 +2735,17 @@ private struct NodesCategoriesView: View {
                         ProgressView().controlSize(.small).scaleEffect(0.65)
                     } else if selected {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(BashXTheme.accent(for: appearance))
                     }
                 }
 
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Text(shortType(node.type))
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
                         .foregroundStyle(highlighted ? BashXTheme.accent(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
                         .background(
                             Capsule(style: .continuous)
                                 .fill(highlighted
@@ -2171,7 +2754,7 @@ private struct NodesCategoriesView: View {
                         )
                     Spacer(minLength: 0)
                     Text(delayText(delay))
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .monospacedDigit()
                         .foregroundStyle(
                             delay.map { BashXTheme.delayColor($0, appearance: appearance) }
@@ -2179,22 +2762,21 @@ private struct NodesCategoriesView: View {
                         )
                 }
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                     .fill(highlighted ? BashXTheme.accentSoft(for: appearance) : BashXTheme.card(for: appearance))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                             .strokeBorder(
                                 highlighted
-                                    ? BashXTheme.accent(for: appearance).opacity(0.45)
+                                    ? BashXTheme.accent(for: appearance).opacity(0.40)
                                     : BashXTheme.separator(for: appearance),
-                                lineWidth: highlighted ? 1.2 : 0.5
+                                lineWidth: highlighted ? 1 : 0.5
                             )
                     )
-                    .shadow(color: .black.opacity(highlighted ? 0.08 : 0.03), radius: highlighted ? 6 : 2, y: 1)
             }
         }
         .buttonStyle(PanelPressButtonStyle())

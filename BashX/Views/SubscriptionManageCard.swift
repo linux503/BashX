@@ -33,14 +33,14 @@ struct SubscriptionManageCard: View {
             if let info = sub.userInfo {
                 Divider().opacity(0.45)
                 SubscriptionTrafficBlock(info: info)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
             } else if sub.updatedAt != nil {
                 Text("未识别流量 · 点更新")
-                    .font(.caption2)
+                    .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
             }
 
             if showActions {
@@ -49,10 +49,10 @@ struct SubscriptionManageCard: View {
             }
         }
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                         .strokeBorder(
                             sub.enabled ? accent.opacity(onlyThisEnabled ? 0.32 : 0.18) : BashXTheme.separator(for: appearance),
                             lineWidth: sub.enabled ? 1 : 0.5
@@ -77,7 +77,7 @@ struct SubscriptionManageCard: View {
             } label: {
                 SubscriptionEnableControl(
                     enabled: sub.enabled,
-                    size: 32,
+                    size: 28,
                     emphasized: onlyThisEnabled
                 )
             }
@@ -100,8 +100,8 @@ struct SubscriptionManageCard: View {
                 statusCaption
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
     }
 
     @ViewBuilder
@@ -209,8 +209,8 @@ struct SubscriptionManageCard: View {
             }
             .menuStyle(.borderlessButton)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
     }
 
     @ViewBuilder

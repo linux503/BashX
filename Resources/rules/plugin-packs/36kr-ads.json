@@ -1,0 +1,18 @@
+{
+  "id": "36kr-ads",
+  "name": "36氪去广告",
+  "summary": "规则拦截开屏、信息流与广告网关域名。",
+  "tag": "去广告",
+  "symbol": "newspaper.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,gateway-ad.36kr.com,REJECT",
+    "DOMAIN,adx.36kr.com,REJECT",
+    "DOMAIN,adapi.36kr.com,REJECT",
+    "DOMAIN-SUFFIX,partner.36kr.com,REJECT",
+    "DOMAIN-SUFFIX,36krcnd.com,REJECT",
+    "DOMAIN-KEYWORD,36kr-ad,REJECT",
+    "DOMAIN-KEYWORD,adapi.36kr,REJECT",
+    "DOMAIN-KEYWORD,36kr.ad,REJECT"
+  ]
+}

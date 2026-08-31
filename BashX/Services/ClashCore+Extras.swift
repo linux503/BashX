@@ -151,6 +151,7 @@ extension ClashCore {
     }
 
     /// Prefer one-time privileged helper; fall back to legacy per-launch osascript.
+    /// Tahoe: helper install may fail (Gatekeeper / bootstrap) — still open TUN via password once.
     static func startElevated(binary: String, configDir: URL) throws {
         try validateElevatedBinary(binary)
 
@@ -160,22 +161,20 @@ extension ClashCore {
             return
         } catch let error as TunPrivilege.PrivilegeError {
             switch error {
-            case .helperMissingInApp:
-                // Dev builds without embedded helper — fall through to legacy.
+            case .installCancelled:
+                throw error
+            case .helperMissingInApp, .installFailed, .notReady:
+                // Dev builds / Tahoe Gatekeeper — fall through to legacy osascript.
                 break
             case .startFailed(let msg)
                 where msg.contains("非法配置目录")
                     || msg.contains("参数不足")
                     || msg.contains("内核完整性")
-                    || msg.contains("非法内核路径"):
-                // Protocol / helper mismatch — try legacy osascript once before surfacing.
-                do {
-                    try startElevatedLegacyOsascript(binary: binary, configDir: configDir)
-                    return
-                } catch {
-                    throw error
-                }
-            case .installCancelled, .installFailed, .startFailed, .notReady:
+                    || msg.contains("非法内核路径")
+                    || msg.contains("未授权")
+                    || msg.contains("助手无响应"):
+                break
+            case .startFailed:
                 throw error
             }
         } catch {

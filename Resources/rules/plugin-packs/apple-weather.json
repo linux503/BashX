@@ -1,0 +1,15 @@
+{
+  "id": "apple-weather",
+  "name": "Apple天气增强",
+  "summary": "WeatherKit / 天气数据走代理，便于完整天气内容。",
+  "tag": "增强",
+  "symbol": "cloud.sun.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN-SUFFIX,weatherkit.apple.com,PROXY",
+    "DOMAIN-SUFFIX,weather-data.apple.com,PROXY",
+    "DOMAIN,weather-data.apple.com,PROXY",
+    "DOMAIN-SUFFIX,weather.apple.com,PROXY",
+    "DOMAIN,weather-data.apple.com.akadns.net,PROXY"
+  ]
+}

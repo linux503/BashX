@@ -1,0 +1,18 @@
+{
+  "id": "soda-ads",
+  "name": "汽水音乐去广告",
+  "summary": "规则拦截开屏与穿山甲/广告 SDK 域名。",
+  "tag": "去广告",
+  "symbol": "music.note",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,adapi.qishui.com,REJECT",
+    "DOMAIN,ad.qishui.com,REJECT",
+    "DOMAIN,ads.qishui.com,REJECT",
+    "DOMAIN,pangolin.snssdk.com,REJECT",
+    "DOMAIN-SUFFIX,pangolin-sdk-toutiao.com,REJECT",
+    "DOMAIN-SUFFIX,pangle.io,REJECT",
+    "DOMAIN-KEYWORD,qishui-ad,REJECT",
+    "DOMAIN-KEYWORD,qishui.ad,REJECT"
+  ]
+}

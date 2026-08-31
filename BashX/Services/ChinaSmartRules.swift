@@ -2,7 +2,7 @@ import Foundation
 
 enum ChinaSmartRules {
     /// Bump when bundled rule set changes so existing installs auto-upgrade.
-    static let version = 28
+    static let version = 34
 
     /// Published rules list (also shipped at Resources/rules/bashx-smart-rules.txt).
     static let rules: [String] = loadBundledRules()
@@ -89,7 +89,9 @@ enum ChinaSmartRules {
         // v19: Shadowrocket-Rules inspired — AI sticky + Apple Push proxy + HK banks/brokers
         if !rules.contains(where: { $0.contains(",CURSOR") || $0.contains("cursor.sh") }) { return true }
         if !rules.contains(where: { $0.contains("hsbc.com.hk") }) { return true }
-        if !rules.contains(where: { $0.contains("push.apple.com,PROXY") }) { return true }
+        if !rules.contains(where: {
+            $0.contains("push.apple.com,APNS") || $0.contains("push.apple.com,PROXY")
+        }) { return true }
         // v20: Cursor Electron helpers + CDN/VM must stick to CURSOR (not PROXY/AUTO thrash)
         if !rules.contains(where: { $0.contains("Cursor Helper") }) { return true }
         if !rules.contains(where: { $0.contains("cursor-cdn.com") }) { return true }
@@ -112,6 +114,19 @@ enum ChinaSmartRules {
         if !rules.contains(where: { $0.contains("wikipedia.org,PROXY") }) { return true }
         // v28: force rewrite — prior builds re-injected GEOSITE/PROCESS into iOS yaml (core start fail)
         if (storedVersion ?? 0) < 28 { return true }
+        // v29: drop Cursor PROCESS-NAME hijack (forces all IDE egress via US sticky → busy/broken)
+        if rules.contains(where: {
+            let u = $0.uppercased()
+            return u.hasPrefix("PROCESS-NAME,CURSOR") || u.hasPrefix("PROCESS-PATH,*CURSOR")
+        }) { return true }
+        if (storedVersion ?? 0) < 29 { return true }
+        // v30: APNs via dedicated APNS group + Apple push CIDRs (fix DIRECT 17.249 conflict)
+        if !rules.contains(where: { $0.contains("push.apple.com,APNS") }) { return true }
+        if !rules.contains(where: { $0.contains("17.249.0.0/16,APNS") }) { return true }
+        if (storedVersion ?? 0) < 30 { return true }
+        // v31: Asia-first APNS + APNs IPv6 CIDRs (avoid US PROXY pin / Happy-Eyeballs stall)
+        if !rules.contains(where: { $0.contains("2620:149:a44::/48,APNS") || $0.contains("IP-CIDR6,2620:149:a44::/48,APNS") }) { return true }
+        if (storedVersion ?? 0) < 31 { return true }
         return false
     }
 

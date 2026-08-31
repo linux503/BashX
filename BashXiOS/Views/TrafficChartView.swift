@@ -2,6 +2,7 @@ import SwiftUI
 
 struct IOSTrafficChart: View {
     @EnvironmentObject private var state: IOSAppState
+    @Environment(\.colorScheme) private var colorScheme
     let samples: [TrafficSample]
     let uploadRate: Int64
     let downloadRate: Int64
@@ -35,12 +36,16 @@ struct IOSTrafficChart: View {
         }
         .background {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(.ultraThinMaterial)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(IOSTheme.cardBackground.opacity(colorScheme == .dark ? 0.92 : 0.95))
+                )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(IOSTheme.cardStroke, lineWidth: 0.5)
+                        .strokeBorder(IOSTheme.cardStroke, lineWidth: colorScheme == .dark ? 0.8 : 0.5)
                 )
-                .shadow(color: .black.opacity(0.04), radius: 12, y: 4)
+                .shadow(color: IOSTheme.cardShadow, radius: colorScheme == .dark ? 18 : 12, y: 4)
         }
     }
 
@@ -80,30 +85,10 @@ struct IOSTrafficChart: View {
     private var chartWell: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.93, green: 0.97, blue: 1.0),
-                            Color(red: 0.88, green: 0.94, blue: 0.99),
-                            Color(red: 0.91, green: 0.96, blue: 0.95),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(IOSTheme.trafficWellFill(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.55, green: 0.78, blue: 0.98).opacity(0.45),
-                                    Color(red: 0.45, green: 0.85, blue: 0.80).opacity(0.25),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
+                        .strokeBorder(IOSTheme.trafficWellStroke(for: colorScheme), lineWidth: 1)
                 )
 
             if samples.count > 1 {
@@ -113,7 +98,7 @@ struct IOSTrafficChart: View {
             } else {
                 Text(isLive ? t("traffic.wait") : t("traffic.none"))
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(Color(red: 0.35, green: 0.48, blue: 0.58).opacity(0.75))
+                    .foregroundStyle(IOSTheme.trafficEmptyLabel(for: colorScheme))
             }
         }
     }
@@ -145,7 +130,11 @@ struct IOSTrafficChart: View {
         .padding(.vertical, 6)
         .background(
             Capsule(style: .continuous)
-                .fill(color.opacity(0.12))
+                .fill(color.opacity(colorScheme == .dark ? 0.20 : 0.12))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(color.opacity(colorScheme == .dark ? 0.35 : 0), lineWidth: 0.6)
+                )
         )
     }
 
@@ -160,6 +149,7 @@ struct IOSTrafficChart: View {
 }
 
 private struct LiveBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
     @State private var pulse = false
 
     var body: some View {
@@ -168,13 +158,14 @@ private struct LiveBadge: View {
                 .fill(IOSTheme.good)
                 .frame(width: 5, height: 5)
                 .opacity(pulse ? 1 : 0.45)
+                .shadow(color: IOSTheme.good.opacity(colorScheme == .dark ? 0.7 : 0), radius: pulse ? 4 : 2)
             Text("LIVE")
                 .font(.system(size: 8, weight: .bold, design: .rounded))
                 .foregroundStyle(IOSTheme.good)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(Capsule().fill(IOSTheme.good.opacity(0.12)))
+        .background(Capsule().fill(IOSTheme.good.opacity(colorScheme == .dark ? 0.18 : 0.12)))
         .onAppear {
             withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
                 pulse = true
@@ -184,6 +175,7 @@ private struct LiveBadge: View {
 }
 
 private struct TrafficSparkline: View {
+    @Environment(\.colorScheme) private var colorScheme
     let samples: [TrafficSample]
     let peak: Int64
 
@@ -195,15 +187,15 @@ private struct TrafficSparkline: View {
             ZStack {
                 grid(in: geo.size)
                 smoothArea(values: downs, maxV: maxV, size: geo.size, colors: [
-                    IOSTheme.chartDown.opacity(0.5),
-                    IOSTheme.chartDown.opacity(0.05),
+                    IOSTheme.chartDown.opacity(colorScheme == .dark ? 0.55 : 0.5),
+                    IOSTheme.chartDown.opacity(colorScheme == .dark ? 0.08 : 0.05),
                     Color.clear,
                 ])
                 smoothLine(values: downs, maxV: maxV, size: geo.size, color: IOSTheme.chartDown, width: 2.2)
                 tipDot(values: downs, maxV: maxV, size: geo.size, color: IOSTheme.chartDown)
 
                 smoothArea(values: ups, maxV: maxV, size: geo.size, colors: [
-                    IOSTheme.chartUp.opacity(0.28),
+                    IOSTheme.chartUp.opacity(colorScheme == .dark ? 0.38 : 0.28),
                     Color.clear,
                 ])
                 smoothLine(values: ups, maxV: maxV, size: geo.size, color: IOSTheme.chartUp, width: 1.8, dashed: true)
@@ -212,13 +204,14 @@ private struct TrafficSparkline: View {
     }
 
     private func grid(in size: CGSize) -> some View {
-        Canvas { ctx, sz in
+        let gridColor = IOSTheme.trafficGrid(for: colorScheme)
+        return Canvas { ctx, sz in
             for i in 1..<3 {
                 let y = sz.height * CGFloat(i) / 3
                 var path = Path()
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: sz.width, y: y))
-                ctx.stroke(path, with: .color(Color(red: 0.45, green: 0.62, blue: 0.78).opacity(0.18)), lineWidth: 0.6)
+                ctx.stroke(path, with: .color(gridColor), lineWidth: 0.6)
             }
         }
     }
@@ -230,7 +223,7 @@ private struct TrafficSparkline: View {
             Circle()
                 .fill(color)
                 .frame(width: 6, height: 6)
-                .shadow(color: color.opacity(0.6), radius: 4)
+                .shadow(color: color.opacity(colorScheme == .dark ? 0.85 : 0.6), radius: 4)
                 .position(pt)
         }
     }
@@ -258,7 +251,7 @@ private struct TrafficSparkline: View {
                     dash: dashed ? [4, 3] : []
                 )
             )
-            .shadow(color: color.opacity(dashed ? 0.1 : 0.35), radius: 4)
+            .shadow(color: color.opacity(dashed ? 0.15 : (colorScheme == .dark ? 0.5 : 0.35)), radius: 4)
     }
 
     private func point(at i: Int, values: [Int64], maxV: Int64, size: CGSize) -> CGPoint {

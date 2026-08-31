@@ -6,7 +6,7 @@
 #   → signed + notarized (double-click open on other Macs)
 #
 # Without Developer ID (current machine):
-#   → ad-hoc sign + 「一键解锁并打开」助手（其他电脑首次需右键打开助手一次）
+#   → ad-hoc sign + 「安装.command」（其他电脑首次需右键打开安装脚本）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,7 +44,7 @@ echo "  Sign identity: $SIGN_ID"
 if [[ "$USE_DEV_ID" -eq 1 ]]; then
   echo "  Mode: Developer ID (can notarize)"
 else
-  echo "  Mode: ad-hoc（其他电脑需用 DMG 内「一键解锁」；要免此步骤请在 Xcode 创建 Developer ID 证书）"
+  echo "  Mode: ad-hoc（其他电脑用「安装.command」；要免此步骤请创建 Developer ID 证书）"
 fi
 
 cd "$ROOT"
@@ -137,73 +137,67 @@ codesign --verify --deep --strict --verbose=2 "$STAGE/BashX.app" 2>&1 | tail -10
   echo "WARN: codesign verify reported issues (continuing)"
 }
 
-echo "[4/6] Install helper + 说明…"
-# AppleScript .app — one-click install (copy + quarantine + icon cache + launch).
-HELPER_SCRIPT="$STAGE/_install.applescript"
-cat > "$HELPER_SCRIPT" <<'APPLESCRIPT'
-on run
-  set appsPath to "/Applications/BashX.app"
-  set myPOSIX to POSIX path of (path to me)
-  set parentPOSIX to do shell script "dirname " & quoted form of myPOSIX
-  set dmgApp to parentPOSIX & "/BashX.app"
+echo "[4/6] Install helper…"
+# DMG keeps only: BashX.app + Applications + 安装.command
+cat > "$STAGE/安装.command" <<'UNLOCK'
+#!/bin/bash
+# BashX unlock + install (ad-hoc builds / Gatekeeper).
+set -euo pipefail
+cd "$(dirname "$0")"
+SRC="$(pwd)/BashX.app"
+DST="/Applications/BashX.app"
 
-  try
-    do shell script "mkdir -p /Applications"
-  end try
+echo ""
+echo "════════════════════════════════════"
+echo "  BashX 安装"
+echo "════════════════════════════════════"
+echo ""
 
-  if (do shell script "[ -d " & quoted form of dmgApp & " ] && echo 1 || echo 0") is "1" then
-    try
-      do shell script "osascript -e 'tell application \"BashX\" to quit' 2>/dev/null || true"
-    end try
-    do shell script "sleep 0.4"
-    do shell script "rm -rf " & quoted form of appsPath & "; ditto " & quoted form of dmgApp & " " & quoted form of appsPath
-  else if (do shell script "[ -d " & quoted form of appsPath & " ] && echo 1 || echo 0") is not "1" then
-    display dialog "未找到 BashX.app。请确认 DMG 已打开，且本助手与 BashX 在同一窗口。" buttons {"好"} default button 1 with icon stop
-    return
-  end if
+if [[ ! -d "$SRC" ]]; then
+  echo "❌ 未找到 BashX.app，请先打开 DMG 再运行本脚本。"
+  read -r -p "按回车关闭…" _
+  exit 1
+fi
 
-  -- Gatekeeper quarantine + Finder/Dock icon cache
-  do shell script "xattr -cr " & quoted form of appsPath & " 2>/dev/null || true"
-  do shell script "touch " & quoted form of appsPath
-  do shell script "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f " & quoted form of appsPath & " 2>/dev/null || true"
-  do shell script "killall Dock 2>/dev/null || true"
+osascript -e 'tell application "BashX" to quit' >/dev/null 2>&1 || true
+sleep 0.4
 
-  try
-    do shell script "open " & quoted form of appsPath
-  end try
+echo "将请求管理员密码：复制到应用程序并清除隔离标记…"
+sudo /bin/bash -c "
+set -e
+rm -rf '$DST'
+/usr/bin/ditto '$SRC' '$DST'
+/usr/bin/xattr -cr '$DST' 2>/dev/null || true
+/usr/bin/find '$DST' -exec /usr/bin/xattr -c {} \; 2>/dev/null || true
+/usr/bin/xattr -dr com.apple.quarantine '$DST' 2>/dev/null || true
+/usr/bin/xattr -dr com.apple.provenance '$DST' 2>/dev/null || true
+/usr/bin/xattr -dr com.apple.macl '$DST' 2>/dev/null || true
+/usr/bin/codesign --force --deep --sign - '$DST' 2>/dev/null || true
+/usr/bin/touch '$DST'
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f '$DST' 2>/dev/null || true
+echo OK
+"
 
-  display dialog "✅ BashX 已安装到「应用程序」
+echo ""
+echo "正在启动…"
+if /usr/bin/open "$DST" 2>/dev/null; then
+  echo "✅ 已安装并打开。"
+else
+  nohup "$DST/Contents/MacOS/BashX" >/tmp/bashx-launch.log 2>&1 &
+  sleep 1
+  if pgrep -x BashX >/dev/null 2>&1; then
+    echo "✅ BashX 已在后台运行（看菜单栏图标）。"
+  else
+    echo "❌ 仍无法启动。终端粘贴："
+    echo "   xattr -cr /Applications/BashX.app && open /Applications/BashX.app"
+  fi
+fi
 
-• 图标已刷新（黄底 X）
-• 若仍提示无法打开：系统设置 → 隐私与安全性 → 仍要打开
-
-也可手动把 BashX 拖到「应用程序」文件夹。" buttons {"好"} default button 1 with icon note
-end run
-APPLESCRIPT
-
-osacompile -o "$STAGE/安装 BashX.app" "$HELPER_SCRIPT" >/dev/null
-rm -f "$HELPER_SCRIPT"
-codesign --force --deep --sign - "$STAGE/安装 BashX.app" 2>/dev/null || true
-
-cat > "$STAGE/使用说明.txt" <<EOF
-BashX ${VERSION} — 安装说明
-══════════════════════════════════════
-
-【推荐】双击「安装 BashX」
-  → 自动复制到应用程序、解除隔离、刷新 Dock 图标并启动
-
-【或】把 BashX 拖到右侧「Applications」文件夹
-  → 首次若打不开，再双击「安装 BashX」
-
-──────────────────────────────────────
-提示「已损坏 / 无法打开」？
-  系统设置 → 隐私与安全性 → 仍要打开
-  或终端：xattr -cr /Applications/BashX.app
-EOF
-
-# Legacy helper name (same script) for old docs / muscle memory.
-ditto "$STAGE/安装 BashX.app" "$STAGE/一键解锁并打开.app"
-codesign --force --deep --sign - "$STAGE/一键解锁并打开.app" 2>/dev/null || true
+echo ""
+read -r -p "按回车关闭窗口…" _
+UNLOCK
+chmod +x "$STAGE/安装.command"
+xattr -c "$STAGE/安装.command" 2>/dev/null || true
 
 echo "[5/6] Create DMG…"
 mkdir -p "$DIST"
@@ -242,9 +236,10 @@ echo ""
 echo "Done: $DMG"
 ls -lh "$DMG"
 echo ""
+echo "  DMG 内容: BashX.app + Applications + 安装.command"
 if [[ "$USE_DEV_ID" -eq 1 && -n "$NOTARY_PROFILE" ]]; then
   echo "发给别人后应可直接打开。"
 else
-  echo "发给别人时请说明：右键「一键解锁并打开」→ 打开。"
+  echo "发给别人时请说明：右键「安装.command」→ 打开（输入密码）。"
   echo "要彻底免此步骤：Xcode → Settings → Accounts → Manage Certificates → + → Developer ID Application"
 fi

@@ -17,6 +17,23 @@ enum AppLanguage: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// Compact chip title for settings language switcher.
+    var shortTitle: String {
+        switch self {
+        case .system: return "系统"
+        case .zh: return "中文"
+        case .en: return "EN"
+        }
+    }
+
+    var hint: String {
+        switch self {
+        case .system: return L10n.t("lang.hint.system", self)
+        case .zh: return L10n.t("lang.hint.zh", self)
+        case .en: return L10n.t("lang.hint.en", self)
+        }
+    }
+
     /// Resolved catalog code used by `L10n`.
     var code: String {
         switch self {
@@ -67,6 +84,18 @@ enum L10n {
 
         // Language
         "lang.title": ["zh": "语言", "en": "Language"],
+        "lang.hint.system": [
+            "zh": "界面文字跟随手机系统语言。",
+            "en": "Follow the system language.",
+        ],
+        "lang.hint.zh": [
+            "zh": "界面固定为简体中文。",
+            "en": "Use Simplified Chinese.",
+        ],
+        "lang.hint.en": [
+            "zh": "界面固定为 English。",
+            "en": "Use English.",
+        ],
         "lang.footer": [
             "zh": "切换后界面立即生效。",
             "en": "UI updates immediately after switching.",
@@ -79,9 +108,10 @@ enum L10n {
         "proxy.rule": ["zh": "规则", "en": "Rule"],
         "proxy.global": ["zh": "全局", "en": "Global"],
         "proxy.direct": ["zh": "直连", "en": "Direct"],
-        "proxy.rule.sub": ["zh": "按规则分流：国内直连，国外走代理", "en": "Route by rules: domestic direct, foreign via proxy"],
-        "proxy.global.sub": ["zh": "全部流量走当前节点（忽略规则）", "en": "All traffic via current node (ignore rules)"],
-        "proxy.direct.sub": ["zh": "全部流量直连，不走代理", "en": "All traffic direct, no proxy"],
+        "proxy.rule.sub": ["zh": "按规则路由数据包（推荐）", "en": "Route packets by rules (recommended)"],
+        "proxy.global.sub": ["zh": "全部数据包转发到同一端点", "en": "Forward all packets to one endpoint"],
+        "proxy.direct.sub": ["zh": "直接转发到互联网，不经代理", "en": "Forward directly to the internet"],
+        "proxy.outbound": ["zh": "出站模式", "en": "Outbound Mode"],
 
         // Appearance / nodes
         "appearance.light": ["zh": "浅色", "en": "Light"],
@@ -93,6 +123,9 @@ enum L10n {
         "dns.smart": ["zh": "智能分流", "en": "Smart"],
         "dns.domestic": ["zh": "国内优选", "en": "Domestic"],
         "dns.foreign": ["zh": "国外优选", "en": "Foreign"],
+        "dns.smart.short": ["zh": "智能", "en": "Smart"],
+        "dns.domestic.short": ["zh": "国内", "en": "CN"],
+        "dns.foreign.short": ["zh": "国外", "en": "Intl"],
         "dns.smart.sub": [
             "zh": "国内站走阿里/腾讯 DoH，国外站自动回落 Cloudflare/Google（默认）",
             "en": "CN sites use Ali/Tencent DoH; foreign falls back to Cloudflare/Google",
@@ -136,10 +169,19 @@ enum L10n {
         ],
         "ios.ondemand.on": ["zh": "已开启按需连接", "en": "Connect on Demand enabled"],
         "ios.ondemand.off": ["zh": "已关闭按需连接", "en": "Connect on Demand disabled"],
-        "ios.icon.hint": [
-            "zh": "专为手机主屏幕优化的 8 款图标。切换后桌面图标会立即更换；若仍是空白，请删掉 App 重装一次。",
-            "en": "8 home-screen icons. Changes apply immediately; if blank, delete and reinstall the app.",
+        "ios.tgpush.toggle": ["zh": "Telegram 消息推送", "en": "Telegram push"],
+        "ios.tgpush.hint": [
+            "zh": "开启后把苹果推送纳入 VPN（需已选节点）。系统会排除节点地址，避免无网；推送跟当前 PROXY。切换后会软重连。",
+            "en": "Routes Apple Push into the VPN (needs a selected node). The node address is excluded so browsing stays up; push follows PROXY. Soft-reconnects when toggled.",
         ],
+        "ios.tgpush.on": ["zh": "已开启 Telegram 消息推送", "en": "Telegram push enabled"],
+        "ios.tgpush.off": ["zh": "已关闭 Telegram 消息推送", "en": "Telegram push disabled"],
+        "ios.icon.hint": [
+            "zh": "6 款主屏幕图标。切换后立即生效；若图标空白，删掉 App 重装即可。",
+            "en": "6 Home Screen icons. Changes apply immediately; if blank, delete and reinstall the app.",
+        ],
+        "ios.icon.change": ["zh": "轻点更换", "en": "Tap to change"],
+        "ios.icon.current": ["zh": "当前使用", "en": "Currently using"],
         "ios.icon.unsupported": ["zh": "当前系统不支持更换图标", "en": "Alternate icons not supported on this system"],
 
         "ios.conn.status": ["zh": "连接", "en": "Status"],
@@ -174,6 +216,19 @@ enum L10n {
         "ios.routing.version": ["zh": "规则版本", "en": "Rules version"],
         "ios.routing.count": ["zh": "生效条数", "en": "Active rules"],
         "ios.routing.adblock": ["zh": "去广告", "en": "Ad Block"],
+        "plugin.market.title": ["zh": "插件市场", "en": "Plugin Market"],
+        "plugin.market.section": ["zh": "精选插件", "en": "Featured"],
+        "plugin.market.hint": [
+            "zh": "全部为 Clash 规则版（REJECT/分流），开启后请重连 VPN。",
+            "en": "All packs are Clash rules (REJECT/route). Reconnect VPN after enabling.",
+        ],
+        "plugin.market.enableAll": ["zh": "一键开启", "en": "Enable All"],
+        "plugin.market.disableAll": ["zh": "一键关闭", "en": "Disable All"],
+        "plugin.market.rules": ["zh": "%@ 条规则", "en": "%@ rules"],
+        "plugin.market.scriptNote": [
+            "zh": "原版依赖 MITM 脚本；当前已用规则覆盖主要域名",
+            "en": "Original needs MITM scripts; this pack covers key domains via rules",
+        ],
         "ios.routing.restore": ["zh": "恢复智能规则 v%@", "en": "Restore smart rules v%@"],
         "ios.routing.footer": [
             "zh": "去广告默认开启：视频站广告域、开屏 SDK、电商跳转广告域。规则模式：国内直连，谷歌/Telegram 等走代理。",
@@ -231,6 +286,14 @@ enum L10n {
         "groups.needVpn": ["zh": "请先连接 VPN", "en": "Connect VPN first"],
         "groups.refresh": ["zh": "刷新", "en": "Refresh"],
         "home.quick": ["zh": "快捷控制", "en": "Quick actions"],
+        "home.quickHint": ["zh": "DNS · 测速 · 重连 · 站点", "en": "DNS · Speed · Reconnect · Sites"],
+        "home.quickOpenHint": ["zh": "点按收起", "en": "Tap to collapse"],
+        "home.quick.dns": ["zh": "DNS 偏好", "en": "DNS preference"],
+        "home.quick.actions": ["zh": "常用操作", "en": "Actions"],
+        "home.quick.reconnect": ["zh": "重连", "en": "Reconnect"],
+        "home.quick.update": ["zh": "更新", "en": "Update"],
+        "home.quick.groups": ["zh": "策略", "en": "Groups"],
+        "home.quick.subs": ["zh": "订阅", "en": "Subs"],
         "home.test": ["zh": "测速", "en": "Test"],
         "home.fastest": ["zh": "最快", "en": "Fastest"],
         "home.nodes": ["zh": "节点", "en": "Nodes"],
@@ -273,22 +336,28 @@ enum L10n {
         "subs.updating": ["zh": "更新中…", "en": "Updating…"],
         "subs.updateOne": ["zh": "更新此订阅", "en": "Update this"],
         "subs.copyLink": ["zh": "复制链接", "en": "Copy link"],
+        "subs.urlHidden": ["zh": "连接 URL 已隐藏 · 点击显示", "en": "URL hidden · tap to show"],
+        "subs.urlShown": ["zh": "点击隐藏连接 URL", "en": "Tap to hide URL"],
         "subs.qrShare": ["zh": "二维码分享", "en": "Share QR"],
         "subs.shareLink": ["zh": "分享链接", "en": "Share link"],
+        "subs.rename": ["zh": "修改备注", "en": "Edit name"],
+        "subs.renameTitle": ["zh": "修改备注", "en": "Edit name"],
+        "subs.renamePlaceholder": ["zh": "订阅备注名称", "en": "Subscription name"],
+        "subs.renameSave": ["zh": "保存", "en": "Save"],
         "subs.nameOptional": ["zh": "名称（可选）", "en": "Name (optional)"],
         "subs.url": ["zh": "订阅 URL", "en": "Subscription URL"],
         "subs.formHint": [
-            "zh": "支持 Clash YAML 与 Base64 节点列表。",
-            "en": "Supports Clash YAML and Base64 node lists.",
+            "zh": "支持 Clash YAML、Base64 节点列表，以及 Base64 / sub:// 编码的订阅链接（扫码可用）。",
+            "en": "Supports Clash YAML, Base64 node lists, and Base64 / sub:// encoded subscription URLs (QR scan).",
+        ],
+        "subs.scan.hint": [
+            "zh": "对准机场订阅二维码。支持普通链接、Base64 链接、sub:// 等格式。",
+            "en": "Point at a subscription QR. Supports plain URLs, Base64 links, and sub://.",
         ],
         "subs.paste": ["zh": "从剪贴板粘贴", "en": "Paste from clipboard"],
         "subs.scan": ["zh": "扫码添加", "en": "Scan QR code"],
         "subs.addManual": ["zh": "手动输入链接", "en": "Enter URL manually"],
         "subs.scan.title": ["zh": "扫描订阅二维码", "en": "Scan subscription QR"],
-        "subs.scan.hint": [
-            "zh": "将订阅二维码放入取景框，识别后会自动填入链接",
-            "en": "Align the subscription QR code; the URL fills in automatically",
-        ],
         "subs.scan.noCamera.title": ["zh": "无法使用相机", "en": "Camera unavailable"],
         "subs.scan.noCamera.msg": [
             "zh": "请在「设置 → BashX → 相机」中允许访问，或改用手动输入链接。",
@@ -309,6 +378,9 @@ enum L10n {
         "traffic.none": ["zh": "暂无数据", "en": "No data"],
         "traffic.down": ["zh": "下行", "en": "Down"],
         "traffic.up": ["zh": "上行", "en": "Up"],
+        "traffic.total": ["zh": "累积", "en": "Total"],
+        "traffic.totalHint": ["zh": "双击重置", "en": "Double-click to reset"],
+        "traffic.resetDone": ["zh": "累积流量已重置", "en": "Session totals reset"],
 
         // Connect control
         "connect.protected": ["zh": "已保护", "en": "Protected"],
@@ -428,6 +500,21 @@ enum L10n {
 
         // Mac menu bar
         "mac.menu.openPanel": ["zh": "打开面板", "en": "Open Panel"],
+        "mac.minimal.connect": ["zh": "连接", "en": "Connect"],
+        "mac.minimal.disconnect": ["zh": "断开", "en": "Disconnect"],
+        "mac.minimal.connecting": ["zh": "连接中…", "en": "Connecting…"],
+        "mac.minimal.protected": ["zh": "已连接 · 流量受保护", "en": "Connected · protected"],
+        "mac.minimal.ready": ["zh": "一键连接 · 智能分流", "en": "One-tap connect"],
+        "mac.minimal.needSub": ["zh": "请先添加订阅", "en": "Add a subscription first"],
+        "mac.minimal.addSub": ["zh": "添加订阅", "en": "Add subscription"],
+        "mac.minimal.updateSub": ["zh": "更新订阅", "en": "Update subscriptions"],
+        "mac.minimal.toFull": ["zh": "切换完整版", "en": "Full panel"],
+        "mac.minimal.toSimple": ["zh": "切换极简版", "en": "Minimal"],
+        "mac.minimal.mode": ["zh": "极简", "en": "Simple"],
+        "mac.minimal.full": ["zh": "完整", "en": "Full"],
+        "mac.minimal.homeHint": ["zh": "手机同款首页 · 一键连接", "en": "Same as iPhone home"],
+        "mac.minimal.pickNode": ["zh": "选择节点", "en": "Choose node"],
+        "mac.minimal.noNode": ["zh": "未选择节点", "en": "No node selected"],
         "mac.menu.proxyMode": ["zh": "代理模式：%@", "en": "Mode: %@"],
         "mac.menu.strategyGroups": ["zh": "策略分组", "en": "Policy Groups"],
         "mac.menu.systemProxy": ["zh": "系统代理", "en": "System Proxy"],
@@ -484,6 +571,10 @@ enum L10n {
         "mac.nodes.hubFO.sub": ["zh": "断线自动切换", "en": "Fail over in order"],
         "mac.nodes.hubManual": ["zh": "手动选择", "en": "Manual"],
         "mac.nodes.hubManual.sub": ["zh": "自己点选节点", "en": "Pick a node yourself"],
+        "mac.nodes.hubManual.hint": [
+            "zh": "当前为手动选节点；点上方卡片可恢复智能/均衡/故障转移",
+            "en": "Manual node pick — tap a card to restore Smart / Balance / Failover",
+        ],
         "mac.nodes.speedAll": ["zh": "全部测速", "en": "Test all"],
         "mac.nodes.speedBig": ["zh": "测速", "en": "Test"],
         "mac.nodes.speedBigBusy": ["zh": "测速中…", "en": "Testing…"],
@@ -493,10 +584,23 @@ enum L10n {
         "mac.panel.subscriptions": ["zh": "订阅", "en": "Subs"],
         "mac.panel.monitor": ["zh": "监控", "en": "Monitor"],
         "mac.panel.rules": ["zh": "规则", "en": "Rules"],
-        "mac.panel.groups": ["zh": "策略组", "en": "Groups"],
+        "mac.panel.routing": ["zh": "分流", "en": "Routing"],
+        "mac.panel.groups": ["zh": "策略组", "en": "Policies"],
+        "mac.groups.seg.policies": ["zh": "策略", "en": "Groups"],
         "mac.groups.subtitle": [
-            "zh": "订阅原策略组 + 业务组（左名称 · 右当前选择），在此切换并立即生效",
-            "en": "Subscription + service groups (name · current); changes apply immediately",
+            "zh": "为网络请求选择策略组（左名称 · 右当前出站）。PROXY 选 AUTO/BALANCE/FALLBACK 即线路策略。",
+            "en": "Pick a policy group for requests (name · current). PROXY → AUTO/BALANCE/FALLBACK sets hub strategy.",
+        ],
+        "mac.groups.hubTitle": ["zh": "PROXY 线路策略", "en": "PROXY hub"],
+        "mac.groups.hubHint": [
+            "zh": "智能 / 均衡 / 故障转移会写入 PROXY；也可在下方策略组里手动切换",
+            "en": "Smart / Balance / Failover write into PROXY; or pick below in the group list",
+        ],
+        "mac.routing.apps": ["zh": "应用分流", "en": "Apps"],
+        "mac.routing.rules": ["zh": "域名规则", "en": "Rules"],
+        "mac.routing.subtitle": [
+            "zh": "应用走指定策略组；域名规则决定其余流量如何分流",
+            "en": "Apps → policy groups; domain rules cover the rest",
         ],
         "mac.groups.empty": ["zh": "内核未运行或暂无策略组", "en": "Core off or no groups yet"],
         "mac.groups.refresh": ["zh": "刷新策略组", "en": "Refresh groups"],
@@ -558,8 +662,8 @@ enum L10n {
         "mac.sec.proxyMode": ["zh": "代理模式", "en": "Proxy mode"],
         "mac.sec.systemProxy": ["zh": "系统代理", "en": "System proxy"],
         "mac.systemProxy.hint": [
-            "zh": "开启前会备份原有代理；关闭时自动恢复。指向 127.0.0.1:%@。",
-            "en": "Backs up existing proxy before enable; restores on disable. Points to 127.0.0.1:%@.",
+            "zh": "首次开启会要管理员密码（与 TUN 同一助手），之后可直接开关。指向 127.0.0.1:%@；关闭时自动恢复原代理。",
+            "en": "First enable asks for admin password (same helper as TUN). Points to 127.0.0.1:%@. Restores previous proxy on disable.",
         ],
         "mac.restoreProxy": ["zh": "恢复网络代理备份", "en": "Restore proxy backup"],
         "mac.closeConnOnSwitch": ["zh": "切节点时关闭连接", "en": "Close connections on switch"],
@@ -567,10 +671,10 @@ enum L10n {
             "zh": "切换节点后断开旧连接，避免流量仍走旧节点。",
             "en": "Drop old connections after switching nodes.",
         ],
-        "mac.tun": ["zh": "TUN 模式", "en": "TUN mode"],
+        "mac.tun": ["zh": "TUN 模式（推荐）", "en": "TUN mode (recommended)"],
         "mac.tun.hint": [
-            "zh": "增强模式，可接管更多流量。首次会安装 TUN 权限（输一次管理员密码），之后开关无需再输。",
-            "en": "Enhanced mode captures more traffic. First enable installs TUN helper (one admin password).",
+            "zh": "默认开启。Telegram 等 App 必须走 TUN，光开系统代理经常转圈。首次输一次管理员密码安装助手；若 Tahoe 装助手失败，会改用每次启动时输密码。",
+            "en": "On by default. Telegram needs TUN — system proxy alone often spins. First launch installs a helper (one admin password). On Tahoe, if helper install fails, each start may ask for the password instead.",
         ],
         "mac.httpSubs": ["zh": "允许不安全 HTTP 订阅", "en": "Allow insecure HTTP subscriptions"],
         "mac.httpSubs.hint": [

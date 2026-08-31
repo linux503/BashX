@@ -1,0 +1,25 @@
+{
+  "id": "pdd-ads",
+  "name": "拼多多去广告",
+  "summary": "规则拦截推广、埋点与广告素材域名。",
+  "tag": "去广告",
+  "symbol": "bag.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,titan.pinduoduo.com,REJECT",
+    "DOMAIN,xg.pinduoduo.com,REJECT",
+    "DOMAIN,cdl-1.pddpic.com,REJECT",
+    "DOMAIN,cdl-p2.pddpic.com,REJECT",
+    "DOMAIN,cd-1.pddpic.com,REJECT",
+    "DOMAIN,apm.pinduoduo.com,REJECT",
+    "DOMAIN,apm-a.pinduoduo.com,REJECT",
+    "DOMAIN,th-b.pinduoduo.com,REJECT",
+    "DOMAIN,ta.pinduoduo.com,REJECT",
+    "DOMAIN,th.pinduoduo.com,REJECT",
+    "DOMAIN,th-a.pinduoduo.com,REJECT",
+    "DOMAIN,ta-a.pinduoduo.com,REJECT",
+    "DOMAIN,meta.pinduoduo.com,REJECT",
+    "DOMAIN-KEYWORD,pdd-ad,REJECT",
+    "DOMAIN-KEYWORD,pinduoduo.ad,REJECT"
+  ]
+}

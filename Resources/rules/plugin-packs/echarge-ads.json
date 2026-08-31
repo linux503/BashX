@@ -1,0 +1,17 @@
+{
+  "id": "echarge-ads",
+  "name": "e充电去广告",
+  "summary": "规则拦截开屏与运营位广告域名。",
+  "tag": "去广告",
+  "symbol": "bolt.car.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,ad.eichong.com,REJECT",
+    "DOMAIN,ads.eichong.com,REJECT",
+    "DOMAIN,adapi.eichong.com,REJECT",
+    "DOMAIN,advert.eichong.com,REJECT",
+    "DOMAIN-KEYWORD,eichong-ad,REJECT",
+    "DOMAIN-KEYWORD,echarge-ad,REJECT",
+    "DOMAIN-KEYWORD,eichong.ad,REJECT"
+  ]
+}

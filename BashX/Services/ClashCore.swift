@@ -171,7 +171,7 @@ enum ClashCore {
 
         var byName: [String: ProxyGroupInfo] = [:]
         for (name, value) in proxies {
-            if AppConstants.hiddenProxyGroupNames.contains(name.uppercased()) { continue }
+            if AppConstants.isInternalProxyGroupName(name) { continue }
             guard let dict = value as? [String: Any],
                   let type = dict["type"] as? String,
                   AppConstants.selectableProxyGroupTypes.contains(type) else { continue }

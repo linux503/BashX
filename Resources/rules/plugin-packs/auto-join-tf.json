@@ -1,0 +1,13 @@
+{
+  "id": "auto-join-tf",
+  "name": "自动加入TestFlight",
+  "summary": "TestFlight 相关域名走代理，便于访问与加入测试。",
+  "tag": "工具",
+  "symbol": "airplane.departure",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN-SUFFIX,testflight.apple.com,PROXY",
+    "DOMAIN,testflight.apple.com,PROXY",
+    "DOMAIN-SUFFIX,beta.itunes.apple.com,PROXY"
+  ]
+}

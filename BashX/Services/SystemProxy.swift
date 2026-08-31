@@ -17,6 +17,9 @@ struct SavedProxySnapshot: Codable, Equatable {
 enum SystemProxy {
     private static let snapshotURL = Paths.supportDir.appendingPathComponent("proxy-backup.json")
 
+    /// Last elevated-proxy error for UI (password cancel / helper failure).
+    private(set) static var lastError: String?
+
     /// ClashX-style LAN / loopback bypass when system proxy is on.
     private static let bypassDomains = [
         "localhost",
@@ -45,15 +48,29 @@ enum SystemProxy {
     }
 
     /// Enable BashX proxy after saving prior settings; disable restores the backup.
-    /// Prefer `setEnabledAsync` from UI — `networksetup` can take hundreds of ms per service.
-    static func setEnabled(_ enabled: Bool, host: String = "127.0.0.1", port: Int) {
+    /// - Parameter allowPrivilegePrompt: only `true` for explicit UI toggles.
+    ///   Background auto-apply must NOT pop the admin password sheet on every launch.
+    static func setEnabled(
+        _ enabled: Bool,
+        host: String = "127.0.0.1",
+        port: Int,
+        allowPrivilegePrompt: Bool = false
+    ) {
+        lastError = nil
         let services = listServices()
-        guard !services.isEmpty else { return }
+        guard !services.isEmpty else {
+            lastError = "无可用网络服务"
+            return
+        }
 
         if enabled {
             if loadSnapshot() == nil {
                 saveSnapshot(capture(services: services))
             }
+            if applyElevatedSet(host: host, port: port, allowPrompt: allowPrivilegePrompt) {
+                return
+            }
+            // Fallback: unprivileged (works on some admin sessions).
             for service in services {
                 _ = run("/usr/sbin/networksetup", ["-setwebproxy", service, host, "\(port)"])
                 _ = run("/usr/sbin/networksetup", ["-setsecurewebproxy", service, host, "\(port)"])
@@ -63,16 +80,31 @@ enum SystemProxy {
                 _ = run("/usr/sbin/networksetup", ["-setsocksfirewallproxystate", service, "on"])
                 applyBypass(for: service)
             }
+            if !isEnabled(port: port), lastError == nil {
+                lastError = allowPrivilegePrompt
+                    ? "系统代理写入失败（请在弹窗中输入管理员密码）"
+                    : "系统代理未授权（请在设置里手动开一次系统代理并输入密码）"
+            }
         } else {
-            restoreFromSnapshot(fallbackServices: services)
+            let snaps = loadSnapshot()
+            if applyElevatedOff(restore: snaps, allowPrompt: allowPrivilegePrompt) {
+                clearSnapshot()
+                return
+            }
+            restoreFromSnapshot(fallbackServices: services, allowPrivilegePrompt: allowPrivilegePrompt)
         }
     }
 
     /// Off-main-thread wrapper so toggles stay responsive.
     @discardableResult
-    static func setEnabledAsync(_ enabled: Bool, host: String = "127.0.0.1", port: Int) async -> Bool {
+    static func setEnabledAsync(
+        _ enabled: Bool,
+        host: String = "127.0.0.1",
+        port: Int,
+        allowPrivilegePrompt: Bool = false
+    ) async -> Bool {
         await Task.detached(priority: .userInitiated) {
-            setEnabled(enabled, host: host, port: port)
+            setEnabled(enabled, host: host, port: port, allowPrivilegePrompt: allowPrivilegePrompt)
             if enabled {
                 return isEnabled(port: port)
             }
@@ -80,17 +112,69 @@ enum SystemProxy {
         }.value
     }
 
+    // MARK: - Elevated (TunHelper root daemon)
+
+    private static func applyElevatedSet(host: String, port: Int, allowPrompt: Bool) -> Bool {
+        do {
+            try TunPrivilege.runProxyCommand("PROXY_SET|\(host)|\(port)", allowInstall: allowPrompt)
+            usleep(200_000)
+            return true
+        } catch let error as TunPrivilege.PrivilegeError {
+            // notReady without prompt is expected on cold launch — stay quiet.
+            if case .notReady = error, !allowPrompt {
+                return false
+            }
+            lastError = error.errorDescription
+            return false
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
+    private static func applyElevatedOff(restore snaps: [SavedProxySnapshot]?, allowPrompt: Bool) -> Bool {
+        do {
+            if let snaps, !snaps.isEmpty,
+               let data = try? JSONEncoder().encode(snaps) {
+                let b64 = data.base64EncodedString()
+                try TunPrivilege.runProxyCommand("PROXY_RESTORE|\(b64)", allowInstall: allowPrompt)
+            } else {
+                try TunPrivilege.runProxyCommand("PROXY_OFF", allowInstall: allowPrompt)
+            }
+            return true
+        } catch let error as TunPrivilege.PrivilegeError {
+            if case .notReady = error, !allowPrompt {
+                return false
+            }
+            lastError = error.errorDescription
+            return false
+        } catch {
+            lastError = error.localizedDescription
+            return false
+        }
+    }
+
     /// Restore saved proxy settings (also usable after crash / next launch).
     @discardableResult
-    static func restoreFromSnapshot(fallbackServices: [String]? = nil) -> Bool {
+    static func restoreFromSnapshot(
+        fallbackServices: [String]? = nil,
+        allowPrivilegePrompt: Bool = true
+    ) -> Bool {
         guard let snaps = loadSnapshot(), !snaps.isEmpty else {
-            // No backup — only turn off (legacy behavior).
+            if applyElevatedOff(restore: nil, allowPrompt: allowPrivilegePrompt) {
+                return false
+            }
             for service in fallbackServices ?? listServices() {
                 _ = run("/usr/sbin/networksetup", ["-setwebproxystate", service, "off"])
                 _ = run("/usr/sbin/networksetup", ["-setsecurewebproxystate", service, "off"])
                 _ = run("/usr/sbin/networksetup", ["-setsocksfirewallproxystate", service, "off"])
             }
             return false
+        }
+
+        if applyElevatedOff(restore: snaps, allowPrompt: allowPrivilegePrompt) {
+            clearSnapshot()
+            return true
         }
 
         for snap in snaps {
@@ -113,6 +197,25 @@ enum SystemProxy {
             if enabled && hasPort { return true }
         }
         return false
+    }
+
+    /// First enabled HTTP/SOCKS system-proxy port (any service), if any.
+    static func activeEnabledPort() -> Int? {
+        for service in listServices() {
+            for args in [["-getwebproxy"], ["-getsocksfirewallproxy"]] as [[String]] {
+                let info = run("/usr/sbin/networksetup", args + [service]) ?? ""
+                let parsed = parseProxy(info)
+                guard parsed.enabled, let port = Int(parsed.port), port > 0 else { continue }
+                return port
+            }
+        }
+        return nil
+    }
+
+    /// True when OS proxy is on but points at a foreign local VPN (e.g. Stash:7890).
+    static func isForeignProxyActive(ourPort: Int) -> Bool {
+        guard let active = activeEnabledPort() else { return false }
+        return active != ourPort
     }
 
     // MARK: - Capture / restore

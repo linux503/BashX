@@ -77,6 +77,8 @@ enum AppRoutingRules {
         // IM — Telegram 独立线路；国内 IM 直连
         .init(category: .im, labelZh: "Telegram", labelEn: "Telegram",
               processName: "Telegram", bundleId: "org.telegram.desktop", proxyTarget: "TELEGRAM"),
+        .init(category: .im, labelZh: "Telegra2", labelEn: "Telegra2",
+              processName: "Telegram", bundleId: "ru.keepcoder.Telegram", proxyTarget: "TELEGRAM"),
         .init(category: .im, labelZh: "微信", labelEn: "WeChat",
               processName: "WeChat", bundleId: "com.tencent.xinWeChat", proxyTarget: "DIRECT"),
         .init(category: .im, labelZh: "QQ", labelEn: "QQ",
@@ -137,17 +139,8 @@ enum AppRoutingRules {
         guard !base.isEmpty else { return [] }
         let t = sanitizedTarget(target)
         if base.caseInsensitiveCompare("Cursor") == .orderedSame {
-            return [
-                "PROCESS-NAME,Cursor,\(t)",
-                "PROCESS-NAME,Cursor Helper,\(t)",
-                "PROCESS-NAME,Cursor Helper (GPU),\(t)",
-                "PROCESS-NAME,Cursor Helper (Renderer),\(t)",
-                "PROCESS-NAME,Cursor Helper (Plugin),\(t)",
-                "PROCESS-NAME,Cursor Helper (Network),\(t)",
-                "PROCESS-PATH,*Cursor.app/Contents/Frameworks/Cursor Helper*,\(t)",
-                "PROCESS-PATH,*Cursor.app/Contents/MacOS/*,\(t)",
-                "PROCESS-PATH,*Cursor Helper*.app/Contents/MacOS/*,\(t)",
-            ]
+            // Domain routing covers Cursor cloud; do not PROCESS-NAME the whole Electron tree.
+            return []
         }
         return []
     }

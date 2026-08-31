@@ -27,7 +27,9 @@ object ChinaSmartRules {
         if (rules.none { it.contains("translate-pa.googleapis.com") }) return true
         if (rules.none { it.contains("cursor.sh") || it.contains(",CURSOR") }) return true
         if (rules.none { it.contains("hsbc.com.hk") }) return true
-        if (rules.none { it.contains("push.apple.com,PROXY") }) return true
+        if (rules.none {
+                it.contains("push.apple.com,APNS") || it.contains("push.apple.com,PROXY")
+            }) return true
         return false
     }
 
@@ -146,10 +148,17 @@ object AndroidDirectDomains {
         "DOMAIN-SUFFIX,baidu.com,DIRECT",
         "DOMAIN-SUFFIX,bdstatic.com,DIRECT",
         "DOMAIN-SUFFIX,taobao.com,DIRECT",
+        "DOMAIN-SUFFIX,tmall.com,DIRECT",
+        "DOMAIN-SUFFIX,goofish.com,DIRECT",
+        "DOMAIN-SUFFIX,idlefish.com,DIRECT",
+        "DOMAIN-SUFFIX,httpdns.alicdn.com,DIRECT",
         "DOMAIN-SUFFIX,alipay.com,DIRECT",
         "DOMAIN-SUFFIX,aliyun.com,DIRECT",
         "DOMAIN-SUFFIX,alicdn.com,DIRECT",
         "DOMAIN-SUFFIX,jd.com,DIRECT",
+        "DOMAIN-SUFFIX,pinduoduo.com,DIRECT",
+        "DOMAIN-SUFFIX,yangkeduo.com,DIRECT",
+        "DOMAIN-SUFFIX,vip.com,DIRECT",
         "DOMAIN-SUFFIX,bilibili.com,DIRECT",
         "DOMAIN-SUFFIX,zhihu.com,DIRECT",
         "DOMAIN-SUFFIX,amap.com,DIRECT",

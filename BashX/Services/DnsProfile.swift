@@ -18,6 +18,15 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         }
     }
 
+    /// Compact label for tight home quick-control chips (avoids segmented squash).
+    func shortTitle(lang: AppLanguage) -> String {
+        switch self {
+        case .smart: return L10n.t("dns.smart.short", lang)
+        case .domestic: return L10n.t("dns.domestic.short", lang)
+        case .foreign: return L10n.t("dns.foreign.short", lang)
+        }
+    }
+
     var subtitle: String { subtitle(lang: .current) }
 
     func subtitle(lang: AppLanguage) -> String {
@@ -34,9 +43,22 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         "+.cdn-telegram.org",
         "+.telesco.pe",
         "+.t.me",
+        "+.tx.me",
         "+.graph.org",
         "+.tdesktop.com",
         "+.telegra.ph",
+    ]
+
+    /// Cursor / Anysphere — real IP (fake-ip breaks long-lived agent WebSockets).
+    private static let cursorFakeIPFilters: [String] = [
+        "+.cursor.sh",
+        "+.cursor.com",
+        "+.cursorapi.com",
+        "+.cursor-cdn.com",
+        "+.cursorvm.com",
+        "+.anysphere.co",
+        "+.anysphere.com",
+        "+.anysphere.tech",
     ]
 
     private static let googleFakeIPFilters: [String] = [
@@ -168,7 +190,7 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
                 "+.local",
                 "geosite:cn",
                 "geosite:private",
-            ] + googleFakeIPFilters + [
+            ] + googleFakeIPFilters + telegramFakeIPFilters + cursorFakeIPFilters + [
                 "localhost.ptlogin2.qq.com",
                 "+.stun.*.*",
                 "lens.l.google.com",
@@ -232,8 +254,9 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "+.qq.com", "+.weixin.qq.com", "+.weixin.com", "+.wechat.com",
             "+.qpic.cn", "+.qlogo.cn", "+.gtimg.cn", "+.gtimg.com",
             "+.servicewechat.com", "+.tenpay.com",
-            "+.taobao.com", "+.aliyun.com", "+.alicdn.com",
-            "+.jd.com", "+.bilibili.com", "+.zhihu.com",
+            "+.taobao.com", "+.tmall.com", "+.aliyun.com", "+.alicdn.com",
+            "+.goofish.com", "+.idlefish.com", "+.jd.com",
+            "+.bilibili.com", "+.zhihu.com",
         ] {
             policy[suffix] = cnNS
         }
@@ -253,6 +276,9 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
 
         var block: [String: Any] = [:]
         block["enable"] = true
+        // Never answer AAAA on iOS — only Telegram DC IPv6 is routed into TUN;
+        // other AAAA would bypass the tunnel and hang Happy-Eyeballs.
+        block["ipv6"] = false
         // Bind localhost — 198.18.0.2:53 cannot bind; NE still points DNS at 198.18.0.2,
         // and TUN dns-hijack feeds queries into mihomo (BaoLianDeng pattern).
         block["listen"] = "127.0.0.1:1053"
@@ -273,11 +299,13 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "+.qpic.cn", "+.qlogo.cn", "+.gtimg.cn", "+.gtimg.com",
             "+.servicewechat.com", "+.tenpay.com", "+.idqqimg.com",
             "+.taobao.com", "+.tmall.com", "+.alipay.com", "+.alicdn.com",
-            "+.aliyun.com", "+.jd.com", "+.bilibili.com", "+.zhihu.com",
-            "+.douyin.com", "+.bytedance.com", "+.meituan.com", "+.ctrip.com",
+            "+.aliyun.com", "+.goofish.com", "+.idlefish.com",
+            "+.jd.com", "+.pinduoduo.com", "+.yangkeduo.com", "+.vip.com",
+            "+.bilibili.com", "+.zhihu.com",
+            "+.douyin.com", "+.douyincdn.com", "+.bytedance.com", "+.zijieapi.com", "+.snssdk.com", "+.amemv.com", "+.byteimg.com", "+.xiaohongshu.com", "+.xhscdn.com", "+.xhslink.com", "+.meituan.com", "+.ctrip.com",
             "localhost.ptlogin2.qq.com",
             "+.stun.*.*", "lens.l.google.com",
-        ]
+        ] + telegramFakeIPFilters + cursorFakeIPFilters
         // IP-literal DoH bootstrap — plain UDP:53 often returns "network is unreachable" under NE bind.
         block["default-nameserver"] = bootstrapNS
         block["proxy-server-nameserver"] = [

@@ -59,7 +59,30 @@ final class IOSAppState: ObservableObject {
         if let sel = settings.selectedNodeName, ClashConfigParser.isPlaceholderNodeName(sel) {
             settings.selectedNodeName = nodes.first(where: { !ClashConfigParser.isPlaceholderNodeName($0.name) })?.name
         }
+        // Pulse removed from iOS curated set — fall back to brand icon.
+        if !LogoStyle.iosCurated.contains(settings.logoStyle) {
+            settings.logoStyle = .default
+        }
+        // One-time: older builds defaulted On-Demand on; switch default to off.
+        let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+        if ud?.bool(forKey: "iosOnDemandDefaultOffMigrated") != true {
+            settings.iosOnDemandEnabled = false
+            ud?.set(true, forKey: "iosOnDemandDefaultOffMigrated")
+            ud?.set(false, forKey: "iosOnDemandEnabled")
+            _ = SettingsStore.save(settings)
+            Task { await vpn.syncOnDemandPreference(enabled: false) }
+        }
         writeConfig()
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(settings.iosTelegramPushEnabled, forKey: AppConstants.iosTelegramPushKey)
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(settings.iosOnDemandEnabled, forKey: "iosOnDemandEnabled")
+        if let node = nodes.first(where: { $0.name == settings.selectedNodeName }), !node.server.isEmpty {
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set(node.server, forKey: AppConstants.selectedNodeServerKey)
+        } else {
+            VPNManager.syncSelectedNodeServerToDefaults()
+        }
         // Re-apply with catalog name `AppIcon-*` so SpringBoard never keeps a blank tile
         // from older builds that used bare style rawValues.
         Task { await IOSIconManager.apply(style: settings.logoStyle) }
@@ -205,6 +228,42 @@ final class IOSAppState: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
+    func setPluginEnabled(_ id: String, enabled: Bool) {
+        var ids = settings.enabledPluginIds
+        if enabled {
+            if !ids.contains(id) { ids.append(id) }
+        } else {
+            ids.removeAll { $0 == id }
+        }
+        settings.enabledPluginIds = ids
+        if enabled, settings.proxyMode != .rule {
+            settings.proxyMode = .rule
+        }
+        persistNow()
+        Task { await writeConfig() }
+        let name = PluginEngine.plugin(id: id)?.name ?? id
+        statusText = enabled
+            ? "已启用插件：\(name)"
+            : "已关闭插件：\(name)"
+    }
+
+    func setAllPluginsEnabled(_ enabled: Bool) {
+        if enabled {
+            settings.enabledPluginIds = PluginEngine.catalog.map(\.id)
+            if settings.proxyMode != .rule {
+                settings.proxyMode = .rule
+            }
+        } else {
+            settings.enabledPluginIds = []
+        }
+        persistNow()
+        Task { await writeConfig() }
+        statusText = enabled
+            ? L10n.t("plugin.market.enableAll", settings.uiLanguage)
+            : L10n.t("plugin.market.disableAll", settings.uiLanguage)
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
     func reloadNodesFromCache() {
         var merged: [ProxyNode] = []
         var seen = Set<String>()
@@ -250,6 +309,17 @@ final class IOSAppState: ObservableObject {
         settings.subscriptions.append(sub)
         persist()
         Task { await updateSubscription(id: sub.id) }
+    }
+
+    func renameSubscription(_ id: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let idx = settings.subscriptions.firstIndex(where: { $0.id == id }) else { return }
+        guard settings.subscriptions[idx].name != trimmed else { return }
+        settings.subscriptions[idx].name = trimmed
+        persist()
+        statusText = "\(L10n.t("subs.rename", settings.uiLanguage)): \(trimmed)"
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
     }
 
     func removeSubscription(id: UUID) {
@@ -359,6 +429,12 @@ final class IOSAppState: ObservableObject {
 
     func selectNode(_ name: String) {
         settings.selectedNodeName = name
+        if let node = nodes.first(where: { $0.name == name }), !node.server.isEmpty {
+            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .set(node.server, forKey: AppConstants.selectedNodeServerKey)
+        } else {
+            VPNManager.syncSelectedNodeServerToDefaults()
+        }
         writeConfig()
         persist()
         Task { await vpn.selectNode(name) }
@@ -442,7 +518,9 @@ final class IOSAppState: ObservableObject {
         RuntimeRules.effective(
             base: settings.rules,
             prepend: settings.rulesPrepend,
-            videoAdBlockEnabled: settings.videoAdBlockEnabled
+            videoAdBlockEnabled: settings.videoAdBlockEnabled,
+            enabledPluginIds: settings.enabledPluginIds,
+            telegramPushEnabled: settings.iosTelegramPushEnabled
         )
     }
 
@@ -553,6 +631,18 @@ final class IOSAppState: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 
+    func setTelegramPushEnabled(_ enabled: Bool) {
+        guard settings.iosTelegramPushEnabled != enabled else { return }
+        settings.iosTelegramPushEnabled = enabled
+        UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .set(enabled, forKey: AppConstants.iosTelegramPushKey)
+        writeConfig()
+        persistNow()
+        Task { await vpn.syncTelegramPushPreference(enabled: enabled) }
+        statusText = enabled ? L10n.t("ios.tgpush.on") : L10n.t("ios.tgpush.off")
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
     func testSpeeds(selectFastest: Bool = false) async {
         guard !nodes.isEmpty else { return }
         isTesting = true
@@ -599,6 +689,9 @@ final class IOSAppState: ObservableObject {
         isAppUnlocked = true
         if pendingSubscriptionURL != nil {
             openAddSubscription()
+        } else {
+            // 伪装解锁后一律进首页，避免停在节点/订阅/设置。
+            selectedTab = 0
         }
     }
 

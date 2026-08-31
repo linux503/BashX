@@ -42,6 +42,8 @@ final class AppState: ObservableObject {
     @Published private(set) var coreConnecting = false
     /// Bumped when node list / filters change — isolated views subscribe instead of whole AppState.
     @Published private(set) var nodeListRevision = 0
+    /// Bumped when PROXY hub mode chips change — nodes pane header subscribes.
+    @Published private(set) var hubModeRevision = 0
     /// Bumped when chrome (core/proxy/TUN/outbound) changes — sidebar + top bar subscribe.
     @Published private(set) var chromeRevision = 0
     /// Mirrors SMAppService login-item state — panel + menu bar read this (not stale JSON).
@@ -67,6 +69,9 @@ final class AppState: ObservableObject {
     private var systemProxyTask: Task<Void, Never>?
     private var telegramGuardTask: Task<Void, Never>?
     private var lastTelegramNodeProbe = Date.distantPast
+    private var lastTelegramTunAssist = Date.distantPast
+    private var lastTelegramRoutePatch = Date.distantPast
+    private var telegramTunAssistInFlight = false
     private var cursorGuardTask: Task<Void, Never>?
     private var lastCursorNodeProbe = Date.distantPast
     private var persistTask: Task<Void, Never>?
@@ -162,6 +167,10 @@ final class AppState: ObservableObject {
 
     func bumpNodeListRevision() {
         nodeListRevision &+= 1
+    }
+
+    func bumpHubModeRevision() {
+        hubModeRevision &+= 1
     }
 
     /// Refresh panel chrome (sidebar / top bar) without rebuilding the whole node list.
@@ -318,6 +327,7 @@ final class AppState: ObservableObject {
         migrateCursorAppRouting()
         migrateCursorReliabilitySettings()
         migrateNodeDisplayModeToCard()
+        migrateTunDefaultOn()
         systemProxyOn = settings.systemProxyEnabled
         // Defer huge rulesText join — only needed when Rules tab opens.
         rulesText = ""
@@ -546,6 +556,18 @@ final class AppState: ObservableObject {
             mixedPortCachedAlive = false
         }
 
+        // Critical: kernel dead + system proxy still on = machine has NO network.
+        // Clear OS proxy immediately; keep preference so reconnect can re-enable.
+        if !port, (systemProxyOn || settings.systemProxyEnabled), !settings.userDisabledSystemProxy {
+            if coreHealthMissStreak >= 1 {
+                SystemProxy.setEnabled(false, port: settings.mixedPort)
+                systemProxyOn = false
+                if coreHealthMissStreak == 1 {
+                    statusText = "内核离线，已临时关闭系统代理保网"
+                }
+            }
+        }
+
         // Need several consecutive misses before flipping UI to offline (~45s).
         if coreRunning, coreHealthDeadStreak >= 3 {
             applyCoreRunning(false)
@@ -569,32 +591,45 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Keep system proxy on — Telegram relies on it; core recovery continues in background.
-        if !settings.userDisabledSystemProxy, !settings.systemProxyEnabled {
-            settings.systemProxyEnabled = true
-            schedulePersist()
-        }
+        // Core still dead — do NOT force systemProxyEnabled back on (blackholes the Mac).
+        // Preference stays true so a later successful start re-applies proxy.
     }
 
     /// BashX open => keep system proxy preference unless user explicitly disabled it.
     /// Never rewrite proxyMode — 规则/全局/直连 must stick to user choice.
     private func migrateTelegramReliabilitySettings() {
         var changed = false
-        if !settings.userDisabledSystemProxy, !settings.systemProxyEnabled {
+        // Only force preference when core is already healthy — otherwise OS proxy blackholes net.
+        if !settings.userDisabledSystemProxy, !settings.systemProxyEnabled,
+           coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) {
             settings.systemProxyEnabled = true
             changed = true
         }
         if changed { _ = SettingsStore.save(settings) }
     }
 
+    /// One-shot: turn TUN on for existing installs (Telegram MTProto needs it).
+    private func migrateTunDefaultOn() {
+        guard !settings.userDisabledTun, !settings.tunEnabled else { return }
+        settings.tunEnabled = true
+        _ = SettingsStore.save(settings)
+    }
+
     /// Old presets sent Cursor → PROXY/AUTO; that thrash breaks long-lived agent streams.
     private func migrateCursorAppRouting() {
         var changed = false
+        // Remove whole-process Cursor hijack — forces npm/CN CDN via sticky US and breaks the IDE.
+        let before = settings.appRoutingRules.count
+        settings.appRoutingRules.removeAll { rule in
+            rule.processName.localizedCaseInsensitiveContains("cursor")
+                || rule.bundleId.lowercased().contains("230313mzl4w4u92")
+                || rule.label.localizedCaseInsensitiveContains("cursor")
+        }
+        if settings.appRoutingRules.count != before { changed = true }
         for i in settings.appRoutingRules.indices {
             let rule = settings.appRoutingRules[i]
             let isCursor = rule.processName.localizedCaseInsensitiveContains("cursor")
                 || rule.bundleId.lowercased().contains("230313mzl4w4u92")
-                || rule.label.localizedCaseInsensitiveContains("cursor")
             guard isCursor else { continue }
             let target = rule.proxyTarget.uppercased()
             if target == "PROXY" || target == "AUTO" || target.isEmpty {
@@ -602,21 +637,9 @@ final class AppState: ObservableObject {
                 changed = true
             }
         }
-        // Ensure Cursor is present so Helper processes get PROCESS-NAME coverage.
-        let hasCursor = settings.appRoutingRules.contains {
-            $0.processName.caseInsensitiveCompare("Cursor") == .orderedSame
-                || $0.bundleId.lowercased().contains("230313mzl4w4u92")
+        if changed {
+            schedulePersist()
         }
-        if !hasCursor {
-            if let preset = AppRoutingRules.commonPresets.first(where: {
-                $0.processName.caseInsensitiveCompare("Cursor") == .orderedSame
-            }) {
-                var rule = preset.asRule(lang: settings.uiLanguage)
-                settings.appRoutingRules.append(rule)
-                changed = true
-            }
-        }
-        if changed { _ = SettingsStore.save(settings) }
     }
 
     /// Cursor uses kernel FAILOVER — never pin CURSOR select to a single Asia leaf.
@@ -692,35 +715,88 @@ final class AppState: ObservableObject {
             await ensureCoreRunning()
         }
 
-        let port = settings.mixedPort
-        let proxyWritten = await Task.detached(priority: .utility) {
-            SystemProxy.isEnabled(port: port)
-        }.value
-        if !proxyWritten || !systemProxyOn {
-            await applyDefaultSystemProxyIfEnabled()
-        }
-
-        guard TelegramReliability.isTelegramRunning() else { return }
+        let clients = TelegramReliability.runningClients()
+        guard clients.any else { return }
         guard await coreIsHealthy() else { return }
-        if await CoreHealth.telegramReachable(port: port) { return }
 
-        let cooldown: TimeInterval = 18
-        guard Date().timeIntervalSince(lastTelegramNodeProbe) >= cooldown else { return }
-        lastTelegramNodeProbe = Date()
-        await healTelegramGroupOnly()
+        // Any Telegram variant → attach to *this* BashX VPN (reclaim Stash etc. + TUN for bare-IP).
+        await attachTelegramToBashXVpn(clients: clients, forceNodeProbe: false)
     }
 
     private func ensureTelegramConnectivity(forceNodeProbe: Bool) async {
         guard !settings.userDisabledSystemProxy else { return }
         migrateTelegramReliabilitySettings()
         _ = await ensureCoreRunning()
-        await applyDefaultSystemProxyIfEnabled()
-
-        let port = settings.mixedPort
-        let telegramOK = await CoreHealth.telegramReachable(port: port)
-        if forceNodeProbe || !telegramOK {
-            await healTelegramGroupOnly()
+        let clients = TelegramReliability.runningClients()
+        if clients.any {
+            await attachTelegramToBashXVpn(clients: clients, forceNodeProbe: forceNodeProbe)
+        } else {
+            await applyDefaultSystemProxyIfEnabled()
+            let port = settings.mixedPort
+            let telegramOK = await CoreHealth.telegramReachable(port: port)
+            if forceNodeProbe || !telegramOK {
+                await healTelegramGroupOnly()
+            }
         }
+    }
+
+    /// Make every Telegram build follow the currently running BashX VPN:
+    /// Desktop via system proxy; Telegra2/keepcoder via TUN + DC routes.
+    private func attachTelegramToBashXVpn(
+        clients: TelegramReliability.RunningClients,
+        forceNodeProbe: Bool
+    ) async {
+        guard clients.any, await coreIsHealthy() else { return }
+        let port = settings.mixedPort
+
+        // 1) System proxy must point at BashX — not Stash/ClashX leftover :7890.
+        let foreign = await Task.detached(priority: .utility) {
+            SystemProxy.isForeignProxyActive(ourPort: port) || !SystemProxy.isEnabled(port: port)
+        }.value
+        if foreign || !systemProxyOn {
+            await applyDefaultSystemProxyIfEnabled()
+        }
+
+        // 2) Native Mac / Telegra2 dials DC IPs → need TUN (unless user turned it off).
+        if clients.needsTunCapture, !settings.userDisabledTun, !settings.tunEnabled,
+           !telegramTunAssistInFlight {
+            let cool: TimeInterval = 90
+            if Date().timeIntervalSince(lastTelegramTunAssist) >= cool {
+                lastTelegramTunAssist = Date()
+                telegramTunAssistInFlight = true
+                statusText = "检测到 Telegra2/Mac Telegram，自动开启 TUN 以接入 BashX…"
+                await setTUN(true)
+                telegramTunAssistInFlight = false
+            }
+        }
+
+        // 3) Keep TUN DC routes hot so bare-IP MTProto enters the stack.
+        if settings.tunEnabled, effectiveTunInConfig() {
+            let attachCool: TimeInterval = forceNodeProbe ? 0 : 45
+            if forceNodeProbe || Date().timeIntervalSince(lastTelegramRoutePatch) >= attachCool {
+                lastTelegramRoutePatch = Date()
+                try? await ClashCore.patchConfig(
+                    controller: settings.externalController,
+                    secret: settings.secret,
+                    body: [
+                        "tun": ClashConfigParser.tunConfigBlock(
+                            stack: settings.tunStack.isEmpty ? "mixed" : settings.tunStack
+                        ),
+                        "ipv6": true
+                    ]
+                )
+            }
+        }
+
+        // 4) Heal TELEGRAM group when API path is dead.
+        if await CoreHealth.telegramReachable(port: port) {
+            if forceNodeProbe { await healTelegramGroupOnly() }
+            return
+        }
+        let cooldown: TimeInterval = forceNodeProbe ? 0 : 18
+        guard Date().timeIntervalSince(lastTelegramNodeProbe) >= cooldown else { return }
+        lastTelegramNodeProbe = Date()
+        await healTelegramGroupOnly()
     }
 
     private func startLaunchCoreGuard() {
@@ -783,7 +859,13 @@ final class AppState: ObservableObject {
             return
         }
         let port = settings.mixedPort
-        let on = await SystemProxy.setEnabledAsync(true, port: port)
+        // Never pop admin password from background recover — that spam is what
+        // other Macs saw on every launch. Privilege prompt only on manual toggle.
+        let on = await SystemProxy.setEnabledAsync(
+            true,
+            port: port,
+            allowPrivilegePrompt: false
+        )
         systemProxyOn = on
         bumpChromeRevision()
         if on {
@@ -793,6 +875,9 @@ final class AppState: ObservableObject {
                 secret: settings.secret,
                 mode: settings.proxyMode
             )
+        } else if let err = SystemProxy.lastError, !err.contains("未授权") {
+            // Keep quiet for expected "helper not installed yet".
+            statusText = err
         }
     }
 
@@ -944,8 +1029,11 @@ final class AppState: ObservableObject {
         for i in settings.appRoutingRules.indices {
             let rule = settings.appRoutingRules[i]
             let isTG = rule.processName.localizedCaseInsensitiveContains("telegram")
+                || rule.processName.localizedCaseInsensitiveContains("telegra")
                 || rule.bundleId.localizedCaseInsensitiveContains("telegram")
+                || rule.bundleId.localizedCaseInsensitiveContains("keepcoder")
                 || rule.label.localizedCaseInsensitiveContains("telegram")
+                || rule.label.localizedCaseInsensitiveContains("telegra")
             guard isTG else { continue }
             let target = rule.proxyTarget.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             if target == "PROXY" || target == "AUTO" || target.isEmpty {
@@ -1739,6 +1827,98 @@ final class AppState: ObservableObject {
         statusText = enabled ? "程序坞已显示图标" : "程序坞已隐藏图标"
     }
 
+    func setMacMinimalHome(_ enabled: Bool) {
+        guard settings.macMinimalHome != enabled else { return }
+        settings.macMinimalHome = enabled
+        persist()
+        // Resize + remount first so 完整版立刻出现大面板；再 bump chrome。
+        PanelPresenter.shared.resizeForMode(minimal: enabled)
+        bumpChromeRevision()
+        objectWillChange.send()
+        statusText = enabled
+            ? L10n.t("mac.minimal.toSimple", settings.uiLanguage)
+            : L10n.t("mac.minimal.toFull", settings.uiLanguage)
+    }
+
+    /// Minimal home: one-tap start/stop (core + system proxy).
+    /// At most one admin password (install helper); later toggles use the helper with no prompt.
+    func toggleMinimalConnection() async {
+        let up = isCoreVisiblyAlive || systemProxyOn || coreRunning
+        if up {
+            await softDisconnectMinimal()
+            return
+        }
+        let hasSub = settings.subscriptions.contains(where: \.enabled)
+        guard hasSub else {
+            statusText = L10n.t("mac.minimal.needSub", settings.uiLanguage)
+            panelIntent = .addSubscription
+            return
+        }
+
+        // At most one password: install helper once up front (TUN + system proxy share it).
+        if !TunPrivilege.isReady {
+            do {
+                try TunPrivilege.ensureReady()
+            } catch {
+                statusText = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+            }
+        }
+
+        // Helper missing → skip TUN (avoids legacy per-start osascript password).
+        let wantTun = settings.tunEnabled
+        let skipTun = wantTun && !TunPrivilege.isReady
+        if skipTun {
+            settings.tunEnabled = false
+        }
+        _ = await ensureCoreRunning()
+        if skipTun {
+            settings.tunEnabled = wantTun
+        }
+
+        // Never prompt again here — ensureReady already asked once if needed.
+        systemProxyTask?.cancel()
+        systemProxyOn = true
+        settings.systemProxyEnabled = true
+        settings.userDisabledSystemProxy = false
+        bumpChromeRevision()
+        schedulePersist()
+        let port = settings.mixedPort
+        let ok = await SystemProxy.setEnabledAsync(
+            true,
+            port: port,
+            allowPrivilegePrompt: false
+        )
+        if ok {
+            systemProxyOn = true
+            statusText = "已连接 → 127.0.0.1:\(port)"
+            Task { await syncSelectedOutbound() }
+        } else {
+            systemProxyOn = false
+            settings.systemProxyEnabled = false
+            bumpChromeRevision()
+            statusText = SystemProxy.lastError
+                ?? (TunPrivilege.isReady ? "系统代理开启失败" : "请先完成助手安装（设置 → 特权助手）")
+        }
+    }
+
+    /// Disconnect without admin password (helper restore / soft stop).
+    private func softDisconnectMinimal() async {
+        systemProxyTask?.cancel()
+        systemProxyOn = false
+        settings.systemProxyEnabled = false
+        settings.userDisabledSystemProxy = true
+        bumpChromeRevision()
+        schedulePersist()
+        _ = await SystemProxy.setEnabledAsync(
+            false,
+            port: settings.mixedPort,
+            allowPrivilegePrompt: false
+        )
+        stopCore(clearProxy: false, force: false, markUserStopped: true)
+        statusText = "已断开"
+    }
+
     func setNodeDisplayMode(_ mode: NodeDisplayMode) {
         guard settings.nodeDisplayMode != mode else { return }
         settings.nodeDisplayMode = mode
@@ -2106,8 +2286,11 @@ final class AppState: ObservableObject {
         // Manual pick → leave auto hub modes so the choice sticks.
         var needHubReload = false
         if name != "AUTO", name != "DIRECT", settings.proxyHubMode != .manual {
-            settings.proxyHubMode = .manual
+            var next = settings
+            next.proxyHubMode = .manual
+            settings = next
             needHubReload = true
+            bumpHubModeRevision()
             scheduleWriteConfig()
         }
         guard settings.selectedNodeName != name else {
@@ -2159,17 +2342,20 @@ final class AppState: ObservableObject {
     /// Switch PROXY hub between smart / load-balance / failover / manual.
     func setProxyHubMode(_ mode: ProxyHubMode) async {
         guard settings.proxyHubMode != mode else {
-            bumpNodeListRevision()
+            bumpHubModeRevision()
             return
         }
-        settings.proxyHubMode = mode
+        var next = settings
+        next.proxyHubMode = mode
         if mode != .manual {
-            settings.selectedNodeName = "AUTO"
-            settings.autoSelectFastest = (mode == .smart)
+            next.selectedNodeName = "AUTO"
+            next.autoSelectFastest = (mode == .smart)
         }
+        settings = next
+        bumpHubModeRevision()
         bumpChromeRevision()
         bumpNodeListRevision()
-        statusText = "\(mode.title)…"
+        statusText = "切换\(mode.title)…"
         schedulePersist()
         writeConfig()
         if coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) {
@@ -2180,8 +2366,9 @@ final class AppState: ObservableObject {
             statusText = "已启用\(mode.title)"
             scheduleOutboundIPRefresh()
         } else {
-            statusText = "已选择\(mode.title)（下次连接生效）"
+            statusText = "已选择\(mode.title)（连接后生效）"
         }
+        bumpHubModeRevision()
         bumpNodeListRevision()
     }
 
@@ -2406,7 +2593,11 @@ final class AppState: ObservableObject {
             }
 
             guard !Task.isCancelled else { return }
-            let writeOK = await SystemProxy.setEnabledAsync(enabled, port: port)
+            let writeOK = await SystemProxy.setEnabledAsync(
+                enabled,
+                port: port,
+                allowPrivilegePrompt: true
+            )
             guard !Task.isCancelled else { return }
 
             if enabled, !writeOK {
@@ -2414,7 +2605,8 @@ final class AppState: ObservableObject {
                 self.settings.systemProxyEnabled = false
                 self.bumpChromeRevision()
                 self.schedulePersist()
-                self.statusText = "系统代理写入失败，请检查网络权限 / 是否被其他代理占用"
+                self.statusText = SystemProxy.lastError
+                    ?? "系统代理写入失败，请输入管理员密码授权（与 TUN 同一助手）"
                 return
             }
 
@@ -2609,8 +2801,8 @@ final class AppState: ObservableObject {
             timeoutMs: 6000
         )
 
-        // Prefer kernel failover chain — mihomo picks first healthy member.
-        for pick in ["TELEGRAM-FAILOVER", "TELEGRAM-AUTO"] {
+        // Prefer PROXY (user node) first — FAILOVER chain may be missing on broken passthrough configs.
+        for pick in ["PROXY", "TELEGRAM-FAILOVER", "TELEGRAM-AUTO"] {
             try? await ClashCore.selectProxy(
                 controller: settings.externalController,
                 secret: settings.secret,
@@ -2710,7 +2902,7 @@ final class AppState: ObservableObject {
             timeoutMs: 6000
         )
 
-        for pick in ["CURSOR-FAILOVER", "CURSOR-AUTO"] {
+        for pick in ["PROXY", "CURSOR-FAILOVER", "CURSOR-AUTO"] {
             try? await ClashCore.selectProxy(
                 controller: settings.externalController,
                 secret: settings.secret,
@@ -2843,6 +3035,7 @@ final class AppState: ObservableObject {
     func setTUN(_ enabled: Bool) async {
         userStoppedCore = false
         settings.tunEnabled = enabled
+        settings.userDisabledTun = !enabled
         if enabled {
             requestElevatedCoreStart = true
             runtimeTunInConfig = true
@@ -2892,13 +3085,23 @@ final class AppState: ObservableObject {
         statusText = enabled ? "TUN 已开启\(proxyNote)" : "TUN 已关闭"
     }
 
-    /// Selected node, or AUTO when nodes exist, else DIRECT.
+    /// Selected node, or strategy hub when smart/LB/failover is on.
     func activeProxyTarget() -> String {
-        if let name = settings.selectedNodeName,
-           name == "DIRECT" || name == "AUTO" || nodes.contains(where: { $0.name == name }) {
-            return name
+        switch settings.proxyHubMode {
+        case .smart:
+            return "AUTO"
+        case .loadBalance:
+            return "BALANCE"
+        case .failover:
+            return "FALLBACK"
+        case .manual:
+            if let name = settings.selectedNodeName,
+               name == "DIRECT" || name == "AUTO" || name == "BALANCE" || name == "FALLBACK"
+                || nodes.contains(where: { $0.name == name }) {
+                return name
+            }
+            return nodes.isEmpty ? "DIRECT" : "AUTO"
         }
-        return nodes.isEmpty ? "DIRECT" : "AUTO"
     }
 
     func writeConfig() {
@@ -2957,7 +3160,10 @@ final class AppState: ObservableObject {
                         mode: mode,
                         allowLan: allowLan,
                         dnsPreference: dnsPreference,
-                        domainSniffing: domainSniffing
+                        domainSniffing: domainSniffing,
+                        selectedName: selectedName,
+                        proxyHubMode: hubMode,
+                        turboMode: turboMode
                     )
                 }
                 return ClashConfigParser.buildConfig(
@@ -3019,7 +3225,8 @@ final class AppState: ObservableObject {
             base: settings.rules,
             prepend: settings.rulesPrepend,
             appRouting: settings.appRoutingRules,
-            videoAdBlockEnabled: settings.videoAdBlockEnabled
+            videoAdBlockEnabled: settings.videoAdBlockEnabled,
+            enabledPluginIds: settings.enabledPluginIds
         )
     }
 
@@ -3043,6 +3250,7 @@ final class AppState: ObservableObject {
     }
 
     /// Select a member inside a named proxy-group (GOOGLE / TELEGRAM / AUTO / PROXY).
+    /// Stash-style: picking AUTO/BALANCE/FALLBACK on PROXY also updates hub mode.
     func selectGroupProxy(group: String, name: String) async {
         guard coreRunning || CoreHealth.mixedPortAlive(port: settings.mixedPort) else {
             statusText = "内核未运行，无法切换 \(group)"
@@ -3064,7 +3272,18 @@ final class AppState: ObservableObject {
         }
         if group == "PROXY" || group == "GLOBAL" {
             settings.selectedNodeName = name
+            switch name.uppercased() {
+            case "AUTO":
+                settings.proxyHubMode = .smart
+            case "BALANCE":
+                settings.proxyHubMode = .loadBalance
+            case "FALLBACK":
+                settings.proxyHubMode = .failover
+            default:
+                settings.proxyHubMode = .manual
+            }
             schedulePersist()
+            bumpHubModeRevision()
             bumpChromeRevision()
             scheduleOutboundIPRefresh()
         } else {
@@ -3112,6 +3331,39 @@ final class AppState: ObservableObject {
         } else {
             statusText = "去广告已关闭"
         }
+    }
+
+    func setPluginEnabled(_ id: String, enabled: Bool) async {
+        var ids = settings.enabledPluginIds
+        if enabled {
+            if !ids.contains(id) { ids.append(id) }
+        } else {
+            ids.removeAll { $0 == id }
+        }
+        settings.enabledPluginIds = ids
+        if enabled, settings.proxyMode != .rule {
+            settings.proxyMode = .rule
+        }
+        persist()
+        await applyConfig(reloadIfRunning: true)
+        let name = PluginEngine.plugin(id: id)?.name ?? id
+        statusText = enabled ? "已启用插件：\(name)" : "已关闭插件：\(name)"
+    }
+
+    func setAllPluginsEnabled(_ enabled: Bool) async {
+        if enabled {
+            settings.enabledPluginIds = PluginEngine.catalog.map(\.id)
+            if settings.proxyMode != .rule {
+                settings.proxyMode = .rule
+            }
+        } else {
+            settings.enabledPluginIds = []
+        }
+        persist()
+        await applyConfig(reloadIfRunning: true)
+        statusText = enabled
+            ? L10n.t("plugin.market.enableAll", settings.uiLanguage)
+            : L10n.t("plugin.market.disableAll", settings.uiLanguage)
     }
 
     /// Local mixed-port for other apps (HTTP + SOCKS same port).
@@ -3488,14 +3740,16 @@ final class AppState: ObservableObject {
 
             var attempt = 0
             var lastFailDetail = ""
-            // Clash Verge style: if user wants TUN and helper is ready, always elevate + write tun.
+            // Clash Verge style: if user wants TUN, always try elevate (install helper once if needed).
             // Bug was: requestElevatedCoreStart only set on toggle → restart dropped TUN from yaml
             // while UI still showed TUN on → Telegram MTProto UDP bypassed SOCKS and spun forever.
-            if settings.tunEnabled, TunPrivilege.isReady {
+            if settings.tunEnabled {
                 requestElevatedCoreStart = true
-                runtimeTunInConfig = true
+                if TunPrivilege.isReady {
+                    runtimeTunInConfig = true
+                }
             }
-            let wantTUN = settings.tunEnabled && (requestElevatedCoreStart || TunPrivilege.isReady)
+            let wantTUN = settings.tunEnabled
             var useRoot = wantTUN
             if settings.tunEnabled, !useRoot {
                 runtimeTunInConfig = false
@@ -3576,14 +3830,9 @@ final class AppState: ObservableObject {
                             controller: settings.externalController,
                             secret: settings.secret,
                             body: [
-                                "tun": [
-                                    "enable": true,
-                                    "stack": settings.tunStack.isEmpty ? "mixed" : settings.tunStack,
-                                    "auto-route": true,
-                                    "auto-detect-interface": true,
-                                    "dns-hijack": ["any:53"],
-                                    "strict-route": false
-                                ]
+                                "tun": ClashConfigParser.tunConfigBlock(
+                                    stack: settings.tunStack.isEmpty ? "mixed" : settings.tunStack
+                                )
                             ]
                         )
                         tunOn = await CoreHealth.waitUntilTunEnabled(
@@ -3628,16 +3877,29 @@ final class AppState: ObservableObject {
                             ? "内核运行中 · \(settings.mixedPort)（TUN 待开启）"
                             : "内核运行中 · \(settings.mixedPort) · \(settings.proxyMode.title)")
                     // Prefer cached delay / AUTO — avoid auto full speed-test (stuck「测速中」+ stutter).
-                    statusText = effectiveTunInConfig()
-                        ? "内核运行中（TUN）· \(settings.proxyMode.title)"
-                        : (settings.tunEnabled
-                            ? "内核运行中 · \(settings.mixedPort)（TUN 待开启）"
-                            : "内核运行中 · \(settings.mixedPort) · \(settings.proxyMode.title)")
                     if settings.proxyHubMode == .smart || settings.autoSelectFastest {
-                        await selectFastestNodeIfAvailable()
+                        // Hub mode: stay on AUTO/BALANCE/FALLBACK — don't pin a dead leaf.
+                        if settings.proxyHubMode == .manual {
+                            await selectFastestNodeIfAvailable()
+                        }
                     }
-                    if settings.selectedNodeName == nil || settings.selectedNodeName == "AUTO" {
-                        await ensureUsableProxy(forceProbe: true, verifyGoogle: true)
+                    // Verify egress; dead sticky leaf → fall back to AUTO so Mac keeps net.
+                    let port = settings.mixedPort
+                    let egressOK = await CoreHealth.googleReachable(port: port)
+                    if !egressOK {
+                        if settings.proxyHubMode == .manual {
+                            settings.proxyHubMode = .smart
+                            settings.selectedNodeName = "AUTO"
+                            bumpHubModeRevision()
+                            schedulePersist()
+                        }
+                        try? await ClashCore.selectProxy(
+                            controller: settings.externalController,
+                            secret: settings.secret,
+                            group: "PROXY",
+                            name: "AUTO"
+                        )
+                        statusText = "节点不通，已切 AUTO 智能选路"
                     }
                     // Kick TELEGRAM / CURSOR onto FAILOVER so apps have kernel-side HA immediately.
                     Task { await self.healTelegramGroupOnly() }

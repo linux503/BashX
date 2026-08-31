@@ -28,10 +28,11 @@ enum AppActivation {
             let id = window.identifier?.rawValue ?? ""
             return id == panelID || id == settingsID || id == addSubscriptionID
         }
-        if !hasVisible, !preferDockIcon {
-            NSApp.setActivationPolicy(.accessory)
-        } else if preferDockIcon {
+        if preferDockIcon {
+            // Keep .regular — switching to accessory drops the Dock icon and feels like it "vanished".
             NSApp.setActivationPolicy(.regular)
+        } else if !hasVisible {
+            NSApp.setActivationPolicy(.accessory)
         }
     }
 
@@ -140,8 +141,10 @@ final class SettingsPresenter {
 final class PanelPresenter {
     static let shared = PanelPresenter()
 
-    private static let defaultSize = NSSize(width: 1280, height: 860)
-    private static let minimumSize = NSSize(width: 1100, height: 680)
+    private static let defaultSize = NSSize(width: 1100, height: 740)
+    private static let minimumSize = NSSize(width: 980, height: 640)
+    private static let minimalSize = NSSize(width: 440, height: 720)
+    private static let minimalMinimum = NSSize(width: 400, height: 640)
 
     private var window: NSWindow?
     private var host: NSHostingController<AnyView>?
@@ -156,6 +159,7 @@ final class PanelPresenter {
     private weak var boundRates: MenuBarRateStore?
     private var isPresenting = false
     private var pendingPresent: (state: AppState, intent: AppState.PanelIntent)?
+    private weak var lastState: AppState?
 
     var traffic: TrafficMonitor?
     var menuRates: MenuBarRateStore?
@@ -243,15 +247,36 @@ final class PanelPresenter {
             BashXThemed(appearance: state.settings.appearance) {
                 MainView(state: state, monitor: monitor, rates: rates)
                     .environmentObject(state)
-                    .frame(
-                        minWidth: Self.minimumSize.width,
-                        minHeight: Self.minimumSize.height
-                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         )
     }
 
+    /// Shrink / expand the panel when switching 极简 ↔ 完整.
+    func resizeForMode(minimal: Bool) {
+        guard let window else {
+            if let state = lastState { refreshAppearance(state: state) }
+            return
+        }
+        // Resize window first so full panel is not laid out inside a tiny frame (looks "empty").
+        let size = minimal ? Self.minimalSize : Self.defaultSize
+        let minSize = minimal ? Self.minimalMinimum : Self.minimumSize
+        if minimal {
+            window.minSize = minSize
+            window.setContentSize(size)
+        } else {
+            window.minSize = NSSize(width: 800, height: 520)
+            window.setContentSize(size)
+            window.minSize = minSize
+        }
+        AppActivation.centerWindow(window)
+        if let state = lastState {
+            refreshAppearance(state: state)
+        }
+    }
+
     private func present(state: AppState, intent: AppState.PanelIntent) {
+        lastState = state
         bindExistingPanelIfNeeded()
         AppActivation.closeDuplicateWindows(withID: AppActivation.panelID, keeping: window)
 
@@ -271,13 +296,16 @@ final class PanelPresenter {
         }
         IconManager.applyBundledAppIcon()
 
+        let preferred = state.settings.macMinimalHome ? Self.minimalSize : Self.defaultSize
+        let minSize = state.settings.macMinimalHome ? Self.minimalMinimum : Self.minimumSize
+
         if host == nil || window == nil {
             let root = panelRoot(state: state, monitor: monitor, rates: rates)
             let controller = NSHostingController(rootView: root)
             let win = NSWindow(contentViewController: controller)
             win.title = "BashX"
-            win.setContentSize(Self.defaultSize)
-            win.minSize = Self.minimumSize
+            win.setContentSize(preferred)
+            win.minSize = minSize
             win.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             win.titlebarAppearsTransparent = false
             win.titleVisibility = .visible
@@ -308,12 +336,20 @@ final class PanelPresenter {
         } else if let window {
             rebindOpenPanelIfNeeded(state: state)
             // Do NOT replace rootView on every open — resets @State and can freeze hit-testing on Ventura.
-            let preferred = Self.defaultSize
+            window.minSize = minSize
             let current = window.contentLayoutRect.size
-            if current.width < preferred.width - 20 || current.height < preferred.height - 20 {
-                window.setContentSize(preferred)
+            let target = preferred
+            if state.settings.macMinimalHome {
+                if abs(current.width - target.width) > 40 || abs(current.height - target.height) > 40 {
+                    window.setContentSize(target)
+                    AppActivation.centerWindow(window)
+                }
+            } else if abs(current.width - target.width) > 60 || abs(current.height - target.height) > 60 {
+                window.setContentSize(target)
                 AppActivation.centerWindow(window)
             }
+            // Avoid remounting rootView on every open (Ventura hit-testing / @State reset).
+            applyPanelChrome(window, appearance: state.settings.appearance)
         }
 
         AppActivation.closeDuplicateWindows(withID: AppActivation.panelID, keeping: window)

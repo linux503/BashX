@@ -8,7 +8,10 @@
 
 1. 本机执行：`./scripts/build_dmg.sh`
 2. 把 `dist/BashX-x.y.z.dmg` 发给对方（尽量用网盘 / AirDrop，少用微信压缩二次打包）
-3. 对方：**右键** DMG 里的「一键解锁并打开」→ 打开 → 需要时再点「仍要打开」
+3. 对方打开 DMG，**右键「安装.command」→ 打开** → 输入管理员密码  
+   （不要只拖 BashX.app；双击可能提示「已损坏」）
+
+DMG 内仅含：`BashX.app`、`Applications`、`安装.command`。
 
 ## 一劳永逸（推荐）
 

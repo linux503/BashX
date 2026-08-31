@@ -5,9 +5,10 @@ import AppKit
 
 /// Keep Cursor IDE / agent streams usable while BashX is running.
 enum CursorReliability {
-    static let probeURL = "https://cursor.com"
-    static let fallbackProbeURL = "https://api2.cursor.sh"
-    static let autoTestURL = "https://cursor.com"
+    /// Prefer API host used by the IDE agent — marketing site is a weak liveness signal.
+    static let probeURL = "https://api2.cursor.sh"
+    static let fallbackProbeURL = "https://cursor.com"
+    static let autoTestURL = "https://api2.cursor.sh"
 
     static func isCursorRunning() -> Bool {
         #if os(macOS)

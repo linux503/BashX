@@ -81,13 +81,8 @@ DOMAIN-SUFFIX,pglstatp-toutiao.com,REJECT
 DOMAIN-SUFFIX,pangolin-sdk-toutiao.com,REJECT
 DOMAIN-SUFFIX,pangolin-sdk-toutiao1.com,REJECT
 DOMAIN-SUFFIX,api-access.pangolin-sdk-toutiao.com,REJECT
-DOMAIN-SUFFIX,is.snssdk.com,REJECT
 DOMAIN-SUFFIX,ad.toutiao.com,REJECT
 DOMAIN-SUFFIX,dm.toutiao.com,REJECT
-DOMAIN-SUFFIX,lf.snssdk.com,REJECT
-DOMAIN-SUFFIX,i.snssdk.com,REJECT
-DOMAIN-SUFFIX,bds.snssdk.com,REJECT
-DOMAIN-SUFFIX,dig.bdurl.net,REJECT
 DOMAIN-SUFFIX,ad.zijieapi.com,REJECT
 DOMAIN-SUFFIX,ad.oceanengine.com,REJECT
 DOMAIN-SUFFIX,luckycat-dypay.ixigua.com,REJECT
@@ -143,6 +138,14 @@ DOMAIN-SUFFIX,tpns.qq.com,REJECT
 DOMAIN-SUFFIX,mi.gdt.qq.com,REJECT
 DOMAIN-SUFFIX,c.gdt.qq.com,REJECT
 DOMAIN-SUFFIX,ads.video.qq.com,REJECT
+DOMAIN,activity.video.qq.com,REJECT
+DOMAIN,info4.video.qq.com,REJECT
+DOMAIN,info6.video.qq.com,REJECT
+DOMAIN,vv6.video.qq.com,REJECT
+DOMAIN,tmead.y.qq.com,REJECT
+DOMAIN,tmeadbak.y.qq.com,REJECT
+DOMAIN,pgdt.ugdtimg.com,REJECT
+DOMAIN-SUFFIX,ugdtimg.com,REJECT
 
 # —— 芒果 TV ——
 DOMAIN-SUFFIX,da.mgtv.com,REJECT

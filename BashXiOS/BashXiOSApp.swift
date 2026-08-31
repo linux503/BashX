@@ -29,6 +29,10 @@ private struct RootContainer: View {
                 RootTabView()
             }
         }
+        .task {
+            // Cold start: onChange(scenePhase) may not fire for the initial .active.
+            await state.vpn.recoverIfNeeded()
+        }
         .onChange(of: scenePhase) { phase in
             if phase == .background {
                 state.lockApp()

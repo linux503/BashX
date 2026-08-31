@@ -149,10 +149,6 @@ private struct MenuBarFrozenContent: View, Equatable {
 
         nodePickerSection
 
-        Button(t("mac.menu.openGroups")) {
-            PanelPresenter.shared.open(state: state, intent: .groups)
-        }
-
         Divider()
 
         Toggle(isOn: Binding(
@@ -428,7 +424,7 @@ private struct MenuBarSnapshot: Equatable {
         proxyMode: .rule,
         proxyModeTitle: ProxyMode.rule.title,
         systemProxyOn: false,
-        tunEnabled: false,
+        tunEnabled: true,
         videoAdBlockEnabled: false,
         closeConnectionsOnSwitch: true,
         subscriptions: [],

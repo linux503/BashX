@@ -20,8 +20,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let logQueue = DispatchQueue(label: "bashx.tunnel.log", qos: .utility)
     private var lastOutboundIF: String = ""
     private var lastPathCloseAt: Date = .distantPast
+    private var lastConnCloseAt: Date = .distantPast
     /// Require consecutive dead-core ticks before cancel — single false read caused flap loops.
     private var coreDeadStreak = 0
+    private var healInFlight = false
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         // Keep prior session tail for diagnosing abrupt jetsam kills.
@@ -37,6 +39,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let home = Paths.mihomoHomeDir.path
         BridgeSetHomeDir(home)
         writeLog("home=\(home) appGroup=\(Paths.usesAppGroup)")
+
+        // Drop stale group selections only when corrupted — wiping every start forced
+        // full re-heal and spiked RSS right after On-Demand restart (jetsam death loop).
+        let cacheURL = Paths.mihomoHomeDir.appendingPathComponent("cache.db")
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: cacheURL.path),
+           let size = attrs[.size] as? NSNumber, size.intValue > 8 * 1024 * 1024 {
+            try? FileManager.default.removeItem(at: cacheURL)
+            writeLog("scrubbed oversized cache.db (\(size.intValue / 1024)KB)")
+        }
 
         let configPath = Paths.mihomoConfigURL.path
         guard FileManager.default.fileExists(atPath: configPath) else {
@@ -350,6 +361,30 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         NEIPv4Route(destinationAddress: "211.95.0.0", subnetMask: "255.255.0.0"),
     ]
 
+    /// Telegram DC IPv6 prefixes (clients dial these literals; must enter TUN).
+    private static let telegramIPv6Routes: [NEIPv6Route] = [
+        NEIPv6Route(destinationAddress: "2001:67c:4e8::", networkPrefixLength: 48),
+        NEIPv6Route(destinationAddress: "2001:b28:f23c::", networkPrefixLength: 48),
+        NEIPv6Route(destinationAddress: "2001:b28:f23d::", networkPrefixLength: 48),
+        NEIPv6Route(destinationAddress: "2001:b28:f23f::", networkPrefixLength: 48),
+    ]
+
+    /// Apple APNs IPv6 — without these, Happy-Eyeballs tries physical v6 first and stalls pushes.
+    private static let apnsIPv6Routes: [NEIPv6Route] = [
+        NEIPv6Route(destinationAddress: "2620:149:a44::", networkPrefixLength: 48),
+        NEIPv6Route(destinationAddress: "2403:300:a42::", networkPrefixLength: 48),
+        NEIPv6Route(destinationAddress: "2403:300:a51::", networkPrefixLength: 48),
+        NEIPv6Route(destinationAddress: "2a01:b740:a42::", networkPrefixLength: 48),
+    ]
+
+    private static func loadTelegramPushEnabled() -> Bool {
+        let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+        if ud?.object(forKey: AppConstants.iosTelegramPushKey) != nil {
+            return ud?.bool(forKey: AppConstants.iosTelegramPushKey) ?? true
+        }
+        return true
+    }
+
     private func makeNetworkSettings(tunnelCapture: Bool) -> NEPacketTunnelNetworkSettings {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "254.1.1.1")
         settings.mtu = 1400
@@ -360,10 +395,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             // Keep WeChat / Tencent CDN on the physical path during any brief core boot window.
             ipv4.excludedRoutes = Self.wechatBypassRoutes
             settings.ipv4Settings = ipv4
-            // Do NOT capture IPv6: mihomo runs with ipv6:false, and WeChat media often
-            // prefers IPv6 CDN — swallowing v6 into TUN then dropping it breaks 发图.
-            // Leaving IPv6 on the physical path keeps domestic apps working.
-            settings.ipv6Settings = nil
+            // Keep most IPv6 on the physical path (WeChat media CDN). Pull Telegram DC +
+            // (when enabled) APNs IPv6 into TUN — otherwise Happy-Eyeballs hangs on blocked v6.
+            let ipv6 = NEIPv6Settings(addresses: ["fd00:beef::1"], networkPrefixLengths: [64])
+            var v6Routes = Self.telegramIPv6Routes
+            if Self.loadTelegramPushEnabled() {
+                v6Routes.append(contentsOf: Self.apnsIPv6Routes)
+            }
+            ipv6.includedRoutes = v6Routes
+            settings.ipv6Settings = ipv6
 
             let dns = NEDNSSettings(servers: [AppConstants.tunDNS])
             dns.matchDomains = [""]
@@ -535,16 +575,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func startMemoryManagement() {
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        // Keep RSS under iOS NE jetsam budget (~15–50MB depending on device).
-        timer.schedule(deadline: .now() + 30, repeating: 60)
+        // Jetsam ~50MB. Baseline NE RSS is often 50–70MB — do NOT closeAll on that
+        // (was killing Telegram MTProto every 8s → "Telegram 没网").
+        timer.schedule(deadline: .now() + 8, repeating: 12)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             self.gcTickCount += 1
             let footprint = Self.residentMemoryBytes()
-            if footprint > 18 * 1024 * 1024 {
+            #if canImport(MihomoCore)
+            if footprint > 14 * 1024 * 1024 {
                 BridgeForceGC()
             }
-            if self.gcTickCount.isMultiple(of: 2) {
+            // Only tear connections near jetsam — and throttle hard.
+            let nearJetsam = footprint > 42 * 1024 * 1024
+            let cooled = Date().timeIntervalSince(self.lastConnCloseAt) > 45
+            if nearJetsam, cooled {
+                self.lastConnCloseAt = Date()
+                self.closeAllConnectionsBestEffort()
+                BridgeForceGC()
+                self.writeLog("mem pressure rss=\(footprint / 1024)KB — closed conns + GC")
+            }
+            #endif
+            if self.gcTickCount.isMultiple(of: 5) {
                 let core = "up=\(BridgeGetUploadTraffic()) down=\(BridgeGetDownloadTraffic()) running=\(BridgeIsRunning()) rss=\(footprint / 1024)KB"
                 if let bridge = self.packetBridge {
                     self.writeLog(bridge.statsLine + " " + core)
@@ -566,24 +618,23 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         keepaliveTimer?.cancel()
         coreDeadStreak = 0
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        // ~15s: stay under typical NE idle (~30–60s) without hammering CPU/jetsam.
-        timer.schedule(deadline: .now() + 8, repeating: 15)
+        // ~20s: stay under NE idle without waking the core too often (RSS).
+        timer.schedule(deadline: .now() + 10, repeating: 20)
         timer.setEventHandler { [weak self] in
             guard let self, self.proxyStarted else { return }
             #if canImport(MihomoCore)
             if !BridgeIsRunning() {
                 self.coreDeadStreak += 1
                 self.writeLog("keepalive: mihomo running=false streak=\(self.coreDeadStreak)")
-                if self.coreDeadStreak >= 2 {
-                    self.writeLog("keepalive: mihomo dead — canceling tunnel for recovery")
-                    self.cancelTunnelWithError(NSError(domain: "BashX", code: -40, userInfo: [
-                        NSLocalizedDescriptionKey: "核心已停止，正在重连"
-                    ]))
-                }
+                // Do NOT cancelTunnel — that + On-Demand was a flap loop.
+                // Leave the NE up; system/On-Demand handles truly dead providers.
                 return
             }
             self.coreDeadStreak = 0
             #endif
+            // Skip extra DNS pulses under memory pressure — they open more sockets during Douyin.
+            let rss = Self.residentMemoryBytes()
+            let skipPulse = rss > 30 * 1024 * 1024
             // 1) Touch local API (cheap health check).
             if let url = URL(string: "http://\(AppConstants.externalController)/version") {
                 var req = URLRequest(url: url, timeoutInterval: 3)
@@ -593,6 +644,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 Self.localAPISession().dataTask(with: req).resume()
             }
+            guard !skipPulse else { return }
             // 2) Real TUN activity — DNS query via tunnel DNS (packetFlow path).
             self.packetBridge?.injectDNSKeepalive(to: AppConstants.tunDNS)
             self.pulseTunnelDNS()
@@ -637,6 +689,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 self?.selectSavedNode(override)
             }
         }
+        // Heal quickly — waiting 3s left XR on a dead leaf with no proxy path.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.healDeadSelectedNode()
+        }
     }
 
     private func selectSavedNode(_ override: String? = nil) {
@@ -644,8 +700,80 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             ?? UserDefaults(suiteName: AppConstants.appGroupIdentifier)?.string(forKey: "selectedNode")
         guard let name, !name.isEmpty else { return }
         // rule → PROXY; global → GLOBAL；两边都同步，避免切全局后仍走 DIRECT。
-        selectGroupProxy(group: "PROXY", name: name)
+        selectGroupProxy(group: "PROXY", name: name) { [weak self] code in
+            // Missing from config (400) — fail over immediately.
+            if code == 400 || code == 404 {
+                self?.healDeadSelectedNode()
+            }
+        }
         selectGroupProxy(group: "GLOBAL", name: name)
+        selectGroupProxy(group: "GOOGLE", name: name)
+        selectGroupProxy(group: "TELEGRAM", name: name)
+    }
+
+    /// If the pinned leaf cannot dial (vmess timeout / 502), try other PROXY members.
+    private func healDeadSelectedNode() {
+        if healInFlight { return }
+        healInFlight = true
+        Task { [weak self] in
+            defer { self?.healInFlight = false }
+            guard let self else { return }
+            let preferred = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                .string(forKey: "selectedNode") ?? ""
+            let testURL = "https://www.gstatic.com/generate_204"
+            if !preferred.isEmpty {
+                let (ok, ms, err) = await Self.mihomoDelay(proxy: preferred, testURL: testURL, timeoutMs: 5000)
+                if ok {
+                    self.writeLog("heal node OK \(preferred) \(ms)ms")
+                    return
+                }
+                self.writeLog("heal node FAIL \(preferred): \(err ?? "?") — trying alternates")
+            }
+            let candidates = await self.fetchProxyGroupMembers(group: "PROXY")
+            let ordered = Self.prioritizeAsiaNodes(candidates, excluding: preferred)
+            for name in ordered.prefix(8) {
+                let (ok, ms, _) = await Self.mihomoDelay(proxy: name, testURL: testURL, timeoutMs: 4500)
+                guard ok else { continue }
+                self.writeLog("heal switched → \(name) \(ms)ms")
+                self.selectSavedNode(name)
+                UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+                    .set(name, forKey: "selectedNode")
+                return
+            }
+            self.writeLog("heal: no working PROXY leaf found")
+        }
+    }
+
+    private func fetchProxyGroupMembers(group: String) async -> [String] {
+        let encoded = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
+        guard let url = URL(string: "http://\(AppConstants.externalController)/proxies/\(encoded)") else {
+            return []
+        }
+        var req = URLRequest(url: url, timeoutInterval: 4)
+        if let secret = apiSecretHeader() {
+            req.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        do {
+            let (data, _) = try await Self.localAPISession().data(for: req)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return []
+            }
+            return (json["all"] as? [String]) ?? []
+        } catch {
+            return []
+        }
+    }
+
+    private static func prioritizeAsiaNodes(_ names: [String], excluding: String) -> [String] {
+        let skip: Set<String> = [
+            excluding, "DIRECT", "REJECT", "PROXY", "GLOBAL", "COMPATIBLE",
+            "AUTO", "BALANCE", "FALLBACK", "GOOGLE", "TELEGRAM", "APNS",
+        ]
+        let keys = ["香港", "HK", "Hong Kong", "台湾", "TW", "日本", "JP", "新加坡", "SG"]
+        let leaves = names.filter { !skip.contains($0) && !$0.hasPrefix("♻️") && !$0.hasPrefix("🚀") }
+        let asia = leaves.filter { n in keys.contains(where: { n.localizedCaseInsensitiveContains($0) }) }
+        let rest = leaves.filter { n in !asia.contains(n) }
+        return asia + rest
     }
 
     private func apiSecretHeader() -> String? {
@@ -663,9 +791,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         return URLSession(configuration: config)
     }
 
-    private func selectGroupProxy(group: String, name: String) {
+    private func selectGroupProxy(group: String, name: String, completion: ((Int) -> Void)? = nil) {
         let encoded = group.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group
-        guard let url = URL(string: "http://\(AppConstants.externalController)/proxies/\(encoded)") else { return }
+        guard let url = URL(string: "http://\(AppConstants.externalController)/proxies/\(encoded)") else {
+            completion?(-1)
+            return
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -676,8 +807,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         Self.localAPISession().dataTask(with: request) { [weak self] _, response, error in
             if let error {
                 self?.writeLog("select \(group)→\(name) failed: \(error.localizedDescription)")
+                completion?(-1)
             } else if let http = response as? HTTPURLResponse {
                 self?.writeLog("select \(group)→\(name) → \(http.statusCode)")
+                completion?(http.statusCode)
+            } else {
+                completion?(-1)
             }
         }.resume()
     }
@@ -716,7 +851,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
         var byName: [String: [String: Any]] = [:]
         for (name, value) in proxies {
-            if AppConstants.hiddenProxyGroupNames.contains(name.uppercased()) { continue }
+            if AppConstants.isInternalProxyGroupName(name) { continue }
             guard let dict = value as? [String: Any],
                   let type = dict["type"] as? String,
                   AppConstants.selectableProxyGroupTypes.contains(type) else { continue }

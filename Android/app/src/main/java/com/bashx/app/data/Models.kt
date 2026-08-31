@@ -11,10 +11,10 @@ enum class ProxyMode(val title: String, val subtitle: String) {
 }
 
 @Serializable
-enum class DnsPreference(val title: String, val subtitle: String) {
-    smart("智能分流", "国内站走阿里/腾讯 DoH，国外站自动回落 Cloudflare/Google（默认）"),
-    domestic("国内优选", "默认使用国内 DNS，国外域名再回落海外解析，适合日常国内浏览"),
-    foreign("国外优选", "默认使用 Cloudflare/Google，国内域名走专用国内 DNS，适合海外节点为主");
+enum class DnsPreference(val title: String, val shortTitle: String, val subtitle: String) {
+    smart("智能分流", "智能", "国内站走阿里/腾讯 DoH，国外站自动回落 Cloudflare/Google（默认）"),
+    domestic("国内优选", "国内", "默认使用国内 DNS，国外域名再回落海外解析，适合日常国内浏览"),
+    foreign("国外优选", "国外", "默认使用 Cloudflare/Google，国内域名走专用国内 DNS，适合海外节点为主");
 }
 
 @Serializable

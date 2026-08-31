@@ -47,14 +47,37 @@ struct SettingsViewIOS: View {
 
     private var generalSection: some View {
         Section {
-            Picker(t("lang.title"), selection: Binding(
-                get: { state.settings.uiLanguage },
-                set: { state.setUiLanguage($0) }
-            )) {
-                ForEach(AppLanguage.allCases) { item in
-                    Text(item.pickerTitle).tag(item)
+            VStack(alignment: .leading, spacing: 10) {
+                Text(t("lang.title"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                HStack(spacing: 8) {
+                    ForEach(AppLanguage.allCases) { item in
+                        let selected = state.settings.uiLanguage == item
+                        Button {
+                            state.setUiLanguage(item)
+                        } label: {
+                            Text(item.shortTitle)
+                                .font(.subheadline.weight(selected ? .bold : .medium))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .foregroundStyle(selected ? Color.white : IOSTheme.accentDeep)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(selected ? AnyShapeStyle(IOSTheme.accentGradient) : AnyShapeStyle(IOSTheme.accentSoft))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+
+                Text(state.settings.uiLanguage.hint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.vertical, 4)
         } header: {
             Text(t("ios.sec.general"))
         }
@@ -66,7 +89,7 @@ struct SettingsViewIOS: View {
                 get: { state.settings.logoStyle },
                 set: { state.setLogoStyle($0) }
             ))
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
         } header: {
             Text(t("ios.sec.icon"))
         } footer: {
@@ -103,6 +126,11 @@ struct SettingsViewIOS: View {
                 set: { state.setIosOnDemandEnabled($0) }
             ))
 
+            Toggle(t("ios.tgpush.toggle"), isOn: Binding(
+                get: { state.settings.iosTelegramPushEnabled },
+                set: { state.setTelegramPushEnabled($0) }
+            ))
+
             Picker("DNS", selection: Binding(
                 get: { state.settings.dnsPreference },
                 set: { state.setDnsPreference($0) }
@@ -116,6 +144,11 @@ struct SettingsViewIOS: View {
                 get: { state.settings.videoAdBlockEnabled },
                 set: { state.setVideoAdBlock($0) }
             ))
+            NavigationLink {
+                PluginMarketViewIOS()
+            } label: {
+                Label(t("plugin.market.title"), systemImage: "puzzlepiece.extension.fill")
+            }
         } header: {
             Text(t("ios.sec.network"))
         } footer: {
@@ -123,6 +156,7 @@ struct SettingsViewIOS: View {
                 if state.settings.iosOnDemandEnabled {
                     Text(t("ios.ondemand.hint"))
                 }
+                Text(t("ios.tgpush.hint"))
                 Text(state.settings.dnsPreference.subtitle(lang: lang))
             }
         }

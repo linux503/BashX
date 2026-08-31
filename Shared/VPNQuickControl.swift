@@ -1,5 +1,6 @@
 import Foundation
 import NetworkExtension
+import Darwin
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -120,29 +121,62 @@ enum VPNQuickControl {
         }
         mgr.isEnabled = true
         if let proto = mgr.protocolConfiguration as? NETunnelProviderProtocol {
-            proto.serverAddress = profileServerAddress
+            // Mirror VPNManager.applyExclusiveProtocolOptions (Controls extension can't call it).
             proto.providerBundleIdentifier = AppConstants.tunnelBundleIdentifier
             proto.disconnectOnSleep = false
+            let ud = UserDefaults(suiteName: AppConstants.appGroupIdentifier)
+            let wantPush: Bool = {
+                if ud?.object(forKey: AppConstants.iosTelegramPushKey) != nil {
+                    return ud?.bool(forKey: AppConstants.iosTelegramPushKey) ?? true
+                }
+                return true
+            }()
+            let nodeServer = ud?.string(forKey: AppConstants.selectedNodeServerKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Mirror VPNManager: only literal IPs for includeAllNetworks.
+            let literalIP: String? = {
+                guard let s = nodeServer, !s.isEmpty else { return nil }
+                var sin = sockaddr_in()
+                var sin6 = sockaddr_in6()
+                if s.withCString({ inet_pton(AF_INET, $0, &sin.sin_addr) }) == 1 { return s }
+                if s.withCString({ inet_pton(AF_INET6, $0, &sin6.sin6_addr) }) == 1 { return s }
+                return nil
+            }()
+            let canIncludeAll = wantPush && literalIP != nil
+            proto.serverAddress = canIncludeAll ? (literalIP ?? profileServerAddress) : profileServerAddress
             if #available(iOS 14.2, *) {
-                proto.includeAllNetworks = false
+                proto.includeAllNetworks = canIncludeAll
                 proto.excludeLocalNetworks = true
+            }
+            if #available(iOS 16.4, *) {
+                proto.excludeAPNs = !canIncludeAll
+                proto.excludeCellularServices = true
+            }
+            if #available(iOS 17.4, *) {
+                proto.excludeDeviceCommunication = true
             }
             mgr.protocolConfiguration = proto
         }
         if mgr.localizedDescription != profileDisplayName {
             mgr.localizedDescription = profileDisplayName
         }
-        // Always arm on-demand while connected so sleep / Wi‑Fi flips auto-recover.
-        let rule = NEOnDemandRuleConnect()
-        rule.interfaceTypeMatch = .any
-        mgr.onDemandRules = [rule]
-        mgr.isOnDemandEnabled = true
+        // Respect in-app on-demand preference (forced always-on caused reconnect storms).
+        let wantOnDemand = UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
+            .bool(forKey: onDemandEnabledKey) ?? false
+        if wantOnDemand {
+            let rule = NEOnDemandRuleConnect()
+            rule.interfaceTypeMatch = .any
+            mgr.onDemandRules = [rule]
+            mgr.isOnDemandEnabled = true
+        } else {
+            mgr.onDemandRules = []
+            mgr.isOnDemandEnabled = false
+        }
         try await mgr.saveToPreferences()
         try await mgr.loadFromPreferences()
         do {
             try mgr.connection.startVPNTunnel()
             UserDefaults(suiteName: AppConstants.appGroupIdentifier)?.set(true, forKey: "vpnUserWantsConnected")
-            UserDefaults(suiteName: AppConstants.appGroupIdentifier)?.set(true, forKey: onDemandEnabledKey)
         } catch {
             throw ControlError.startFailed(error.localizedDescription)
         }

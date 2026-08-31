@@ -1,0 +1,29 @@
+{
+  "id": "lixiang-ads",
+  "name": "理想汽车去广告",
+  "summary": "拦截理想汽车 App 开屏/营销投放与埋点域名，缩短启动等待（不拦车控主接口）。",
+  "tag": "去广告",
+  "symbol": "car.side.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,marketing.lixiang.com,REJECT",
+    "DOMAIN,track.lixiang.com,REJECT",
+    "DOMAIN-KEYWORD,track.lixiang,REJECT",
+    "DOMAIN-KEYWORD,marketing.lixiang,REJECT",
+    "DOMAIN-KEYWORD,lixiang.ad,REJECT",
+    "DOMAIN-KEYWORD,lixiang-ad,REJECT",
+    "DOMAIN-KEYWORD,chehejia.ad,REJECT",
+    "DOMAIN-SUFFIX,growingio.com,REJECT",
+    "DOMAIN-SUFFIX,gio.ren,REJECT",
+    "DOMAIN-SUFFIX,sensorsdata.cn,REJECT",
+    "DOMAIN-SUFFIX,umeng.com,REJECT",
+    "DOMAIN-SUFFIX,umengcloud.com,REJECT",
+    "DOMAIN-SUFFIX,gdt.qq.com,REJECT",
+    "DOMAIN,adsmind.gdtimg.com,REJECT",
+    "DOMAIN,pgdt.gtimg.cn,REJECT",
+    "DOMAIN-SUFFIX,pangolin-sdk-toutiao.com,REJECT",
+    "DOMAIN-SUFFIX,pangle.io,REJECT",
+    "DOMAIN-SUFFIX,tingyun.com,REJECT",
+    "DOMAIN-SUFFIX,networkbench.com,REJECT"
+  ]
+}

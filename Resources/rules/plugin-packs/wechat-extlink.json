@@ -1,0 +1,16 @@
+{
+  "id": "wechat-extlink",
+  "name": "微信外部链接解锁",
+  "summary": "直连微信外链中转页（weixin110 / security.wechat），减少拦截跳转。",
+  "tag": "解锁",
+  "symbol": "link",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN-SUFFIX,weixin110.qq.com,DIRECT",
+    "DOMAIN,weixin110.qq.com,DIRECT",
+    "DOMAIN-SUFFIX,security.wechat.com,DIRECT",
+    "DOMAIN,security.wechat.com,DIRECT",
+    "DOMAIN-KEYWORD,weixin110,DIRECT",
+    "DOMAIN-KEYWORD,newredirectconfirmcgi,DIRECT"
+  ]
+}

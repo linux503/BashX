@@ -81,11 +81,11 @@ func SetOutboundInterface(name string) {
 }
 
 func init() {
-	debug.SetGCPercent(30)
-	// Network Extension jetsam is typically ~50MB. Stay under it but leave room
-	// for gVisor + a few concurrent connections (24MB was too tight → silent kills).
-	debug.SetMemoryLimit(45 * 1024 * 1024)
-	runtime.GOMAXPROCS(2)
+	// Leave headroom for Swift bridge + socket buffers; jetsam kill is ~50MB physical.
+	// 45MB soft limit still let RSS climb to 80–90MB under Douyin → silent reconnect loops.
+	debug.SetGCPercent(20)
+	debug.SetMemoryLimit(32 * 1024 * 1024)
+	runtime.GOMAXPROCS(1)
 	// GC is driven from PacketTunnelProvider (BridgeForceGC) — no duplicate ticker here.
 }
 

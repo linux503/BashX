@@ -204,11 +204,12 @@ func startMihomo(sourceBinary: String, configDir: String, expectedSHA256: String
 
 func handle(line: String) -> String {
     // Allow up to 4 fields: START|bin|dir|sha256 (sha optional for legacy clients).
+    // PROXY_RESTORE|base64 may contain no extra pipes after decode.
     let parts = line.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
     guard let cmd = parts.first?.uppercased() else { return "ERR|空命令" }
     switch cmd {
     case "PING":
-        return "PONG|v2"
+        return "PONG|v3"
     case "STOP":
         _ = runShell("pkill -9 -f 'Application Support/BashX/mihomo' 2>/dev/null || true")
         _ = runShell("pkill -9 -f 'com.bashx.tunhelper/mihomo' 2>/dev/null || true")
@@ -230,9 +231,172 @@ func handle(line: String) -> String {
             }
         }
         return "OK"
+    case "PROXY_SET":
+        // PROXY_SET|host|port — only loopback hosts allowed.
+        guard parts.count >= 3 else { return "ERR|参数不足" }
+        if let err = proxySet(host: parts[1], port: parts[2]) {
+            return "ERR|\(err)"
+        }
+        return "OK"
+    case "PROXY_OFF":
+        if let err = proxyOff() {
+            return "ERR|\(err)"
+        }
+        return "OK"
+    case "PROXY_RESTORE":
+        // PROXY_RESTORE|<base64 JSON array of snapshots>
+        guard parts.count >= 2 else { return "ERR|参数不足" }
+        if let err = proxyRestore(base64: parts[1]) {
+            return "ERR|\(err)"
+        }
+        return "OK"
     default:
         return "ERR|未知命令"
     }
+}
+
+// MARK: - System proxy (root networksetup)
+
+private let proxyBypass = [
+    "localhost", "127.0.0.1", "*.local", "*.lan",
+    "192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "169.254.0.0/16",
+]
+
+private struct ProxySnap: Codable {
+    var service: String
+    var webEnabled: Bool
+    var webHost: String
+    var webPort: String
+    var secureEnabled: Bool
+    var secureHost: String
+    var securePort: String
+    var socksEnabled: Bool
+    var socksHost: String
+    var socksPort: String
+}
+
+func listNetworkServices() -> [String] {
+    let skip = ["shadowrocket", "stash", "clash", "wireguard", "tailscale", "zerotier", "vpn", "ipsec", "utun", "tun"]
+    let output = runCapture("/usr/sbin/networksetup", ["-listallnetworkservices"]) ?? ""
+    return output
+        .split(separator: "\n")
+        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { line in
+            guard !line.isEmpty,
+                  !line.hasPrefix("An asterisk"),
+                  !line.hasPrefix("*") else { return false }
+            let lower = line.lowercased()
+            return !skip.contains { lower.contains($0) }
+        }
+}
+
+@discardableResult
+func runCapture(_ launchPath: String, _ arguments: [String]) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: launchPath)
+    process.arguments = arguments
+    let out = Pipe()
+    let err = Pipe()
+    process.standardOutput = out
+    process.standardError = err
+    do {
+        try process.run()
+        process.waitUntilExit()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)
+    } catch {
+        return nil
+    }
+}
+
+@discardableResult
+func runNetworkSetup(_ arguments: [String]) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+    process.arguments = arguments
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    } catch {
+        return false
+    }
+}
+
+func isLoopbackHost(_ host: String) -> Bool {
+    let h = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return h == "127.0.0.1" || h == "localhost" || h == "::1"
+}
+
+func proxySet(host: String, port: String) -> String? {
+    guard isLoopbackHost(host) else { return "仅允许本机代理地址" }
+    guard let p = Int(port), (1...65535).contains(p) else { return "端口无效" }
+    let services = listNetworkServices()
+    guard !services.isEmpty else { return "无可用网络服务" }
+    var okCount = 0
+    for service in services {
+        let h = host
+        let pt = "\(p)"
+        _ = runNetworkSetup(["-setwebproxy", service, h, pt])
+        _ = runNetworkSetup(["-setsecurewebproxy", service, h, pt])
+        _ = runNetworkSetup(["-setsocksfirewallproxy", service, h, pt])
+        let a = runNetworkSetup(["-setwebproxystate", service, "on"])
+        let b = runNetworkSetup(["-setsecurewebproxystate", service, "on"])
+        let c = runNetworkSetup(["-setsocksfirewallproxystate", service, "on"])
+        _ = runNetworkSetup(["-setproxybypassdomains", service] + proxyBypass)
+        if a || b || c { okCount += 1 }
+    }
+    guard okCount > 0 else { return "networksetup 写入失败" }
+    log("PROXY_SET \(host):\(port) services=\(okCount)")
+    return nil
+}
+
+func proxyOff() -> String? {
+    let services = listNetworkServices()
+    guard !services.isEmpty else { return "无可用网络服务" }
+    for service in services {
+        _ = runNetworkSetup(["-setwebproxystate", service, "off"])
+        _ = runNetworkSetup(["-setsecurewebproxystate", service, "off"])
+        _ = runNetworkSetup(["-setsocksfirewallproxystate", service, "off"])
+    }
+    log("PROXY_OFF services=\(services.count)")
+    return nil
+}
+
+func proxyRestore(base64: String) -> String? {
+    guard let data = Data(base64Encoded: base64) else { return "还原数据无效" }
+    let snaps: [ProxySnap]
+    do {
+        snaps = try JSONDecoder().decode([ProxySnap].self, from: data)
+    } catch {
+        return "还原解析失败"
+    }
+    for snap in snaps {
+        let service = snap.service
+        guard !service.isEmpty, !service.contains(".."), !service.contains(";") else { continue }
+        if snap.webEnabled, !snap.webHost.isEmpty, !snap.webPort.isEmpty {
+            _ = runNetworkSetup(["-setwebproxy", service, snap.webHost, snap.webPort])
+            _ = runNetworkSetup(["-setwebproxystate", service, "on"])
+        } else {
+            _ = runNetworkSetup(["-setwebproxystate", service, "off"])
+        }
+        if snap.secureEnabled, !snap.secureHost.isEmpty, !snap.securePort.isEmpty {
+            _ = runNetworkSetup(["-setsecurewebproxy", service, snap.secureHost, snap.securePort])
+            _ = runNetworkSetup(["-setsecurewebproxystate", service, "on"])
+        } else {
+            _ = runNetworkSetup(["-setsecurewebproxystate", service, "off"])
+        }
+        if snap.socksEnabled, !snap.socksHost.isEmpty, !snap.socksPort.isEmpty {
+            _ = runNetworkSetup(["-setsocksfirewallproxy", service, snap.socksHost, snap.socksPort])
+            _ = runNetworkSetup(["-setsocksfirewallproxystate", service, "on"])
+        } else {
+            _ = runNetworkSetup(["-setsocksfirewallproxystate", service, "off"])
+        }
+    }
+    log("PROXY_RESTORE count=\(snaps.count)")
+    return nil
 }
 
 func serveClient(_ fd: Int32, allowed: uid_t) {
@@ -248,7 +412,8 @@ func serveClient(_ fd: Int32, allowed: uid_t) {
         return
     }
 
-    var buffer = [UInt8](repeating: 0, count: 4096)
+    // PROXY_RESTORE payloads can be a few KB.
+    var buffer = [UInt8](repeating: 0, count: 64 * 1024)
     let n = read(fd, &buffer, buffer.count)
     guard n > 0 else { return }
     let raw = String(bytes: buffer[0..<n], encoding: .utf8)?

@@ -20,6 +20,13 @@ struct MonitorPane: View {
             case .logs: return L10n.t("mac.monitor.logs", lang)
             }
         }
+
+        var systemImage: String {
+            switch self {
+            case .connections: return "link.circle.fill"
+            case .logs: return "text.alignleft"
+            }
+        }
     }
 
     private func t(_ key: String) -> String { L10n.t(key, lang) }
@@ -33,21 +40,21 @@ struct MonitorPane: View {
             trafficHeader
             Rectangle().fill(BashXTheme.hairline(for: appearance)).frame(height: 1)
 
-            HStack {
-                Picker("", selection: $segment) {
-                    ForEach(MonitorSegment.allCases) { s in
-                        Text(s.title(lang)).tag(s)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 180)
+            HStack(spacing: 10) {
+                monitorSegmentBar
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 if segment == .connections {
                     Text(t("mac.monitor.count").replacingOccurrences(of: "%@", with: "\(monitor.connectionCount)"))
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(BashXTheme.secondaryFill(for: appearance))
+                        )
                     Button(t("mac.monitor.clearConn")) { onCloseAll() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -59,8 +66,8 @@ struct MonitorPane: View {
                         .disabled(monitor.logLines.isEmpty)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
 
             Rectangle().fill(BashXTheme.hairline(for: appearance)).frame(height: 1)
 
@@ -76,41 +83,82 @@ struct MonitorPane: View {
         }
     }
 
+    private var monitorSegmentBar: some View {
+        HStack(spacing: 3) {
+            ForEach(MonitorSegment.allCases) { s in
+                let selected = segment == s
+                Button {
+                    withAnimation(.easeOut(duration: 0.14)) { segment = s }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: s.systemImage)
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(s.title(lang))
+                            .font(.system(size: 11, weight: selected ? .bold : .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(selected ? Color.white : BashXTheme.secondaryLabel(for: appearance))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background {
+                        Capsule(style: .continuous)
+                            .fill(selected ? BashXTheme.accent(for: appearance) : Color.clear)
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule(style: .continuous)
+                .fill(BashXTheme.secondaryFill(for: appearance).opacity(0.85))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(BashXTheme.hairline(for: appearance), lineWidth: 0.8)
+                )
+        }
+    }
+
     private var trafficHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .fill(downTint.opacity(appearance == .dark ? 0.24 : 0.14))
-                        .frame(width: 34, height: 34)
+                        .frame(width: 30, height: 30)
                     Image(systemName: "chart.line.uptrend.xyaxis")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(downTint)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text(t("mac.monitor.traffic"))
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    Text(trafficLive ? t("mac.monitor.live") : t("mac.monitor.offline"))
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(trafficLive ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(trafficLive ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
+                            .frame(width: 5, height: 5)
+                        Text(trafficLive ? t("mac.monitor.live") : t("mac.monitor.offline"))
+                            .font(PanelMetrics.micro)
+                            .foregroundStyle(trafficLive ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
+                    }
                 }
 
                 Spacer(minLength: 8)
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("↓ \(ByteFormat.size(panel.downTotal))")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    Text("↓ \(panel.downMbps)/s")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(downTint)
                         .monospacedDigit()
-                    Text("↑ \(ByteFormat.size(panel.upTotal))")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    Text("↑ \(panel.upMbps)/s")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundStyle(upTint)
                         .monospacedDigit()
                 }
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 monitorRateCard(
                     title: t("mac.monitor.down"),
                     symbol: "arrow.down.circle.fill",
@@ -125,6 +173,14 @@ struct MonitorPane: View {
                 )
             }
 
+            TrafficSessionTotalsView(
+                panel: panel,
+                downTint: downTint,
+                upTint: upTint,
+                appearance: appearance,
+                lang: lang
+            )
+
             TrafficChartView(
                 samples: panel.samples,
                 downTint: downTint,
@@ -134,57 +190,63 @@ struct MonitorPane: View {
                 style: .monitor,
                 lang: lang
             )
-            .frame(height: 156)
-        }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 0, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            downTint.opacity(appearance == .dark ? 0.10 : 0.06),
-                            upTint.opacity(appearance == .dark ? 0.05 : 0.03),
-                            Color.clear,
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            .frame(height: 132)
+            .padding(8)
+            .background {
+                RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                    .fill(BashXTheme.card(for: appearance).opacity(0.72))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                            .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
                     )
-                )
+            }
+        }
+        .padding(12)
+        .background {
+            LinearGradient(
+                colors: [
+                    downTint.opacity(appearance == .dark ? 0.10 : 0.06),
+                    upTint.opacity(appearance == .dark ? 0.05 : 0.03),
+                    Color.clear,
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         }
         .transaction { $0.animation = nil }
     }
 
     private func monitorRateCard(title: String, symbol: String, value: String, tint: Color) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: symbol)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(tint)
                 .symbolRenderingMode(.hierarchical)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(value)
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
                         .monospacedDigit()
                     Text("/s")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .font(PanelMetrics.caption)
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(tint.opacity(0.22), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                        .strokeBorder(tint.opacity(0.22), lineWidth: 0.6)
                 )
         }
     }
@@ -192,82 +254,125 @@ struct MonitorPane: View {
     private var connectionsList: some View {
         Group {
             if !coreAlive {
-                emptyState(t("mac.monitor.coreOff"), t("mac.monitor.coreOffHint"))
+                emptyState(
+                    icon: "bolt.slash.fill",
+                    title: t("mac.monitor.coreOff"),
+                    subtitle: t("mac.monitor.coreOffHint")
+                )
             } else if monitor.connections.isEmpty {
-                emptyState(t("mac.monitor.noConn"), t("mac.monitor.noConnHint"))
+                emptyState(
+                    icon: "antenna.radiowaves.left.and.right",
+                    title: t("mac.monitor.noConn"),
+                    subtitle: t("mac.monitor.noConnHint")
+                )
             } else {
-                List {
-                    ForEach(monitor.connections) { row in
-                        connectionRow(row)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .contextMenu {
-                                Button(t("mac.monitor.closeConn")) {
-                                    Task { await monitor.closeConnection(id: row.id) }
+                ScrollView {
+                    LazyVStack(spacing: 7) {
+                        ForEach(monitor.connections) { row in
+                            connectionCard(row)
+                                .contextMenu {
+                                    Button(t("mac.monitor.closeConn")) {
+                                        Task { await monitor.closeConnection(id: row.id) }
+                                    }
                                 }
-                            }
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                 }
-                .listStyle(.inset(alternatesRowBackgrounds: true))
-                .scrollContentBackground(.hidden)
             }
         }
     }
 
-    private func connectionRow(_ row: ConnectionRow) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func connectionCard(_ row: ConnectionRow) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 Text(row.host)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
                     .lineLimit(1)
                 Spacer(minLength: 6)
                 if !row.network.isEmpty {
-                    Text(row.network)
+                    Text(row.network.uppercased())
                         .font(.system(size: 9, weight: .bold, design: .rounded))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.primary.opacity(0.06)))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(BashXTheme.accent(for: appearance))
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(BashXTheme.accentSoft(for: appearance))
+                        )
                 }
             }
-            HStack(spacing: 10) {
+
+            HStack(spacing: 8) {
                 if !row.process.isEmpty {
-                    Label(row.process, systemImage: "app.badge")
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundStyle(.secondary)
+                    Label(row.process, systemImage: "app.fill")
+                        .font(PanelMetrics.caption)
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                         .lineLimit(1)
                 }
                 Text(row.chain)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(BashXTheme.accent(for: appearance))
                     .lineLimit(1)
-                Spacer()
-                Text("↓\(ByteFormat.size(row.download)) ↑\(ByteFormat.size(row.upload))")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Text("↓\(ByteFormat.size(row.download))  ↑\(ByteFormat.size(row.upload))")
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
-            Text(row.rule)
-                .font(.system(size: 10, design: .rounded))
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
+
+            if !row.rule.isEmpty {
+                Text(row.rule)
+                    .font(PanelMetrics.micro)
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                    .lineLimit(1)
+            }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background {
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
+                .overlay(
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                )
+        }
     }
 
     private var logsList: some View {
         Group {
             if !coreAlive {
-                emptyState(t("mac.monitor.coreOff"), t("mac.monitor.logsOffHint"))
+                emptyState(
+                    icon: "bolt.slash.fill",
+                    title: t("mac.monitor.coreOff"),
+                    subtitle: t("mac.monitor.logsOffHint")
+                )
             } else if monitor.logLines.isEmpty {
-                emptyState(t("mac.monitor.waitLogs"), t("mac.monitor.waitLogsHint"))
+                emptyState(
+                    icon: "text.badge.plus",
+                    title: t("mac.monitor.waitLogs"),
+                    subtitle: t("mac.monitor.waitLogsHint")
+                )
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 4) {
+                        LazyVStack(alignment: .leading, spacing: 3) {
                             ForEach(Array(monitor.logLines.enumerated()), id: \.offset) { idx, line in
                                 Text(line)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(.primary.opacity(0.85))
+                                    .foregroundStyle(BashXTheme.primaryLabel(for: appearance).opacity(0.88))
                                     .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background {
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(idx % 2 == 0
+                                                  ? BashXTheme.card(for: appearance)
+                                                  : BashXTheme.secondaryFill(for: appearance).opacity(0.35))
+                                    }
                                     .id(idx)
                             }
                         }
@@ -283,13 +388,21 @@ struct MonitorPane: View {
         }
     }
 
-    private func emptyState(_ title: String, _ subtitle: String) -> some View {
-        VStack(spacing: 8) {
+    private func emptyState(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(BashXTheme.accentSoft(for: appearance))
+                    .frame(width: 52, height: 52)
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+            }
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
             Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(PanelMetrics.caption)
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

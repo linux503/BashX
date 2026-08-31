@@ -62,7 +62,8 @@ enum ClashConfigParser {
                 ? nodes.filter { !Self.isPlaceholderNodeName($0.name) }
                 : real
             guard !pool.isEmpty else { return nodes }
-            let cap = 24
+            // Keep NE under ~50MB jetsam budget — 24 leaves + sniffer was killing tunnels (80MB+).
+            let cap = 12
             let selected = selectedName.flatMap { name in pool.first(where: { $0.name == name }) }
             var names = Self.urlTestPool(from: pool.map(\.name), selected: selected?.name, limit: cap)
             if names.isEmpty { names = Array(pool.prefix(cap).map(\.name)) }
@@ -103,15 +104,30 @@ enum ClashConfigParser {
         // iOS NE: never ship PROCESS / GEOSITE / GEOIP — no process matcher, no geo DB
         // (normalize* used to re-inject them → mihomo Parse hang / start fail).
         let scrubbed = forIOS ? Self.scrubIOSIncompatibleRules(rewrittenRules) : rewrittenRules
-        let finalRules = scrubbed.isEmpty ? AppSettings.defaultRules : scrubbed
-
-        // Leaves for PROXY hub (no nested strategy groups — avoids loops).
-        let proxyLeaves: [String] = {
-            if poolSource.isEmpty { return ["DIRECT"] }
-            let capped = forIOS
-                ? Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
-                : Self.urlTestPool(from: poolSource, selected: selected, limit: 48)
-            return capped.isEmpty ? ["DIRECT"] : capped
+        let finalRules: [String] = {
+            let base = scrubbed.isEmpty ? AppSettings.defaultRules : scrubbed
+            guard forIOS else { return base }
+            // Prepend DNS / APNS / WeChat / 电商 DIRECT so MATCH,PROXY cannot hijack.
+            // APNS rules must sit ABOVE any apple.com DIRECT/APPLE suffix or CIDR leftovers.
+            var out = IosDirectDomains.dnsBootstrapDirectRules
+            out.append(contentsOf: IosRoutingRules.apnsPriorityRules)
+            out.append(contentsOf: IosDirectDomains.wechatPriorityRules)
+            out.append(contentsOf: IosDirectDomains.tiktokPriorityRules)
+            out.append(contentsOf: IosDirectDomains.ecommercePriorityRules)
+            out.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules)
+            out.append(contentsOf: IosDirectDomains.bankPriorityRules)
+            out.append(contentsOf: IosDirectDomains.douyinPriorityRules)
+            out.append(contentsOf: IosProxyDomains.rules)
+            let head = base.filter { !$0.uppercased().hasPrefix("MATCH,") }
+            // Drop duplicate APNS lines already prepended (base from RuntimeRules also has them).
+            let apnsMarkers = ["PUSH.APPLE.COM", "17.249.", "17.252.", "17.57.144.", "17.188.128.", "17.188.20.", "PUSH-APPLE.COM"]
+            let filteredHead = head.filter { line in
+                let u = line.uppercased()
+                return !apnsMarkers.contains { u.contains($0) }
+            }
+            out.append(contentsOf: filteredHead)
+            out.append("MATCH,PROXY")
+            return out
         }()
 
         // ACL4SSR / Clash Verge style hub names used by PROXY select & 策略组 panel.
@@ -119,20 +135,27 @@ enum ClashConfigParser {
         let balanceHubName = "BALANCE"
         let fallbackHubName = "FALLBACK"
 
+        // Always keep PROXY as select with strategy hubs + DIRECT escape hatch.
+        // Hub chips (smart/LB/FO) pick AUTO/BALANCE/FALLBACK inside PROXY — never rewrite PROXY
+        // into url-test of leaves only (that blackholes the whole machine when all nodes die).
         let proxyGroupList: [String] = {
             var list: [String]
             if names.isEmpty {
                 list = ["DIRECT"]
-            } else if !forIOS, proxyHubMode != .manual {
-                // Smart / LB / failover: PROXY *is* the auto hub — concrete leaves only.
-                list = proxyLeaves
             } else if forIOS {
                 // iOS: real nodes first (NE cannot nest url-test). Prefer leaf so MATCH,PROXY works.
                 let leaves = Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
                 list = leaves + [autoHubName, "JP", "HK", "US", "TW", "DIRECT"]
             } else {
-                // Manual Mac: ACL4SSR entry — AUTO / BALANCE / FALLBACK + regions + nodes.
-                list = [autoHubName, balanceHubName, fallbackHubName, "JP", "HK", "US", "TW"]
+                let hubFirst: String = {
+                    switch proxyHubMode {
+                    case .smart: return autoHubName
+                    case .loadBalance: return balanceHubName
+                    case .failover: return fallbackHubName
+                    case .manual: return autoHubName
+                    }
+                }()
+                list = [hubFirst, autoHubName, balanceHubName, fallbackHubName, "JP", "HK", "US", "TW"]
                     + poolSource + ["DIRECT"]
             }
             if let selected, proxyHubMode == .manual || forIOS {
@@ -143,35 +166,14 @@ enum ClashConfigParser {
             return list.filter { seen.insert($0).inserted }
         }()
 
+        let proxyHubGroup: [String: Any] = [
+            "name": "PROXY",
+            "type": "select",
+            "proxies": proxyGroupList,
+        ]
         let probeURL = "https://www.gstatic.com/generate_204"
         let hubInterval = turboMode ? 300 : 180
         let hubTolerance = turboMode ? 50 : 40
-
-        let proxyHubGroup: [String: Any] = {
-            if forIOS || proxyHubMode == .manual {
-                return [
-                    "name": "PROXY",
-                    "type": "select",
-                    "proxies": proxyGroupList
-                ]
-            }
-            // Hub chips map PROXY itself to url-test / load-balance / fallback (Clash Verge pattern).
-            var g: [String: Any] = [
-                "name": "PROXY",
-                "type": proxyHubMode.clashType,
-                "proxies": proxyGroupList,
-                "url": probeURL,
-                "interval": hubInterval,
-                "lazy": true,
-            ]
-            if proxyHubMode == .smart {
-                g["tolerance"] = hubTolerance
-            }
-            if proxyHubMode == .loadBalance {
-                g["strategy"] = "consistent-hashing"
-            }
-            return g
-        }()
         // Prefer Asia hubs for TELEGRAM/GOOGLE url-test; cap so health checks finish.
         // iOS NE has a tight RAM budget: keep pools small or jetsam kills the tunnel.
         let urlTestLimit = forIOS ? 8 : 36
@@ -183,7 +185,7 @@ enum ClashConfigParser {
             let asia = Self.regionPool(
                 from: poolSource,
                 keys: ["香港", "HK", "Hong Kong", "新加坡", "SG", "Singapore", "日本", "JP", "Japan", "台湾", "TW", "Taiwan"],
-                selected: nil,
+                selected: selected,
                 limit: forIOS ? iosPickerLimit : 16
             )
             let pool = (asia == ["DIRECT"] || asia.isEmpty)
@@ -196,7 +198,12 @@ enum ClashConfigParser {
         let googleProxies: [String] = {
             if poolSource.isEmpty { return ["DIRECT"] }
             if forIOS {
-                return Self.urlTestPool(from: poolSource, selected: selected, limit: iosPickerLimit)
+                // Follow PROXY (user node) first — same reliability as Telegram.
+                var list = Self.urlTestPool(from: poolSource, selected: selected, limit: iosPickerLimit)
+                list.removeAll { $0 == "PROXY" }
+                list.insert("PROXY", at: 0)
+                if !list.contains("DIRECT") { list.append("DIRECT") }
+                return list
             }
             return Self.urlTestPool(from: poolSource, selected: selected, limit: urlTestLimit)
         }()
@@ -207,7 +214,9 @@ enum ClashConfigParser {
                 return Self.urlTestPool(from: poolSource, selected: selected, limit: iosPickerLimit)
             }
             // Cap AUTO like TELEGRAM/GOOGLE — full-list url-test burns CPU/battery on large airports.
-            return Self.urlTestPool(from: poolSource, selected: selected, limit: urlTestLimit)
+            var pool = Self.urlTestPool(from: poolSource, selected: selected, limit: urlTestLimit)
+            if !pool.contains("DIRECT") { pool.append("DIRECT") }
+            return pool
         }()
 
         let aiPinned = stableAINodeName.flatMap { realNames.contains($0) ? $0 : nil } ?? selected
@@ -254,6 +263,7 @@ enum ClashConfigParser {
                     Self.iosSelectGroup(name: "US", proxies: usProxies),
                     Self.iosSelectGroup(name: "TW", proxies: twProxies),
                 ] + Self.telegramGroups(proxies: telegramProxies, forIOS: true)
+                    + Self.apnsGroups(proxies: telegramProxies, selected: selected, forIOS: true)
                     + cursorGroups + aiGroups + serviceGroups
             }
             // Shadowrocket-style: GOOGLE prefers JP, then HK, then GOOGLE-AUTO / PROXY.
@@ -311,6 +321,7 @@ enum ClashConfigParser {
                 googleAuto,
                 googleSelect,
             ] + regionGroups + Self.telegramGroups(proxies: telegramProxies, forIOS: false)
+                + Self.apnsGroups(proxies: telegramProxies, selected: selected, forIOS: false)
                 + cursorGroups + aiGroups + serviceGroups
         }()
 
@@ -330,7 +341,8 @@ enum ClashConfigParser {
             "log-level": forIOS ? "warning" : "warning",
             "external-controller": controller,
             "secret": secret,
-            "ipv6": false,
+            // TUN + Telegram DC literals (Telegra2/keepcoder) need IPv6 stack; dns.ipv6 stays false.
+            "ipv6": forIOS || tunEnabled,
             // Same as Clash Verge / Meta — one delay per proxy instead of per hop.
             "unified-delay": true,
             "dns": forIOS
@@ -380,11 +392,11 @@ enum ClashConfigParser {
             root["find-process-mode"] = "off"
             // Concurrent dials + large proxy graphs spike RAM → iOS jetsam kills the NE.
             root["tcp-concurrent"] = false
-            root["keep-alive-interval"] = 30
-            // Lightweight sniffer: WeChat/CDN often dial by real IP; SNI restores DOMAIN→DIRECT.
-            if domainSniffing {
-                root["sniffer"] = iosSnifferBlock
-            }
+            root["keep-alive-interval"] = 10
+            // Sniffer was a major RSS contributor on iPhone (80MB+ → silent jetsam restarts).
+            // DOMAIN rules + WeChat IP bypass routes cover the important cases without sniff.
+            root["sniffer"] = ["enable": false]
+            root["profile"] = ["store-selected": true, "store-fake-ip": false]
         }
 
         if tunEnabled {
@@ -414,7 +426,10 @@ enum ClashConfigParser {
         allowLan: Bool = false,
         dnsPreference: DnsPreference = .smart,
         forIOS: Bool = false,
-        domainSniffing: Bool = true
+        domainSniffing: Bool = true,
+        selectedName: String? = nil,
+        proxyHubMode: ProxyHubMode = .smart,
+        turboMode: Bool = true
     ) -> String {
         var root = deepNativeDict(rawRoot)
 
@@ -441,7 +456,12 @@ enum ClashConfigParser {
         root["log-level"] = "warning"
         root["external-controller"] = controller
         root["secret"] = secret
-        if root["ipv6"] == nil { root["ipv6"] = false }
+        // TUN needs IPv6 stack for Telegram DC literals; dns.ipv6 stays false — no AAAA pollution.
+        if forIOS || tunEnabled {
+            root["ipv6"] = true
+        } else if root["ipv6"] == nil {
+            root["ipv6"] = false
+        }
         if root["unified-delay"] == nil { root["unified-delay"] = true }
 
         if var proxies = root["proxies"] as? [[String: Any]] {
@@ -457,6 +477,7 @@ enum ClashConfigParser {
             root["dns"] = DnsPreference.iosDnsBlock(for: dnsPreference)
             // url-test health checks + RULE-SET downloads blow the NE jetsam budget.
             sanitizeIOSPassthroughGroups(&root)
+            applyPassthroughSelectedNode(&root, selectedName: selectedName)
             root.removeValue(forKey: "rule-providers")
             let scrubbed = scrubIOSIncompatibleRules(stringList(root["rules"]) ?? [])
             root["rules"] = patchIOSPassthroughRules(scrubbed, groupNames: proxyGroupNames(in: root))
@@ -464,10 +485,9 @@ enum ClashConfigParser {
             root["geo-auto-update"] = false
             root["find-process-mode"] = "off"
             root["tcp-concurrent"] = false
-            root["keep-alive-interval"] = 30
-            if domainSniffing {
-                root["sniffer"] = iosSnifferBlock
-            }
+            root["keep-alive-interval"] = 10
+            root["sniffer"] = ["enable": false]
+            root["profile"] = ["store-selected": true, "store-fake-ip": false]
         } else {
             if root["find-process-mode"] == nil { root["find-process-mode"] = "strict" }
             if root["tcp-concurrent"] == nil { root["tcp-concurrent"] = true }
@@ -475,9 +495,16 @@ enum ClashConfigParser {
             if domainSniffing, root["sniffer"] == nil {
                 root["sniffer"] = snifferBlock
             }
-            if root["dns"] == nil {
-                root["dns"] = DnsPreference.dnsBlock(for: dnsPreference)
-            }
+            // Always BashX DNS — airport DNS often lacks telegram/cursor fake-ip-filter → MTProto/agent hang.
+            root["dns"] = DnsPreference.dnsBlock(for: dnsPreference)
+            injectMacReliabilityStack(
+                &root,
+                selectedName: selectedName,
+                proxyHubMode: proxyHubMode,
+                turboMode: turboMode
+            )
+            applyPassthroughSelectedNode(&root, selectedName: selectedName)
+            applyPassthroughHubMode(&root, mode: proxyHubMode, turboMode: turboMode)
         }
 
         if tunEnabled {
@@ -485,6 +512,11 @@ enum ClashConfigParser {
         }
 
         return (try? Yams.dump(object: root)) ?? ""
+    }
+
+    /// Exposed for runtime TUN hot-patch (must match written config).
+    static func tunConfigBlock(stack: String, forIOS: Bool = false) -> [String: Any] {
+        tunBlock(stack: stack, forIOS: forIOS)
     }
 
     private static func tunBlock(stack: String, forIOS: Bool) -> [String: Any] {
@@ -498,7 +530,10 @@ enum ClashConfigParser {
         ]
         if forIOS {
             tun["mtu"] = 1400
+            // Exclude WeChat/Tencent + ByteDance CDN CIDRs so video/chat bypasses gVisor
+            // (TUN still sees DNS; missing these → Douyin/WeChat inflate NE RSS → jetsam).
             tun["route-exclude-address"] = [
+                // Tencent / WeChat
                 "1.12.0.0/14",
                 "14.17.0.0/16", "14.18.0.0/16", "14.19.0.0/16", "14.116.0.0/16",
                 "43.154.0.0/16",
@@ -513,7 +548,28 @@ enum ClashConfigParser {
                 "183.57.0.0/16", "183.60.0.0/16",
                 "183.192.0.0/16", "183.232.0.0/16",
                 "203.205.128.0/19", "211.95.0.0/16",
+                // ByteDance / Douyin / Toutiao CDN (common CN egress)
+                "49.51.0.0/16",
+                "101.33.0.0/16", "101.126.0.0/16",
+                "110.249.0.0/16",
+                "111.225.0.0/16",
+                "116.63.0.0/16",
+                "117.71.0.0/16",
+                "119.3.0.0/16", "119.8.0.0/16",
+                "120.46.0.0/16", "120.92.0.0/16",
+                "121.36.0.0/16", "121.46.0.0/16",
+                "123.249.0.0/16",
+                "124.243.0.0/16",
+                "140.143.0.0/16",
+                "180.184.0.0/16",
+                "220.243.0.0/16",
             ]
+        } else {
+            // fake-ip auto-route only installs 198.18/16. Setting inet*-route-address
+            // replaces that table — keep fake-ip and add Telegram DC CIDRs so
+            // Telegra2/keepcoder bare-IP MTProto enters TUN (system proxy alone never sees it).
+            tun["inet4-route-address"] = ["198.18.0.0/16"] + TelegramReliability.dcIPv4CIDRs
+            tun["inet6-route-address"] = TelegramReliability.dcIPv6CIDRs
         }
         return tun
     }
@@ -672,21 +728,22 @@ enum ClashConfigParser {
 
     /// High-availability Telegram path (Shadowrocket 电报消息 + mihomo failover):
     /// TELEGRAM-AUTO (url-test Asia) → TELEGRAM-FAILOVER (fallback chain) → TELEGRAM (select).
-    /// iOS: select only (no background url-test — jetsam).
+    /// iOS: select only (no background url-test — jetsam). Default follows PROXY (user's node).
     private static func telegramGroups(proxies: [String], forIOS: Bool) -> [[String: Any]] {
         let leaves = proxies.filter {
             $0 != "DIRECT" && $0 != "PROXY" && !$0.hasPrefix("TELEGRAM")
+                && $0 != "HK" && $0 != "JP" && $0 != "TW" && $0 != "US"
+                && !Self.isPlaceholderNodeName($0)
         }
         if forIOS {
-            // Prefer concrete Asia leaves; include region hubs for manual failover.
-            // Only reference hubs we actually emit on iOS (JP/HK/TW/US) — SG was missing → mihomo reject.
-            var iosMembers = leaves
-            for hub in ["HK", "JP", "TW", "US"] where !iosMembers.contains(hub) {
-                iosMembers.append(hub)
+            // Follow main node first — Asia-only leaf pools often pick a dead node while
+            // PROXY (user selection) still works. Do NOT nest empty JP/HK hubs → DIRECT.
+            var iosMembers: [String] = ["PROXY"]
+            for leaf in leaves where !iosMembers.contains(leaf) {
+                iosMembers.append(leaf)
             }
-            if iosMembers.isEmpty { iosMembers = ["DIRECT"] }
-            else if !iosMembers.contains("DIRECT") { iosMembers.append("DIRECT") }
-            return [iosSelectGroup(name: "TELEGRAM", proxies: Array(iosMembers.prefix(16)))]
+            if !iosMembers.contains("DIRECT") { iosMembers.append("DIRECT") }
+            return [iosSelectGroup(name: "TELEGRAM", proxies: Array(iosMembers.prefix(12)))]
         }
 
         let autoProxies = leaves.isEmpty ? ["DIRECT"] : leaves
@@ -694,20 +751,18 @@ enum ClashConfigParser {
             "name": "TELEGRAM-AUTO",
             "type": "url-test",
             "proxies": autoProxies,
-            "url": "https://t.me",
-            "interval": 90,
-            "tolerance": 120,
-            "lazy": false,
+            "url": TelegramReliability.probeURL,
+            "interval": 120,
+            "tolerance": 150,
+            "lazy": true,
             "expected-status": "200/301/302/404",
         ]
 
-        // Failover chain: auto → regional url-test hubs → PROXY → DIRECT.
-        // mihomo `fallback` picks the first healthy member — true HA without app thrash.
-        var failoverMembers: [String] = ["TELEGRAM-AUTO"]
+        // Failover: follow user's PROXY first (usually already working), then AUTO / hubs.
+        var failoverMembers: [String] = ["PROXY", "TELEGRAM-AUTO"]
         for hub in ["HK", "JP", "TW", "US"] where !failoverMembers.contains(hub) {
             failoverMembers.append(hub)
         }
-        failoverMembers.append("PROXY")
         if !failoverMembers.contains("DIRECT") {
             failoverMembers.append("DIRECT")
         }
@@ -715,19 +770,17 @@ enum ClashConfigParser {
             "name": "TELEGRAM-FAILOVER",
             "type": "fallback",
             "proxies": failoverMembers,
-            "url": "https://t.me",
-            "interval": 60,
-            "lazy": false,
+            "url": TelegramReliability.probeURL,
+            "interval": 90,
+            "lazy": true,
             "expected-status": "200/301/302/404",
         ]
 
-        // Select defaults to FAILOVER so Desktop always has auto recovery;
-        // user can still pin a concrete leaf / PROXY from the menu.
-        var selectMembers: [String] = ["TELEGRAM-FAILOVER", "TELEGRAM-AUTO"]
+        // PROXY first — user's working node; FAILOVER/AUTO as recovery.
+        var selectMembers: [String] = ["PROXY", "TELEGRAM-FAILOVER", "TELEGRAM-AUTO"]
         for leaf in leaves where !selectMembers.contains(leaf) {
             selectMembers.append(leaf)
         }
-        if !selectMembers.contains("PROXY") { selectMembers.append("PROXY") }
         if !selectMembers.contains("DIRECT") { selectMembers.append("DIRECT") }
 
         return [
@@ -739,6 +792,29 @@ enum ClashConfigParser {
                 "proxies": selectMembers,
             ],
         ]
+    }
+
+    /// Low-latency Apple Push (APNs) — follow the user's working PROXY first (v1 behavior that
+    /// actually delivered Telegram notifications), then Asia leaves as backup.
+    private static func apnsGroups(proxies: [String], selected: String?, forIOS: Bool) -> [[String: Any]] {
+        let leaves = proxies.filter {
+            $0 != "DIRECT" && $0 != "PROXY" && !$0.hasPrefix("TELEGRAM") && !$0.hasPrefix("APNS")
+                && $0 != "HK" && $0 != "JP" && $0 != "TW" && $0 != "US"
+                && !Self.isPlaceholderNodeName($0)
+        }
+        var members: [String] = ["PROXY"]
+        if let selected, leaves.contains(selected), !members.contains(selected) {
+            members.insert(selected, at: 0)
+        }
+        for hub in ["HK", "JP", "TW"] where !members.contains(hub) {
+            members.append(hub)
+        }
+        for leaf in leaves where !members.contains(leaf) {
+            members.append(leaf)
+        }
+        if !members.contains("DIRECT") { members.append("DIRECT") }
+        let cap = forIOS ? 8 : 18
+        return [iosSelectGroup(name: "APNS", proxies: Array(members.prefix(cap)))]
     }
 
     /// High-availability Cursor path (US-first, kernel failover — no app-side thrash):
@@ -778,28 +854,28 @@ enum ClashConfigParser {
             "type": "url-test",
             "proxies": autoProxies,
             "url": CursorReliability.probeURL,
-            "interval": 90,
-            "tolerance": 120,
-            "lazy": false,
+            "interval": 180,
+            "tolerance": 150,
+            "lazy": true,
             "expected-status": "200/301/302/404",
         ]
 
-        var failoverMembers: [String] = ["CURSOR-AUTO", "US", "AI", "PROXY"]
+        // PROXY first — follow user's working node; US-only auto often dead while PROXY works.
+        var failoverMembers: [String] = ["PROXY", "CURSOR-AUTO", "US", "AI"]
         if !failoverMembers.contains("DIRECT") { failoverMembers.append("DIRECT") }
         let failover: [String: Any] = [
             "name": "CURSOR-FAILOVER",
             "type": "fallback",
             "proxies": failoverMembers,
             "url": CursorReliability.probeURL,
-            "interval": 60,
-            "lazy": false,
+            "interval": 120,
+            "lazy": true,
             "expected-status": "200/301/302/404",
         ]
 
-        var selectMembers: [String] = ["CURSOR-FAILOVER", "CURSOR-AUTO", "US"]
+        var selectMembers: [String] = ["PROXY", "CURSOR-FAILOVER", "CURSOR-AUTO", "US"]
         for leaf in leaves where !selectMembers.contains(leaf) { selectMembers.append(leaf) }
         if !selectMembers.contains("AI") { selectMembers.append("AI") }
-        if !selectMembers.contains("PROXY") { selectMembers.append("PROXY") }
         if !selectMembers.contains("DIRECT") { selectMembers.append("DIRECT") }
 
         return [
@@ -913,7 +989,8 @@ enum ClashConfigParser {
         return names.first
     }
 
-    /// iOS NE: flatten health-check groups to select; ensure PROXY / GOOGLE / TELEGRAM exist.
+    /// iOS NE: flatten health-check groups to select; ensure PROXY / GOOGLE / TELEGRAM exist
+    /// and prefer the primary proxy group (user's node) so Telegram/Google don't stick on a dead leaf.
     private static func sanitizeIOSPassthroughGroups(_ root: inout [String: Any]) {
         var groups = (root["proxy-groups"] as? [[String: Any]]) ?? []
         let leaves = Array(proxyLeafNames(in: root).prefix(16))
@@ -949,9 +1026,33 @@ enum ClashConfigParser {
             existing.insert(name)
         }
 
+        /// Even when the airport already defines TELEGRAM/GOOGLE, force primary first.
+        func preferPrimary(_ name: String) {
+            if let idx = groups.firstIndex(where: { ($0["name"] as? String) == name }) {
+                var members = (groups[idx]["proxies"] as? [Any])?.compactMap { $0 as? String } ?? []
+                members.removeAll { $0 == primary || $0 == name }
+                if primary != name { members.insert(primary, at: 0) }
+                if members.isEmpty { members = fallbackMembers }
+                if !members.contains("DIRECT") { members.append("DIRECT") }
+                // Avoid defaulting to DIRECT when real proxies exist.
+                if members.first == "DIRECT", members.count > 1 {
+                    members.removeFirst()
+                    members.append("DIRECT")
+                }
+                groups[idx]["type"] = "select"
+                groups[idx]["proxies"] = members
+                for key in ["url", "interval", "tolerance", "lazy", "strategy", "expected-status"] {
+                    groups[idx].removeValue(forKey: key)
+                }
+                return
+            }
+            ensureAlias(name)
+        }
+
         ensureAlias("PROXY")
-        ensureAlias("GOOGLE")
-        ensureAlias("TELEGRAM")
+        preferPrimary("GOOGLE")
+        preferPrimary("TELEGRAM")
+        // Do NOT preferPrimary(APNS) — that pins US PROXY into APNs and adds multi-second delay.
         root["proxy-groups"] = groups
     }
 
@@ -959,29 +1060,301 @@ enum ClashConfigParser {
     private static func patchIOSPassthroughRules(_ rules: [String], groupNames: Set<String>) -> [String] {
         let googleTarget = groupNames.contains("GOOGLE") ? "GOOGLE" : "PROXY"
         let telegramTarget = groupNames.contains("TELEGRAM") ? "TELEGRAM" : "PROXY"
+        let tiktokTarget = groupNames.contains("TIKTOK") ? "TIKTOK" : "PROXY"
         let proxyTarget = groupNames.contains("PROXY") ? "PROXY" : (groupNames.sorted().first ?? "PROXY")
 
         func retarget(_ line: String) -> String {
             line
                 .replacingOccurrences(of: ",GOOGLE", with: ",\(googleTarget)")
                 .replacingOccurrences(of: ",TELEGRAM", with: ",\(telegramTarget)")
+                .replacingOccurrences(of: ",TIKTOK", with: ",\(tiktokTarget)")
                 .replacingOccurrences(of: ",PROXY", with: ",\(proxyTarget)")
         }
 
         var inject = IosDirectDomains.wechatPriorityRules.map(retarget)
+        inject.append(contentsOf: IosDirectDomains.tiktokPriorityRules.map(retarget))
+        inject.append(contentsOf: IosDirectDomains.ecommercePriorityRules.map(retarget))
+        inject.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules.map(retarget))
+        inject.append(contentsOf: IosDirectDomains.bankPriorityRules.map(retarget))
+        inject.append(contentsOf: IosDirectDomains.douyinPriorityRules.map(retarget))
+        // DNS bootstrap MUST be DIRECT — MATCH,PROXY would send 223.5.5.5 DoH via node
+        // (chicken/egg → 502 → every foreign site dies).
+        inject.append(contentsOf: IosDirectDomains.dnsBootstrapDirectRules)
         inject.append(contentsOf: IosProxyDomains.rules.map(retarget))
-        // Keep MATCH last from subscription when present.
+        // Foreign DoH only after a working node exists.
+        inject.append(contentsOf: [
+            "IP-CIDR,8.8.8.8/32,\(proxyTarget),no-resolve",
+            "IP-CIDR,8.8.4.4/32,\(proxyTarget),no-resolve",
+            "IP-CIDR,1.1.1.1/32,\(proxyTarget),no-resolve",
+            "IP-CIDR,1.0.0.1/32,\(proxyTarget),no-resolve",
+            "IP-CIDR,9.9.9.9/32,\(proxyTarget),no-resolve",
+        ])
         let head = rules.filter { !$0.uppercased().hasPrefix("MATCH,") }
-        let match = rules.last(where: { $0.uppercased().hasPrefix("MATCH,") })
-            ?? "MATCH,\(proxyTarget)"
+        // After stripping GEOSITE/GEOIP, airport MATCH,DIRECT leaves Google/X/TG on a dead path.
+        let match = "MATCH,\(proxyTarget)"
         var out = inject + head
-        out.append(retarget(match))
+        out.append(match)
         return out
+    }
+
+    /// Pin the user's node as first member of PROXY / primary / GOOGLE / TELEGRAM selects.
+    private static func applyPassthroughSelectedNode(_ root: inout [String: Any], selectedName: String?) {
+        guard let selectedName, !selectedName.isEmpty,
+              !isPlaceholderNodeName(selectedName),
+              proxyLeafNames(in: root).contains(selectedName) else { return }
+        var groups = (root["proxy-groups"] as? [[String: Any]]) ?? []
+        guard !groups.isEmpty else { return }
+
+        let primary = resolvePrimaryProxyGroupName(in: groups) ?? "PROXY"
+        // Never pin APNS to the user's global node — APNS must stay Asia-first for ≤3s delivery.
+        let targets = Set(["PROXY", primary, "GOOGLE", "TELEGRAM"])
+
+        for i in groups.indices {
+            guard let name = groups[i]["name"] as? String, targets.contains(name) else { continue }
+            var members = (groups[i]["proxies"] as? [Any])?.compactMap { $0 as? String } ?? []
+            members.removeAll { $0 == selectedName }
+            members.insert(selectedName, at: 0)
+            // Never leave DIRECT as the default when a real leaf is selected.
+            if members.first == "DIRECT", members.count > 1 {
+                members.removeFirst()
+                members.append("DIRECT")
+            }
+            groups[i]["proxies"] = members
+            groups[i]["type"] = "select"
+        }
+        root["proxy-groups"] = groups
+    }
+
+    /// Mac passthrough: airport YAML often has TELEGRAM/CURSOR select groups that reference
+    /// missing AUTO/FAILOVER hubs — that blackholes Telegram/Cursor. Inject BashX stacks.
+    private static func injectMacReliabilityStack(
+        _ root: inout [String: Any],
+        selectedName: String?,
+        proxyHubMode: ProxyHubMode,
+        turboMode: Bool
+    ) {
+        let allLeaves = proxyLeafNames(in: root)
+        guard !allLeaves.isEmpty else { return }
+
+        let probeURL = "https://www.gstatic.com/generate_204"
+        let hubInterval = turboMode ? 300 : 180
+        let hubTolerance = turboMode ? 50 : 40
+        let pool = urlTestPool(from: allLeaves, selected: selectedName, limit: 36)
+        var autoPool = pool
+        if !autoPool.contains("DIRECT") { autoPool.append("DIRECT") }
+
+        let jp = regionPool(from: allLeaves, keys: ["日本", "JP", "Japan", "东京", "大阪", "Tokyo"], selected: selectedName, limit: 24)
+        let hk = regionPool(from: allLeaves, keys: ["香港", "HK", "Hong Kong", "深港", "沪港"], selected: selectedName, limit: 24)
+        let us = regionPool(from: allLeaves, keys: ["美国", "US", "USA", "America", "Los Angeles", "San Jose", "西雅图", "纽约"], selected: selectedName, limit: 24)
+        let tw = regionPool(from: allLeaves, keys: ["台湾", "台灣", "TW", "Taiwan", "Taipei"], selected: selectedName, limit: 24)
+        let asia = regionPool(
+            from: allLeaves,
+            keys: ["香港", "HK", "Hong Kong", "新加坡", "SG", "Singapore", "日本", "JP", "Japan", "台湾", "TW", "Taiwan"],
+            selected: selectedName,
+            limit: 16
+        )
+        let telegramLeaves = (asia == ["DIRECT"] || asia.isEmpty) ? Array(pool.prefix(16)) : asia
+
+        var groups = (root["proxy-groups"] as? [[String: Any]]) ?? []
+
+        func upsert(_ group: [String: Any]) {
+            guard let name = group["name"] as? String else { return }
+            if let idx = groups.firstIndex(where: { ($0["name"] as? String) == name }) {
+                groups[idx] = group
+            } else {
+                groups.append(group)
+            }
+        }
+
+        func regionUrlTestLocal(name: String, proxies: [String]) -> [String: Any] {
+            var p = proxies.filter { $0 != "DIRECT" && !isPlaceholderNodeName($0) }
+            if p.isEmpty { p = autoPool.filter { $0 != "DIRECT" } }
+            if p.isEmpty { p = ["DIRECT"] }
+            else if !p.contains("DIRECT") { p.append("DIRECT") }
+            return [
+                "name": name,
+                "type": "url-test",
+                "proxies": p,
+                "url": probeURL,
+                "interval": 600,
+                "tolerance": 100,
+                "lazy": true,
+            ]
+        }
+
+        upsert([
+            "name": "AUTO",
+            "type": "url-test",
+            "proxies": autoPool,
+            "url": probeURL,
+            "interval": hubInterval,
+            "tolerance": hubTolerance,
+            "lazy": true,
+        ])
+        upsert([
+            "name": "BALANCE",
+            "type": "load-balance",
+            "proxies": autoPool,
+            "url": probeURL,
+            "interval": hubInterval,
+            "strategy": "consistent-hashing",
+            "lazy": true,
+        ])
+        upsert([
+            "name": "FALLBACK",
+            "type": "fallback",
+            "proxies": autoPool,
+            "url": probeURL,
+            "interval": hubInterval,
+            "lazy": true,
+        ])
+        upsert(regionUrlTestLocal(name: "JP", proxies: jp))
+        upsert(regionUrlTestLocal(name: "HK", proxies: hk))
+        upsert(regionUrlTestLocal(name: "US", proxies: us))
+        upsert(regionUrlTestLocal(name: "TW", proxies: tw))
+
+        for g in telegramGroups(proxies: telegramLeaves, forIOS: false) { upsert(g) }
+        for g in cursorGroups(usProxies: us, allProxies: allLeaves, pinned: selectedName, forIOS: false) {
+            upsert(g)
+        }
+
+        // Ensure PROXY is a select with strategy hubs + DIRECT (never dangling AUTO refs).
+        let hubFirst: String = {
+            switch proxyHubMode {
+            case .smart: return "AUTO"
+            case .loadBalance: return "BALANCE"
+            case .failover: return "FALLBACK"
+            case .manual: return "AUTO"
+            }
+        }()
+        var proxyMembers = [hubFirst, "AUTO", "BALANCE", "FALLBACK", "JP", "HK", "US", "TW"] + allLeaves + ["DIRECT"]
+        if let selectedName, proxyHubMode == .manual {
+            proxyMembers.removeAll { $0 == selectedName }
+            proxyMembers.insert(selectedName, at: 0)
+        }
+        var seen = Set<String>()
+        proxyMembers = proxyMembers.filter { seen.insert($0).inserted }
+        upsert([
+            "name": "PROXY",
+            "type": "select",
+            "proxies": proxyMembers,
+        ])
+
+        // Drop dangling members that still reference missing groups.
+        let existing = Set(groups.compactMap { $0["name"] as? String }).union(["DIRECT", "REJECT"])
+        for i in groups.indices {
+            guard var members = groups[i]["proxies"] as? [String] else { continue }
+            let before = members
+            members = members.filter { existing.contains($0) || allLeaves.contains($0) }
+            if members.isEmpty { members = ["DIRECT"] }
+            if members != before { groups[i]["proxies"] = members }
+        }
+
+        root["proxy-groups"] = groups
+
+        // Prepend Telegram/Cursor routing so airport MATCH can't steal them.
+        var rules = stringList(root["rules"]) ?? []
+        let inject = [
+            "PROCESS-NAME,Telegram,TELEGRAM",
+            "PROCESS-NAME,org.telegram.desktop,TELEGRAM",
+            "PROCESS-PATH,*Telegram.app/Contents/MacOS/Telegram,TELEGRAM",
+            "PROCESS-PATH,*Telegra2.app/Contents/MacOS/Telegram,TELEGRAM",
+            "PROCESS-PATH,Telegra2,TELEGRAM",
+            "IP-CIDR,149.154.160.0/20,TELEGRAM,no-resolve",
+            "IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve",
+            "IP-CIDR,91.105.192.0/23,TELEGRAM,no-resolve",
+            "IP-CIDR,185.76.151.0/24,TELEGRAM,no-resolve",
+            "IP-CIDR,95.161.64.0/20,TELEGRAM,no-resolve",
+            "IP-CIDR6,2001:67c:4e8::/48,TELEGRAM,no-resolve",
+            "IP-CIDR6,2001:b28:f23c::/48,TELEGRAM,no-resolve",
+            "IP-CIDR6,2001:b28:f23d::/48,TELEGRAM,no-resolve",
+            "IP-CIDR6,2001:b28:f23f::/48,TELEGRAM,no-resolve",
+            "DOMAIN-SUFFIX,telegram.org,TELEGRAM",
+            "DOMAIN-SUFFIX,telegram-cdn.org,TELEGRAM",
+            "DOMAIN-SUFFIX,cdn-telegram.org,TELEGRAM",
+            "DOMAIN-SUFFIX,telesco.pe,TELEGRAM",
+            "DOMAIN-SUFFIX,t.me,TELEGRAM",
+            "DOMAIN-SUFFIX,tx.me,TELEGRAM",
+            "DOMAIN-KEYWORD,telegram,TELEGRAM",
+            "DOMAIN-SUFFIX,cursor.sh,CURSOR",
+            "DOMAIN-SUFFIX,cursor.com,CURSOR",
+            "DOMAIN-SUFFIX,cursorapi.com,CURSOR",
+            "DOMAIN-SUFFIX,cursor-cdn.com,CURSOR",
+            "DOMAIN-SUFFIX,cursorvm.com,CURSOR",
+            "DOMAIN-SUFFIX,anysphere.co,CURSOR",
+            "DOMAIN-SUFFIX,anysphere.com,CURSOR",
+            "DOMAIN,api2.cursor.sh,CURSOR",
+            "DOMAIN,api3.cursor.sh,CURSOR",
+            "DOMAIN,api4.cursor.sh,CURSOR",
+            "DOMAIN-KEYWORD,gcpp.cursor,CURSOR",
+        ]
+        let missing = inject.filter { rule in
+            let needle = rule.split(separator: ",").prefix(2).joined(separator: ",").uppercased()
+            return !rules.contains { $0.uppercased().contains(needle) }
+        }
+        if !missing.isEmpty {
+            rules.insert(contentsOf: missing, at: 0)
+            root["rules"] = rules
+        }
+    }
+
+    /// Mac: keep PROXY as select; put the hub chip (AUTO/BALANCE/FALLBACK) first.
+    /// Never rewrite PROXY into url-test of leaves — dead nodes would blackhole MATCH,PROXY.
+    private static func applyPassthroughHubMode(
+        _ root: inout [String: Any],
+        mode: ProxyHubMode,
+        turboMode: Bool
+    ) {
+        _ = turboMode
+        guard mode != .manual else { return }
+        var groups = (root["proxy-groups"] as? [[String: Any]]) ?? []
+        guard !groups.isEmpty else { return }
+
+        let primary = resolvePrimaryProxyGroupName(in: groups) ?? "PROXY"
+        guard let idx = groups.firstIndex(where: { ($0["name"] as? String) == primary }) else { return }
+
+        let hub: String = {
+            switch mode {
+            case .smart: return "AUTO"
+            case .loadBalance: return "BALANCE"
+            case .failover: return "FALLBACK"
+            case .manual: return "AUTO"
+            }
+        }()
+
+        var members = (groups[idx]["proxies"] as? [String]) ?? []
+        members.removeAll { $0 == hub }
+        members.insert(hub, at: 0)
+        if !members.contains("DIRECT") { members.append("DIRECT") }
+        groups[idx]["type"] = "select"
+        groups[idx]["proxies"] = members
+        groups[idx].removeValue(forKey: "url")
+        groups[idx].removeValue(forKey: "interval")
+        groups[idx].removeValue(forKey: "tolerance")
+        groups[idx].removeValue(forKey: "lazy")
+        groups[idx].removeValue(forKey: "strategy")
+        groups[idx].removeValue(forKey: "expected-status")
+
+        if primary != "PROXY" {
+            if let proxyIdx = groups.firstIndex(where: { ($0["name"] as? String) == "PROXY" }) {
+                var alias = groups[idx]
+                alias["name"] = "PROXY"
+                groups[proxyIdx] = alias
+            }
+        }
+
+        root["proxy-groups"] = groups
     }
 
     /// Route Cursor / OpenAI / Anthropic / other AI (Shadowrocket AI.list).
     private static func normalizeAIRules(_ rules: [String], forIOS: Bool = false) -> [String] {
-        var out = rules
+        // Drop whole-process Cursor hijack — forces npm/CN CDN through US sticky and breaks the IDE.
+        var out = rules.filter { rule in
+            let u = rule.uppercased()
+            if u.hasPrefix("PROCESS-NAME,CURSOR") { return false }
+            if u.hasPrefix("PROCESS-PATH,") && u.contains("CURSOR") { return false }
+            return true
+        }
         var inject: [String] = [
             // Cursor cloud backends (docs.cursor.com enterprise allowlist)
             "DOMAIN-SUFFIX,cursor.sh,CURSOR",
@@ -1018,16 +1391,21 @@ enum ClashConfigParser {
             "DOMAIN-SUFFIX,githubcopilot.com,COPILOT",
         ]
         if !forIOS {
+            // Domain-only for Cursor cloud — do NOT PROCESS-NAME the whole Electron tree
+            // (forces npm/CN CDN/local tooling through US sticky → IDE "busy"/broken).
             inject.insert(contentsOf: [
-                "PROCESS-NAME,Cursor,CURSOR",
-                "PROCESS-NAME,Cursor Helper,CURSOR",
-                "PROCESS-NAME,Cursor Helper (GPU),CURSOR",
-                "PROCESS-NAME,Cursor Helper (Renderer),CURSOR",
-                "PROCESS-NAME,Cursor Helper (Plugin),CURSOR",
-                "PROCESS-NAME,Cursor Helper (Network),CURSOR",
-                "PROCESS-PATH,*Cursor.app/Contents/Frameworks/Cursor Helper*,CURSOR",
-                "PROCESS-PATH,*Cursor.app/Contents/MacOS/*,CURSOR",
-                "PROCESS-PATH,*Cursor Helper*.app/Contents/MacOS/*,CURSOR",
+                "DOMAIN-SUFFIX,cursor.sh,CURSOR",
+                "DOMAIN-SUFFIX,cursor.com,CURSOR",
+                "DOMAIN-SUFFIX,cursorapi.com,CURSOR",
+                "DOMAIN-SUFFIX,cursor-cdn.com,CURSOR",
+                "DOMAIN-SUFFIX,cursorvm.com,CURSOR",
+                "DOMAIN-SUFFIX,anysphere.co,CURSOR",
+                "DOMAIN-SUFFIX,anysphere.com,CURSOR",
+                "DOMAIN-SUFFIX,anysphere.tech,CURSOR",
+                "DOMAIN,api2.cursor.sh,CURSOR",
+                "DOMAIN,api3.cursor.sh,CURSOR",
+                "DOMAIN,api4.cursor.sh,CURSOR",
+                "DOMAIN-KEYWORD,gcpp.cursor,CURSOR",
             ], at: 0)
         }
 
@@ -1160,7 +1538,10 @@ enum ClashConfigParser {
         }
         if top.count < 8 { top = pool }
         var limited = Array(top.prefix(max(8, limit)))
-        if let selected, pool.contains(selected) {
+        // Selected may sit outside the Asia-preferred subset (e.g. "懒人 01A").
+        // Still force-include it from the FULL name list — otherwise iOS export drops it,
+        // select API returns 400, and PROXY stays broken → connected but no network.
+        if let selected, names.contains(selected) {
             limited.removeAll { $0 == selected }
             limited.insert(selected, at: 0)
             if limited.count > limit { limited = Array(limited.prefix(limit)) }
@@ -1252,21 +1633,41 @@ enum ClashConfigParser {
                 out.insert("IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve", at: idx + 1)
             }
         }
+        // Always keep Telegra2 path — masqueraded installs don't match *Telegram.app/*.
+        if !out.contains(where: { $0.contains("Telegra2") && $0.uppercased().contains("TELEGRAM") }) {
+            let telegra2 = [
+                "PROCESS-PATH,*Telegra2.app/Contents/MacOS/Telegram,TELEGRAM",
+                "PROCESS-PATH,Telegra2,TELEGRAM",
+            ]
+            if let idx = out.firstIndex(where: {
+                $0.uppercased().hasPrefix("PROCESS-NAME,TELEGRAM") || $0.uppercased().hasPrefix("PROCESS-PATH,*TELEGRAM.APP")
+            }) {
+                out.insert(contentsOf: telegra2, at: idx + 1)
+            } else if let idx = out.firstIndex(where: { $0.contains("149.154.160.0/20") && $0.contains("TELEGRAM") }) {
+                out.insert(contentsOf: telegra2, at: idx)
+            } else {
+                out.insert(contentsOf: telegra2, at: min(20, out.count))
+            }
+        }
         if !hasDC {
             let inject = [
                 "PROCESS-NAME,Telegram,TELEGRAM",
                 "PROCESS-NAME,org.telegram.desktop,TELEGRAM",
                 "PROCESS-PATH,*Telegra2.app/Contents/MacOS/Telegram,TELEGRAM",
+                "PROCESS-PATH,Telegra2,TELEGRAM",
                 "PROCESS-PATH,*Telegram.app/Contents/MacOS/Telegram,TELEGRAM",
-                "IP-CIDR,149.154.160.0/20,TELEGRAM,no-resolve",
-                "IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve",
-                "IP-CIDR,91.105.192.0/23,TELEGRAM,no-resolve",
-                "IP-CIDR,185.76.151.0/24,TELEGRAM,no-resolve",
+            ] + TelegramReliability.dcIPv4CIDRs.map { "IP-CIDR,\($0),TELEGRAM,no-resolve" }
+                + TelegramReliability.dcIPv6CIDRs.map { "IP-CIDR6,\($0),TELEGRAM,no-resolve" }
+                + [
                 "DOMAIN-SUFFIX,telegram.org,TELEGRAM",
                 "DOMAIN-SUFFIX,telegram-cdn.org,TELEGRAM",
                 "DOMAIN-SUFFIX,cdn-telegram.org,TELEGRAM",
                 "DOMAIN-SUFFIX,telesco.pe,TELEGRAM",
                 "DOMAIN-SUFFIX,t.me,TELEGRAM",
+                "DOMAIN-SUFFIX,tx.me,TELEGRAM",
+                "DOMAIN-SUFFIX,graph.org,TELEGRAM",
+                "DOMAIN-SUFFIX,tdesktop.com,TELEGRAM",
+                "DOMAIN-SUFFIX,telegra.ph,TELEGRAM",
                 "DOMAIN-KEYWORD,telegram,TELEGRAM",
                 "GEOIP,telegram,TELEGRAM,no-resolve",
             ]
@@ -1293,10 +1694,10 @@ enum ClashConfigParser {
         let isTelegram: Bool = {
             if type == "GEOIP" || type == "GEOSITE" { return payload == "telegram" }
             if type == "PROCESS-NAME" {
-                return payload.contains("telegram")
+                return payload.contains("telegram") || payload.contains("telegra")
             }
             if type == "PROCESS-PATH" {
-                return payload.contains("telegram")
+                return payload.contains("telegram") || payload.contains("telegra")
             }
             if type == "DOMAIN-SUFFIX" || type == "DOMAIN" || type == "DOMAIN-KEYWORD" {
                 return payload.contains("telegram")
@@ -1309,6 +1710,7 @@ enum ClashConfigParser {
                     || payload.hasPrefix("91.108.")
                     || payload.hasPrefix("91.105.192")
                     || payload.hasPrefix("185.76.151")
+                    || payload.hasPrefix("95.161.")
                     || payload.hasPrefix("2001:67c:4e8")
                     || payload.hasPrefix("2001:b28:f23")
             }

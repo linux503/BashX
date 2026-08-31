@@ -267,10 +267,11 @@ fun HomeScreen(state: AppState, onOpenNodes: () -> Unit, onNeedVpnPermission: ()
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
-                                    pref.title,
+                                    pref.shortTitle,
                                     color = if (selected) androidx.compose.ui.graphics.Color.White else BashXTheme.accentDeep,
                                     fontSize = if (fold.isCover) 12.sp else 13.sp,
                                     fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
                                 )
                             }
                         }

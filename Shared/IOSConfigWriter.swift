@@ -34,15 +34,35 @@ enum IOSConfigWriter {
         ud?.set(true, forKey: AppConstants.iosTunnelCaptureKey)
         let nodes = loadCachedNodes(from: settings)
         guard !nodes.isEmpty else { return false }
-        let pick = settings.selectedNodeName.flatMap { name in
-            nodes.first(where: { $0.name == name && ClashConfigParser.isSpeedTestable($0) })?.name
-        } ?? nodes.first(where: { ClashConfigParser.isSpeedTestable($0) })?.name
-            ?? nodes.first(where: { !ClashConfigParser.isPlaceholderNodeName($0.name) })?.name
+        let testable = nodes.filter { ClashConfigParser.isSpeedTestable($0) }
+        let usable = testable.isEmpty
+            ? nodes.filter { !ClashConfigParser.isPlaceholderNodeName($0.name) }
+            : testable
+        // If the saved pick is missing from what iOS will export, remapping avoids
+        // select→400 / dead PROXY (seen on XR with "懒人" outside the Asia pool).
+        let saved = settings.selectedNodeName
+        let savedOK = saved.flatMap { name in usable.first(where: { $0.name == name })?.name }
+        let pick = savedOK
+            ?? usable.first(where: { node in
+                ["香港", "HK", "台湾", "TW", "日本", "JP", "新加坡", "SG"]
+                    .contains(where: { node.name.localizedCaseInsensitiveContains($0) })
+            })?.name
+            ?? usable.first?.name
             ?? nodes.first?.name
+        if pick != settings.selectedNodeName {
+            settings.selectedNodeName = pick
+            _ = SettingsStore.save(settings)
+        }
+        if let pick, let node = nodes.first(where: { $0.name == pick }), !node.server.isEmpty {
+            ud?.set(node.server, forKey: AppConstants.selectedNodeServerKey)
+            ud?.set(pick, forKey: "selectedNode")
+        }
         let rules = RuntimeRules.effective(
             base: settings.rules,
             prepend: settings.rulesPrepend,
-            videoAdBlockEnabled: settings.videoAdBlockEnabled
+            videoAdBlockEnabled: settings.videoAdBlockEnabled,
+            enabledPluginIds: settings.enabledPluginIds,
+            telegramPushEnabled: settings.iosTelegramPushEnabled
         )
         return write(
             nodes: nodes,
@@ -57,7 +77,12 @@ enum IOSConfigWriter {
     }
 
     /// Single enabled Clash YAML with native proxy-groups.
+    /// iOS: always nil — airport passthrough strips GEOSITE then breaks DNS/MATCH,
+    /// and huge YAML burns NE memory. BashX buildConfig is the supported path.
     static func loadPassthroughProfileRoot(from settings: AppSettings) -> [String: Any]? {
+        #if os(iOS)
+        return nil
+        #else
         let enabled = settings.subscriptions.filter(\.enabled)
         guard enabled.count == 1, let sub = enabled.first else { return nil }
         let url = Paths.subscriptionCacheURL(id: sub.id)
@@ -65,6 +90,7 @@ enum IOSConfigWriter {
               let parsed = try? ClashConfigParser.parse(data),
               ClashConfigParser.isCompleteProfile(parsed.rawRoot) else { return nil }
         return parsed.rawRoot
+        #endif
     }
 
     private static func loadCachedNodes(from settings: AppSettings) -> [ProxyNode] {
@@ -107,7 +133,8 @@ enum IOSConfigWriter {
                 allowLan: false,
                 dnsPreference: dnsPreference,
                 forIOS: true,
-                domainSniffing: true
+                domainSniffing: true,
+                selectedName: selectedName
             )
         } else {
             yaml = ClashConfigParser.buildConfig(

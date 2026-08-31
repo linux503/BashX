@@ -1,0 +1,28 @@
+{
+  "id": "volvo-ads",
+  "name": "沃尔沃汽车去开屏",
+  "summary": "拦截开屏广告 SDK 与活动投放；不拦 digitalvolvo 素材站，避免红屏一直转圈。",
+  "tag": "去广告",
+  "symbol": "car.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,campaigns.volvocars.com.cn,REJECT",
+    "DOMAIN-KEYWORD,volvocars.campaign,REJECT",
+    "DOMAIN-KEYWORD,volvo-ad,REJECT",
+    "DOMAIN-KEYWORD,volvocars.ad,REJECT",
+    "DOMAIN-SUFFIX,gdt.qq.com,REJECT",
+    "DOMAIN,adsmind.gdtimg.com,REJECT",
+    "DOMAIN,adsmind.ugdtimg.com,REJECT",
+    "DOMAIN,pgdt.gtimg.cn,REJECT",
+    "DOMAIN,pgdt.ugdtimg.com,REJECT",
+    "DOMAIN-SUFFIX,l.qq.com,REJECT",
+    "DOMAIN-SUFFIX,pangolin-sdk-toutiao.com,REJECT",
+    "DOMAIN-SUFFIX,pangle.io,REJECT",
+    "DOMAIN-SUFFIX,pglstatp-toutiao.com,REJECT",
+    "DOMAIN,pangolin.snssdk.com,REJECT",
+    "DOMAIN-SUFFIX,doubleclick.net,REJECT",
+    "DOMAIN-SUFFIX,googlesyndication.com,REJECT",
+    "DOMAIN-SUFFIX,umeng.com,REJECT",
+    "DOMAIN-SUFFIX,umengcloud.com,REJECT"
+  ]
+}

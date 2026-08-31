@@ -24,7 +24,7 @@ enum LogoStyle: String, CaseIterable, Identifiable, Codable {
     /// Phone home-screen set — bold marks that stay clear at 60pt.
     /// First item is primary AppIcon art (`markX` → nil alternate name).
     static let iosCurated: [LogoStyle] = [
-        .markX, .ring, .shield, .bolt, .signal, .hex, .pulse,
+        .markX, .ring, .shield, .bolt, .signal, .hex,
     ]
 
     /// iOS primary home-screen icon art (matches Assets AppIcon + Mac default).
@@ -244,9 +244,10 @@ enum LogoRenderer {
         render(style: style, pixels: pixels, colored: true, panel: false, dockSafeArea: false, iosOpaque: true)
     }
 
-    /// High-res colored icon for panel header (crisper at 28–32 pt).
+    /// High-res colored icon for panel header — pin logical size across macOS versions.
     static func panelIcon(style: LogoStyle, displaySize: CGFloat) -> NSImage {
-        let px = max(96, Int((displaySize * 4).rounded()))
+        let scale = max(NSScreen.main?.backingScaleFactor ?? 2, 2)
+        let px = max(64, Int((displaySize * scale * 2).rounded()))
         let base = render(style: style, pixels: px, colored: true, panel: true, dockSafeArea: false)
         if let cg = base.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             return NSImage(cgImage: cg, size: NSSize(width: displaySize, height: displaySize))

@@ -47,7 +47,7 @@ enum MihomoConfigCheck {
     static func scrubStaleGeoDatabases() {
         let fm = FileManager.default
         let home = Paths.mihomoHomeDir
-        for name in ["geoip.metadb", "geosite.dat", "country.mmdb", "GeoLite2-Country.mmdb"] {
+        for name in ["geoip.metadb", "geosite.dat", "GeoSite.dat", "country.mmdb", "GeoLite2-Country.mmdb"] {
             let url = home.appendingPathComponent(name)
             if fm.fileExists(atPath: url.path) {
                 try? fm.removeItem(at: url)
@@ -103,7 +103,7 @@ enum MihomoConfigCheck {
     /// Mihomo refuses configs where select groups reference each other (e.g. PROXY↔AI).
     static func detectProxyGroupLoop(at url: URL = Paths.mihomoConfigURL) -> String? {
         guard let yaml = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let groups = ["PROXY", "GOOGLE", "AI", "AUTO", "BALANCE", "FALLBACK", "JP", "HK", "US", "TW", "TELEGRAM", "CURSOR", "OPENAI", "ANTHROPIC", "GOOGLE-AUTO", "TELEGRAM-AUTO"]
+        let groups = ["PROXY", "GOOGLE", "AI", "AUTO", "BALANCE", "FALLBACK", "JP", "HK", "US", "TW", "TELEGRAM", "APNS", "CURSOR", "OPENAI", "ANTHROPIC", "GOOGLE-AUTO", "TELEGRAM-AUTO"]
         var edges: [String: Set<String>] = [:]
         let lines = yaml.components(separatedBy: .newlines)
         var current: String?

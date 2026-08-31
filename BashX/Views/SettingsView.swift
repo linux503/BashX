@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, speed, proxy, core, appearance, about
+    case general, plugins, speed, proxy, core, appearance, about
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     func title(lang: AppLanguage) -> String {
         switch self {
         case .general: return L10n.t("mac.tab.general", lang)
+        case .plugins: return L10n.t("plugin.market.title", lang)
         case .speed: return L10n.t("mac.tab.speed", lang)
         case .proxy: return L10n.t("mac.tab.proxy", lang)
         case .core: return L10n.t("mac.tab.core", lang)
@@ -38,6 +39,7 @@ struct SettingsView: View {
                     Group {
                         switch tab {
                         case .general: generalTab
+                        case .plugins: PluginMarketPane()
                         case .speed: speedTestTab
                         case .proxy: proxyTab
                         case .core: coreTab

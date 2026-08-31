@@ -217,6 +217,11 @@ object ConfigWriter {
         sb.appendLine("    expected-status: \"200/301/302/404\"")
         sb.appendLine("    proxies:")
         autoPool.forEach { sb.appendLine("      - ${quote(it)}") }
+        sb.appendLine("  - name: APNS")
+        sb.appendLine("    type: select")
+        sb.appendLine("    proxies:")
+        (listOf("PROXY") + autoPool + listOf("DIRECT")).distinct()
+            .forEach { sb.appendLine("      - ${quote(it)}") }
         listOf("CURSOR", "OPENAI", "ANTHROPIC").forEach { g ->
             sb.appendLine("  - name: $g")
             sb.appendLine("    type: select")

@@ -35,18 +35,38 @@ final class PanelRateStore: ObservableObject {
     @Published private(set) var upMbps = "0.0K"
     @Published private(set) var downTotal: Int64 = 0
     @Published private(set) var upTotal: Int64 = 0
+    /// Session cumulative since last double-click reset (baseline = kernel totals at reset).
+    @Published private(set) var sessionDownTotal: Int64 = 0
+    @Published private(set) var sessionUpTotal: Int64 = 0
+    @Published private(set) var sessionResetTick = 0
     @Published private(set) var isLive = false
     @Published private(set) var samples: [TrafficSample] = []
     /// Skip chart sample array when panel is closed — saves memory + SwiftUI churn.
     var chartSamplesEnabled = false
+
+    private var baselineDown: Int64 = 0
+    private var baselineUp: Int64 = 0
 
     func clear() {
         if downMbps != "0.0K" { downMbps = "0.0K" }
         if upMbps != "0.0K" { upMbps = "0.0K" }
         if downTotal != 0 { downTotal = 0 }
         if upTotal != 0 { upTotal = 0 }
+        if sessionDownTotal != 0 { sessionDownTotal = 0 }
+        if sessionUpTotal != 0 { sessionUpTotal = 0 }
+        baselineDown = 0
+        baselineUp = 0
         if isLive { isLive = false }
         if !samples.isEmpty { samples = [] }
+    }
+
+    /// Double-click cumulative row to zero session counters (kernel totals unchanged).
+    func resetSessionTotals() {
+        baselineDown = downTotal
+        baselineUp = upTotal
+        sessionDownTotal = 0
+        sessionUpTotal = 0
+        sessionResetTick &+= 1
     }
 
     func update(down: Int64, up: Int64, downTotal: Int64, upTotal: Int64, live: Bool) {
@@ -56,6 +76,10 @@ final class PanelRateStore: ObservableObject {
         if upMbps != pu { upMbps = pu }
         if self.downTotal != downTotal { self.downTotal = downTotal }
         if self.upTotal != upTotal { self.upTotal = upTotal }
+        let sessionDown = max(0, downTotal - baselineDown)
+        let sessionUp = max(0, upTotal - baselineUp)
+        if sessionDownTotal != sessionDown { sessionDownTotal = sessionDown }
+        if sessionUpTotal != sessionUp { sessionUpTotal = sessionUp }
         if isLive != live { isLive = live }
 
         if live, chartSamplesEnabled {

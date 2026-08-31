@@ -1,11 +1,13 @@
-# BashX Smart Rules v28
+# BashX Smart Rules v32
 # 参考 LingJingMaster/Shadowrocket-Rules 分流优先级 + ACL4SSR / Clash Verge
 # https://github.com/LingJingMaster/Shadowrocket-Rules
+# v32: 淘宝/闲鱼(goofish)/国内电商直连；阿里 HTTPDNS 改 DIRECT（勿 REJECT→裸 IP 进代理）
+# v29: Cursor 仅域名→CURSOR（去掉整进程劫持，修复本地 IDE 卡「工作很忙」）；Telegram/Cursor 真实 IP DNS
 # v28: ACL4SSR 兜底 MATCH,PROXY；假 IP 下勿用 MATCH,DIRECT
 # v27: 国内优先 — B站/抖音直连；去掉泛 .com PROXY；Cursor Helper(Network)
 # v26: 业务策略组 — ChatGPT/Copilot/Netflix/TikTok/Twitter/WhatsApp/微软/苹果/B站/抖音/Steam 可选手动
 # v25: 政务/银行/.org 一律本地直连；扩大微信 CDN 旁路
-# v20: Cursor 进程整树 + CDN/VM 域名 → sticky CURSOR（美国优先）；修复启动 BashX 时 Cursor 卡顿
+# v20: Cursor CDN/VM 域名 → sticky CURSOR（美国优先）
 # v19: Google→GOOGLE(JP优先) · AI→OPENAI/ANTHROPIC/CURSOR/AI · 苹果推送走代理 · 港股/汇丰→HK · 港银直连
 
 # ========== 1. 私有网络 / 局域网 ==========
@@ -38,16 +40,17 @@ DOMAIN-SUFFIX,ntp.org,DIRECT
 DOMAIN-SUFFIX,pool.ntp.org,DIRECT
 DOMAIN-SUFFIX,cn.pool.ntp.org,DIRECT
 
-# ========== DNS 防泄露（HTTPDNS 常见硬编码） ==========
-DOMAIN-SUFFIX,httpdns.alicdn.com,REJECT
-DOMAIN-SUFFIX,httpdns.baidu.com,REJECT
+# ========== DNS 防泄露（HTTPDNS） ==========
+# 阿里 / 百度 HTTPDNS：REJECT 会让淘宝闲鱼改走裸 IP → MATCH,PROXY，必须直连
+DOMAIN-SUFFIX,httpdns.alicdn.com,DIRECT
+DOMAIN-SUFFIX,httpdns.baidu.com,DIRECT
 DOMAIN-SUFFIX,httpdns.c.cdnhwc.com,REJECT
 # 微信 HTTPDNS：REJECT 会导致发图/登录极慢，必须直连
 DOMAIN-SUFFIX,dns.weixin.qq.com.cn,DIRECT
 DOMAIN-SUFFIX,dns.weixin.qq.com,DIRECT
 IP-CIDR,203.107.1.0/24,REJECT,no-resolve
 
-# ========== 国内优先（豆包 / 腾讯云 IM 等，避免误入港股规则） ==========
+# ========== 国内优先（豆包 / 腾讯云 IM / 淘宝闲鱼等） ==========
 DOMAIN,shortconn.im.qcloud.com,DIRECT
 DOMAIN-SUFFIX,doubao.com,DIRECT
 DOMAIN-SUFFIX,cn,DIRECT
@@ -65,8 +68,13 @@ DOMAIN-SUFFIX,aliyuncs.com,DIRECT
 DOMAIN-SUFFIX,aliyun.com,DIRECT
 DOMAIN-SUFFIX,taobao.com,DIRECT
 DOMAIN-SUFFIX,tmall.com,DIRECT
+DOMAIN-SUFFIX,goofish.com,DIRECT
+DOMAIN-SUFFIX,idlefish.com,DIRECT
 DOMAIN-SUFFIX,alipay.com,DIRECT
 DOMAIN-SUFFIX,jd.com,DIRECT
+DOMAIN-SUFFIX,pinduoduo.com,DIRECT
+DOMAIN-SUFFIX,yangkeduo.com,DIRECT
+DOMAIN-SUFFIX,vip.com,DIRECT
 DOMAIN-SUFFIX,bilibili.com,DIRECT
 DOMAIN-SUFFIX,bilibili.cn,DIRECT
 DOMAIN-SUFFIX,bilivideo.com,DIRECT
@@ -151,7 +159,9 @@ IP-CIDR,149.154.160.0/20,TELEGRAM,no-resolve
 IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve
 IP-CIDR,91.105.192.0/23,TELEGRAM,no-resolve
 IP-CIDR,185.76.151.0/24,TELEGRAM,no-resolve
+IP-CIDR,95.161.64.0/20,TELEGRAM,no-resolve
 IP-CIDR6,2001:67c:4e8::/48,TELEGRAM,no-resolve
+IP-CIDR6,2001:b28:f23c::/48,TELEGRAM,no-resolve
 IP-CIDR6,2001:b28:f23d::/48,TELEGRAM,no-resolve
 IP-CIDR6,2001:b28:f23f::/48,TELEGRAM,no-resolve
 DOMAIN-SUFFIX,telegram.org,TELEGRAM
@@ -196,16 +206,7 @@ GEOSITE,google,GOOGLE
 GEOSITE,youtube,GOOGLE
 
 # ========== AI（参考 Shadowrocket AI.list） ==========
-# Cursor IDE — 进程整树 + 云端域名 → sticky CURSOR（默认美国节点，避免测速打断流）
-PROCESS-NAME,Cursor,CURSOR
-PROCESS-NAME,Cursor Helper,CURSOR
-PROCESS-NAME,Cursor Helper (GPU),CURSOR
-PROCESS-NAME,Cursor Helper (Renderer),CURSOR
-PROCESS-NAME,Cursor Helper (Plugin),CURSOR
-PROCESS-NAME,Cursor Helper (Network),CURSOR
-PROCESS-PATH,*Cursor.app/Contents/Frameworks/Cursor Helper*,CURSOR
-PROCESS-PATH,*Cursor.app/Contents/MacOS/*,CURSOR
-PROCESS-PATH,*Cursor Helper*.app/Contents/MacOS/*,CURSOR
+# Cursor IDE — 仅云端域名 → sticky CURSOR（勿 PROCESS 整树，否则本地扩展/CDN 全走美国节点会卡死）
 DOMAIN-SUFFIX,cursor.sh,CURSOR
 DOMAIN-SUFFIX,cursor.com,CURSOR
 DOMAIN-SUFFIX,cursorapi.com,CURSOR
@@ -317,12 +318,21 @@ DOMAIN-SUFFIX,interactivebrokers.com,HK
 DOMAIN-SUFFIX,ibkr.com,HK
 DOMAIN-SUFFIX,schwab.com,HK
 
-# ========== 苹果推送 → PROXY；其它 Apple → APPLE（默认 DIRECT，可选手动） ==========
-DOMAIN-SUFFIX,push.apple.com,PROXY
-DOMAIN-SUFFIX,gateway.push.apple.com,PROXY
-DOMAIN-SUFFIX,api.push.apple.com,PROXY
-DOMAIN-SUFFIX,sandbox.push.apple.com,PROXY
-DOMAIN-SUFFIX,push-apple.com.akadns.net,PROXY
+# ========== 苹果推送 → APNS；其它 Apple → APPLE（默认 DIRECT，可选手动） ==========
+DOMAIN-SUFFIX,push.apple.com,APNS
+DOMAIN-SUFFIX,gateway.push.apple.com,APNS
+DOMAIN-SUFFIX,api.push.apple.com,APNS
+DOMAIN-SUFFIX,sandbox.push.apple.com,APNS
+DOMAIN-SUFFIX,push-apple.com.akadns.net,APNS
+IP-CIDR,17.249.0.0/16,APNS,no-resolve
+IP-CIDR,17.252.0.0/16,APNS,no-resolve
+IP-CIDR,17.57.144.0/22,APNS,no-resolve
+IP-CIDR,17.188.128.0/18,APNS,no-resolve
+IP-CIDR,17.188.20.0/23,APNS,no-resolve
+IP-CIDR6,2620:149:a44::/48,APNS,no-resolve
+IP-CIDR6,2403:300:a42::/48,APNS,no-resolve
+IP-CIDR6,2403:300:a51::/48,APNS,no-resolve
+IP-CIDR6,2a01:b740:a42::/48,APNS,no-resolve
 DOMAIN-SUFFIX,apple.com.cn,APPLE
 DOMAIN-SUFFIX,icloud.com.cn,APPLE
 DOMAIN-SUFFIX,icloud.com,APPLE
@@ -382,6 +392,7 @@ GEOIP,!CN,PROXY,no-resolve
 
 # ========== 漏网之鱼 ==========
 # Mac（有 GeoIP）：上面 GEOIP,!CN 已覆盖；此处兜底代理
+# v29: Cursor 仅域名→CURSOR；Telegram 媒体 CIDR 95.161
 # v28: ACL4SSR 兜底 MATCH,PROXY；B站/抖音直连；去掉泛 .com PROXY；Cursor 域名完善
 # iOS / Mac 漏网之鱼一律 MATCH,PROXY（假 IP 下勿用 MATCH,DIRECT）
 MATCH,PROXY

@@ -115,8 +115,8 @@ struct AppRoutingPane: View {
             .controlSize(.small)
             .tint(BashXTheme.accent(for: appearance))
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(BashXTheme.card(for: appearance).opacity(0.55))
     }
 

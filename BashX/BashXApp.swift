@@ -53,6 +53,7 @@ final class MenuBarChrome: ObservableObject {
     private var menuOpen = false
     private var lastKey = ""
     private var pendingWhileOpen = false
+    private var trafficRefreshWork: DispatchWorkItem?
 
     func bind(rates: MenuBarRateStore, state: AppState?) {
         self.rates = rates
@@ -60,7 +61,7 @@ final class MenuBarChrome: ObservableObject {
         cancellables.removeAll()
         Publishers.CombineLatest(rates.$menuDown, rates.$menuUp)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in self?.refresh(force: false) }
+            .sink { [weak self] _, _ in self?.scheduleTrafficRefresh() }
             .store(in: &cancellables)
         rates.$coreRunning
             .receive(on: RunLoop.main)
@@ -91,6 +92,16 @@ final class MenuBarChrome: ObservableObject {
             .sink { [weak self] _ in self?.refresh(force: true) }
             .store(in: &cancellables)
         refresh(force: true)
+    }
+
+    /// Traffic SSE is hot — coalesce menu-bar bitmap redraws (esp. Apple Silicon lag).
+    private func scheduleTrafficRefresh() {
+        trafficRefreshWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.refresh(force: false)
+        }
+        trafficRefreshWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
     }
 
     func setMenuOpen(_ open: Bool) {
@@ -357,14 +368,14 @@ enum MenuBarStatusImage {
         showTraffic: Bool,
         dimmed: Bool
     ) -> NSImage {
-        let iconPt: CGFloat = 22
+        // Keep a stable menu-bar size across macOS versions (16–18pt looks native).
+        let iconPt: CGFloat = 18
         let gap: CGFloat = showTraffic ? 3 : 0
-        let rateW: CGFloat = showTraffic ? 42 : 0
+        let rateW: CGFloat = showTraffic ? 40 : 0
         let widthPt = iconPt + gap + rateW
-        let heightPt: CGFloat = 24
+        let heightPt: CGFloat = 18
         let alpha: CGFloat = dimmed ? 0.45 : 1
-        // Always bake @2x pixels — `lockFocus` produces empty/invisible templates on some Macs.
-        let scale: CGFloat = 2
+        let scale = max(NSScreen.main?.backingScaleFactor ?? 2, 2)
         let pxW = max(1, Int((widthPt * scale).rounded()))
         let pxH = max(1, Int((heightPt * scale).rounded()))
 
@@ -413,7 +424,7 @@ enum MenuBarStatusImage {
         )
 
         if showTraffic {
-            let font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+            let font = NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .semibold)
             // Template images must be black; menu bar applies the system tint.
             let color = NSColor.black.withAlphaComponent(alpha)
             let attrs: [NSAttributedString.Key: Any] = [
@@ -424,7 +435,7 @@ enum MenuBarStatusImage {
             let downLine = "↓\(sanitize(down))" as NSString
             let upLine = "↑\(sanitize(up))" as NSString
             let rateX = iconPt + gap
-            let lineGap: CGFloat = 11
+            let lineGap: CGFloat = 9
             downLine.draw(at: NSPoint(x: rateX, y: heightPt - lineGap), withAttributes: attrs)
             upLine.draw(at: NSPoint(x: rateX, y: heightPt - lineGap * 2), withAttributes: attrs)
         }
@@ -498,9 +509,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
-        // Register as accessory early so MenuBarExtra is created even when Dock icon is off.
-        // Doing this only in didFinishLaunching can leave a blank/missing status item on some Macs.
-        let preferDock = state?.settings.showDockIcon ?? false
+        // Prefer settings file — AppDelegate.state is often still nil here (bound from MenuBarExtra later).
+        // Never default to accessory when the user wants a Dock icon, or the icon "keeps vanishing".
+        let preferDock = resolvedPreferDockIcon()
         AppActivation.preferDockIcon = preferDock
         AppActivation.applyPolicy()
     }
@@ -508,25 +519,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Never block launch on xattr — large bundles hitch the main thread.
         stripDownloadQuarantineIfNeeded()
-        AppActivation.preferDockIcon = state?.settings.showDockIcon ?? false
+        let preferDock = resolvedPreferDockIcon()
+        AppActivation.preferDockIcon = preferDock
         AppActivation.applyPolicy()
         // No macOS application menu strip — panel + menu-bar extra are enough.
         NSApp.mainMenu = NSMenu()
         IconManager.applyBundledAppIcon()
         IconManager.refreshDockIconCacheIfNeeded()
+        // Re-assert Dock policy after icon cache refresh (must not leave accessory).
+        AppActivation.preferDockIcon = preferDock
+        AppActivation.applyPolicy()
         LogoRenderer.warmCache()
         if let state {
             trafficRoot?.attachIfNeeded(state: state)
         }
         // Force status-item redraw after menu bar is up (cold start often skips label onAppear).
         DispatchQueue.main.async { [weak self] in
-            guard let self, let state = self.state else { return }
+            guard let self else { return }
+            AppActivation.preferDockIcon = self.resolvedPreferDockIcon()
+            AppActivation.applyPolicy()
+            guard let state = self.state else { return }
             self.trafficRoot?.attachIfNeeded(state: state)
             self.syncTraffic?()
             NotificationCenter.default.post(name: .bashxMenuBarChromeNeedsRefresh, object: nil)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self, let state = self.state else { return }
+            guard let self else { return }
+            AppActivation.preferDockIcon = self.resolvedPreferDockIcon()
+            AppActivation.applyPolicy()
+            guard let state = self.state else { return }
             self.trafficRoot?.attachIfNeeded(state: state)
             self.syncTraffic?()
         }
@@ -535,6 +556,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.trafficRoot?.attachIfNeeded(state: state)
             self.syncTraffic?()
         }
+    }
+
+    /// Dock preference: live AppState if bound, else settings on disk (defaults to on).
+    private func resolvedPreferDockIcon() -> Bool {
+        if let state { return state.settings.showDockIcon }
+        return SettingsStore.load().showDockIcon
     }
 
     /// DMG/browser downloads are quarantined — child mihomo may fail to exec until cleared.
@@ -559,6 +586,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (TUN password sheet briefly promotes to .regular; closing it used to exit BashX).
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    /// Dock icon click (or Finder reopen) → show the control panel.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard let state else { return true }
+        PanelPresenter.shared.open(
+            state: state,
+            traffic: traffic,
+            menuRates: trafficRoot?.menuRates
+        )
+        return true
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -588,26 +626,23 @@ enum IconManager {
         refreshBundleIconCache()
     }
 
-    /// After upgrade, bust Finder/Dock cache once so old teal icons disappear.
+    /// After upgrade, re-register the bundle icon. Never kill Dock — that makes the whole
+    /// Dock vanish and looks like BashX "lost" the Dock icon on every update.
     static func refreshDockIconCacheIfNeeded() {
         let key = "bashx.dockIconCacheVersion"
-        let ver = AppVersion.display
+        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            ?? Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+            ?? "1"
         guard UserDefaults.standard.string(forKey: key) != ver else { return }
         UserDefaults.standard.set(ver, forKey: key)
-        refreshBundleIconCache(forceDockRestart: true)
+        refreshBundleIconCache(forceDockRestart: false)
     }
 
     private static func refreshBundleIconCache(forceDockRestart: Bool = false) {
         let url = URL(fileURLWithPath: Bundle.main.bundlePath) as CFURL
         LSRegisterURL(url, true)
-        if forceDockRestart {
-            DispatchQueue.global(qos: .utility).async {
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-                proc.arguments = ["Dock"]
-                try? proc.run()
-            }
-        }
+        // Intentionally never killall Dock — forceDockRestart kept for API compat only.
+        _ = forceDockRestart
     }
 }
 

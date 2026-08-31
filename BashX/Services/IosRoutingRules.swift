@@ -11,6 +11,26 @@ import Foundation
 /// 4. 国内服务 blanket DIRECT（含 B 站/抖音 — 勿默认进策略组）
 /// 5. GeoIP（Mac）/ 外国 TLD；漏网之鱼 → MATCH,PROXY（ACL4SSR）
 enum IosRoutingRules {
+    /// Highest-priority APNs rules — prepended on iOS so apple.com DIRECT/APPLE cannot steal push.
+    static let apnsPriorityRules: [String] = [
+        "DOMAIN-SUFFIX,push.apple.com,APNS",
+        "DOMAIN,gateway.push.apple.com,APNS",
+        "DOMAIN,api.push.apple.com,APNS",
+        "DOMAIN,sandbox.push.apple.com,APNS",
+        "DOMAIN-SUFFIX,push-apple.com.akadns.net,APNS",
+        "DOMAIN-KEYWORD,push.apple,APNS",
+        "IP-CIDR,17.249.0.0/16,APNS,no-resolve",
+        "IP-CIDR,17.252.0.0/16,APNS,no-resolve",
+        "IP-CIDR,17.57.144.0/22,APNS,no-resolve",
+        "IP-CIDR,17.188.128.0/18,APNS,no-resolve",
+        "IP-CIDR,17.188.20.0/23,APNS,no-resolve",
+        // Apple APNs IPv6 — without TUN capture, Happy-Eyeballs stalls for seconds on blocked v6.
+        "IP-CIDR6,2620:149:a44::/48,APNS,no-resolve",
+        "IP-CIDR6,2403:300:a42::/48,APNS,no-resolve",
+        "IP-CIDR6,2403:300:a51::/48,APNS,no-resolve",
+        "IP-CIDR6,2a01:b740:a42::/48,APNS,no-resolve",
+    ]
+
     /// Full rule list written into mihomo (Packet Tunnel on iOS / local core on Mac).
     static func build(fromBase base: [String]) -> [String] {
         var out: [String] = []
@@ -27,6 +47,13 @@ enum IosRoutingRules {
 
         // WeChat CDN/upload first — bare-IP dials must not fall through to MATCH,PROXY.
         out.append(contentsOf: IosDirectDomains.wechatPriorityRules)
+        // TikTok 必须在抖音 DIRECT 之前（共用 byteoversea / bytedance 基础设施）.
+        out.append(contentsOf: IosDirectDomains.tiktokPriorityRules)
+        // 淘宝 / 闲鱼 / 国内电商 — goofish 等须在 MATCH,PROXY 之前；也盖过 adblock 误伤.
+        out.append(contentsOf: IosDirectDomains.ecommercePriorityRules)
+        out.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules)
+        out.append(contentsOf: IosDirectDomains.bankPriorityRules)
+        out.append(contentsOf: IosDirectDomains.douyinPriorityRules)
         out.append(contentsOf: bootstrap)
         out.append(contentsOf: proxyFirst)   // must precede China blanket
         out.append(contentsOf: apple)
@@ -51,9 +78,12 @@ enum IosRoutingRules {
                 continue
             }
             #endif
-            // WeChat HTTPDNS: never REJECT (breaks 发图 / 登录).
+            // WeChat / 阿里 HTTPDNS / 抖音核心 API: never REJECT.
             let u = t.uppercased()
-            if u.contains("DNS.WEIXIN.QQ.COM") && u.contains("REJECT") {
+            if (u.contains("DNS.WEIXIN.QQ.COM") || u.contains("HTTPDNS.ALICDN.COM") || u.contains("HTTPDNS.BAIDU.COM")
+                || u.contains("I.SNSSDK.COM") || u.contains("IS.SNSSDK.COM") || u.contains("LF.SNSSDK.COM")
+                || u.contains("BDS.SNSSDK.COM"))
+                && u.contains("REJECT") {
                 let parts = t.split(separator: ",").map(String.init)
                 if parts.count >= 2 {
                     out.append("\(parts[0]),\(parts[1]),DIRECT")
@@ -150,6 +180,11 @@ enum IosRoutingRules {
         "IP-CIDR,91.108.0.0/16,TELEGRAM,no-resolve",
         "IP-CIDR,91.105.192.0/23,TELEGRAM,no-resolve",
         "IP-CIDR,185.76.151.0/24,TELEGRAM,no-resolve",
+        "IP-CIDR,95.161.64.0/20,TELEGRAM,no-resolve",
+        "IP-CIDR6,2001:67c:4e8::/48,TELEGRAM,no-resolve",
+        "IP-CIDR6,2001:b28:f23c::/48,TELEGRAM,no-resolve",
+        "IP-CIDR6,2001:b28:f23d::/48,TELEGRAM,no-resolve",
+        "IP-CIDR6,2001:b28:f23f::/48,TELEGRAM,no-resolve",
         // 🐱 代码托管 / Wiki（须在 .org 直连之前）
         "DOMAIN-SUFFIX,github.com,PROXY",
         "DOMAIN-SUFFIX,githubusercontent.com,PROXY",
@@ -175,7 +210,16 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,netflix.com,NETFLIX",
         "DOMAIN-SUFFIX,spotify.com,PROXY",
         "DOMAIN-SUFFIX,tiktok.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokv.com,TIKTOK",
         "DOMAIN-SUFFIX,tiktokcdn.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokcdn-us.com,TIKTOK",
+        "DOMAIN-SUFFIX,ttlivecdn.com,TIKTOK",
+        "DOMAIN-SUFFIX,musical.ly,TIKTOK",
+        "DOMAIN-SUFFIX,byteoversea.com,TIKTOK",
+        "DOMAIN-SUFFIX,ibyteimg.com,TIKTOK",
+        "DOMAIN-SUFFIX,ibytedtos.com,TIKTOK",
+        "DOMAIN-KEYWORD,tiktok,TIKTOK",
+        "DOMAIN-KEYWORD,byteoversea,TIKTOK",
         "DOMAIN-SUFFIX,cloudflare.com,PROXY",
         // 📺 .tv TLD + 流媒体（必须在 QUIC REJECT 之前）
         "DOMAIN-SUFFIX,tv,PROXY",
@@ -187,11 +231,23 @@ enum IosRoutingRules {
         // QUIC→TCP（仅 CDN 域名，勿用泛 .tv 以免误伤）
         "AND,((DOMAIN-SUFFIX,ttvnw.net),(NETWORK,UDP),(DST-PORT,443)),REJECT",
         "AND,((DOMAIN-SUFFIX,jtvnw.net),(NETWORK,UDP),(DST-PORT,443)),REJECT",
-        // 🍎 苹果推送 — Shadowrocket 走代理，改善推送到达
-        "DOMAIN-SUFFIX,push.apple.com,PROXY",
-        "DOMAIN,gateway.push.apple.com,PROXY",
-        "DOMAIN,api.push.apple.com,PROXY",
-        "DOMAIN,sandbox.push.apple.com,PROXY",
+        // 🍎 苹果推送 — 专用 APNS 组（见 apnsPriorityRules；此处保留一份供 Mac/非 iOS 预置）
+        "DOMAIN-SUFFIX,push.apple.com,APNS",
+        "DOMAIN,gateway.push.apple.com,APNS",
+        "DOMAIN,api.push.apple.com,APNS",
+        "DOMAIN,sandbox.push.apple.com,APNS",
+        "DOMAIN-SUFFIX,push-apple.com.akadns.net,APNS",
+        "DOMAIN-KEYWORD,push.apple,APNS",
+        // Apple APNs IPv4 (support.apple.com/102266) — must NOT fall to DIRECT
+        "IP-CIDR,17.249.0.0/16,APNS,no-resolve",
+        "IP-CIDR,17.252.0.0/16,APNS,no-resolve",
+        "IP-CIDR,17.57.144.0/22,APNS,no-resolve",
+        "IP-CIDR,17.188.128.0/18,APNS,no-resolve",
+        "IP-CIDR,17.188.20.0/23,APNS,no-resolve",
+        "IP-CIDR6,2620:149:a44::/48,APNS,no-resolve",
+        "IP-CIDR6,2403:300:a42::/48,APNS,no-resolve",
+        "IP-CIDR6,2403:300:a51::/48,APNS,no-resolve",
+        "IP-CIDR6,2a01:b740:a42::/48,APNS,no-resolve",
     ]
 
     // MARK: - 3. Apple DIRECT (non-push)
@@ -209,8 +265,8 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,gs.apple.com,APPLE",
         "DOMAIN,gateway.icloud.com,APPLE",
         "DOMAIN,gsa.apple.com,APPLE",
+        // Non-APNs Apple media/CDN — keep physical path; do NOT include 17.249 (APNs).
         "IP-CIDR,17.248.0.0/16,DIRECT,no-resolve",
-        "IP-CIDR,17.249.0.0/16,DIRECT,no-resolve",
         // System DoH must not hit GOOGLE health-check
         "DOMAIN,dns.google.com,DIRECT",
         "DOMAIN-SUFFIX,dns.google,DIRECT",
@@ -248,21 +304,35 @@ enum IosRoutingRules {
         "DOMAIN-KEYWORD,weixin,DIRECT",
         "DOMAIN-KEYWORD,qpic,DIRECT",
 
-        // 阿里系
+        // 阿里系（含闲鱼 goofish / HTTPDNS）
+        "DOMAIN,httpdns.alicdn.com,DIRECT",
+        "DOMAIN-SUFFIX,httpdns.alicdn.com,DIRECT",
         "DOMAIN-SUFFIX,alibaba.com,DIRECT",
+        "DOMAIN-SUFFIX,alibaba-inc.com,DIRECT",
         "DOMAIN-SUFFIX,alicdn.com,DIRECT",
         "DOMAIN-SUFFIX,aliyuncs.com,DIRECT",
         "DOMAIN-SUFFIX,aliyun.com,DIRECT",
         "DOMAIN-SUFFIX,taobao.com,DIRECT",
         "DOMAIN-SUFFIX,tmall.com,DIRECT",
+        "DOMAIN-SUFFIX,tmall.hk,DIRECT",
+        "DOMAIN-SUFFIX,goofish.com,DIRECT",
+        "DOMAIN-SUFFIX,goofish.pro,DIRECT",
+        "DOMAIN-SUFFIX,idlefish.com,DIRECT",
+        "DOMAIN-SUFFIX,xianyu.com,DIRECT",
+        "DOMAIN-SUFFIX,tb.cn,DIRECT",
         "DOMAIN-SUFFIX,alipay.com,DIRECT",
         "DOMAIN-SUFFIX,alipayobjects.com,DIRECT",
         "DOMAIN-SUFFIX,cainiao.com,DIRECT",
+        "DOMAIN-SUFFIX,fliggy.com,DIRECT",
+        "DOMAIN-SUFFIX,kaola.com,DIRECT",
         "DOMAIN-SUFFIX,ele.me,DIRECT",
+        "DOMAIN-SUFFIX,elemecdn.com,DIRECT",
         "DOMAIN-SUFFIX,amap.com,DIRECT",
         "DOMAIN-SUFFIX,autonavi.com,DIRECT",
         "DOMAIN-SUFFIX,dingtalk.com,DIRECT",
         "DOMAIN-SUFFIX,laiwang.com,DIRECT",
+        "DOMAIN-KEYWORD,goofish,DIRECT",
+        "DOMAIN-KEYWORD,xianyu,DIRECT",
 
         // 百度 / 字节 / 网易 / 京东 / 美团 / 出行
         "DOMAIN-SUFFIX,baidu.com,DIRECT",
@@ -271,19 +341,38 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,baidubce.com,DIRECT",
         "DOMAIN-SUFFIX,bcebos.com,DIRECT",
         // 抖音 / 字节 — 默认直连（策略组易被选成节点导致打不开）
+        "DOMAIN-SUFFIX,zijieapi.com,DIRECT",
+        "DOMAIN-SUFFIX,ecombdapi.com,DIRECT",
         "DOMAIN-SUFFIX,bytedance.com,DIRECT",
         "DOMAIN-SUFFIX,bytedance.net,DIRECT",
         "DOMAIN-SUFFIX,byteimg.com,DIRECT",
-        "DOMAIN-SUFFIX,byteoversea.com,DIRECT",
+        "DOMAIN-SUFFIX,bytescm.com,DIRECT",
+        "DOMAIN-SUFFIX,byteacctimg.com,DIRECT",
+        // byteoversea → TikTok（见 tiktokPriorityRules），勿 DIRECT
         "DOMAIN-SUFFIX,douyin.com,DIRECT",
         "DOMAIN-SUFFIX,douyincdn.com,DIRECT",
         "DOMAIN-SUFFIX,douyinpic.com,DIRECT",
         "DOMAIN-SUFFIX,douyinvod.com,DIRECT",
+        "DOMAIN-SUFFIX,douyinliving.com,DIRECT",
         "DOMAIN-SUFFIX,snssdk.com,DIRECT",
         "DOMAIN-SUFFIX,amemv.com,DIRECT",
+        "DOMAIN-SUFFIX,pstatp.com,DIRECT",
         "DOMAIN-SUFFIX,ixigua.com,DIRECT",
         "DOMAIN-SUFFIX,toutiao.com,DIRECT",
         "DOMAIN-SUFFIX,toutiaovod.com,DIRECT",
+        "DOMAIN-SUFFIX,toutiaostatic.com,DIRECT",
+        "DOMAIN-SUFFIX,huoshan.com,DIRECT",
+        "DOMAIN-SUFFIX,huoshanstatic.com,DIRECT",
+        "DOMAIN-KEYWORD,zijieapi,DIRECT",
+        "DOMAIN-KEYWORD,douyin,DIRECT",
+        "DOMAIN-KEYWORD,snssdk,DIRECT",
+        // 小红书
+        "DOMAIN-SUFFIX,xiaohongshu.com,DIRECT",
+        "DOMAIN-SUFFIX,xhscdn.com,DIRECT",
+        "DOMAIN-SUFFIX,xhscdn.net,DIRECT",
+        "DOMAIN-SUFFIX,xhslink.com,DIRECT",
+        "DOMAIN-KEYWORD,xiaohongshu,DIRECT",
+        "DOMAIN-KEYWORD,xhscdn,DIRECT",
         "DOMAIN-SUFFIX,feishu.cn,DIRECT",
         "DOMAIN-SUFFIX,larksuite.com,DIRECT",
         "DOMAIN-SUFFIX,jd.com,DIRECT",
@@ -374,6 +463,7 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,mil.cn,DIRECT",
         "DOMAIN-SUFFIX,bank,DIRECT",
         "DOMAIN-KEYWORD,bank,DIRECT",
+        "DOMAIN-KEYWORD,银行,DIRECT",
         "DOMAIN-KEYWORD,gov,DIRECT",
         "DOMAIN-SUFFIX,icbc.com.cn,DIRECT",
         "DOMAIN-SUFFIX,icbc.com,DIRECT",
@@ -410,10 +500,14 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,95516.com,DIRECT",
         "DOMAIN-SUFFIX,tenpay.com,DIRECT",
 
-        // 其它常用国产
+        // 其它常用国产电商
         "DOMAIN-SUFFIX,pinduoduo.com,DIRECT",
         "DOMAIN-SUFFIX,yangkeduo.com,DIRECT",
         "DOMAIN-SUFFIX,suning.com,DIRECT",
+        "DOMAIN-SUFFIX,vip.com,DIRECT",
+        "DOMAIN-SUFFIX,vipstatic.com,DIRECT",
+        "DOMAIN-SUFFIX,dewu.com,DIRECT",
+        "DOMAIN-SUFFIX,poizon.com,DIRECT",
         "DOMAIN-SUFFIX,smzdm.com,DIRECT",
         "DOMAIN-SUFFIX,ximalaya.com,DIRECT",
         "DOMAIN-SUFFIX,zhihuishu.com,DIRECT",

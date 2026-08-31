@@ -28,8 +28,8 @@ targets:
         PRODUCT_NAME: BashXTunHelper
         SKIP_INSTALL: true
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
-        MARKETING_VERSION: "1.0.14"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "1.0.38"
+        CURRENT_PROJECT_VERSION: "38"
         MACOSX_DEPLOYMENT_TARGET: "13.0"
         ENABLE_HARDENED_RUNTIME: true
         ARCHS: "$(ARCHS_STANDARD)"
@@ -70,8 +70,8 @@ targets:
         GENERATE_INFOPLIST_FILE: false
         LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
         PRODUCT_NAME: BashX
-        MARKETING_VERSION: "1.0.14"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "1.0.38"
+        CURRENT_PROJECT_VERSION: "38"
         ENABLE_HARDENED_RUNTIME: true
         ARCHS: "$(ARCHS_STANDARD)"
         ONLY_ACTIVE_ARCH: NO
@@ -86,8 +86,8 @@ targets:
       properties:
         CFBundleName: BashX
         CFBundleDisplayName: BashX
-        CFBundleShortVersionString: "1.0.14"
-        CFBundleVersion: "13"
+        CFBundleShortVersionString: "1.0.38"
+        CFBundleVersion: "38"
         LSMinimumSystemVersion: "13.0"
         LSUIElement: true
         NSAppTransportSecurity:
@@ -98,6 +98,7 @@ targets:
     platform: iOS
     sources:
       - BashXiOS
+      - path: BashXiOS/Views/PluginMarketView.swift
       - Shared
       - path: BashX/Models/Models.swift
       - path: BashX/Services/ClashConfigParser.swift
@@ -107,6 +108,8 @@ targets:
       - path: BashX/Services/ChinaSmartRules.swift
       - path: BashX/Services/GeoSiteRules.swift
       - path: BashX/Services/VideoAdBlock.swift
+      - path: BashX/Services/PluginMarket.swift
+      - path: BashX/Services/PluginEngine.swift
       - path: BashX/Services/L10n.swift
       - path: BashX/Services/RuntimeRules.swift
       - path: BashX/Services/IosProxyDomains.swift
@@ -120,6 +123,9 @@ targets:
         buildPhase: resources
       - path: Resources/rules/bashx-adblock.txt
         buildPhase: resources
+      - path: Resources/rules/plugin-packs
+        buildPhase: resources
+        type: folder
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bashx.app.ios
@@ -127,8 +133,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: BashXiOS/BashXiOS.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: BashX
-        MARKETING_VERSION: "1.0.14"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "1.0.38"
+        CURRENT_PROJECT_VERSION: "38"
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: false
         DEVELOPMENT_TEAM: NFYZYS2VLL
@@ -156,8 +162,8 @@ targets:
       path: BashXiOS/Info.plist
       properties:
         CFBundleDisplayName: BashX
-        CFBundleShortVersionString: "1.0.14"
-        CFBundleVersion: "13"
+        CFBundleShortVersionString: "1.0.38"
+        CFBundleVersion: "38"
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIImageRespectsSafeAreaInsets: true
@@ -199,8 +205,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: BashXControls/BashXControls.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: BashXControls
-        MARKETING_VERSION: "1.0.14"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "1.0.38"
+        CURRENT_PROJECT_VERSION: "38"
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: true
         IPHONEOS_DEPLOYMENT_TARGET: "18.0"
@@ -212,8 +218,8 @@ targets:
       path: BashXControls/Info.plist
       properties:
         CFBundleDisplayName: BashX 控制
-        CFBundleShortVersionString: "1.0.14"
-        CFBundleVersion: "13"
+        CFBundleShortVersionString: "1.0.38"
+        CFBundleVersion: "38"
         CFBundlePackageType: XPC!
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -236,8 +242,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: PacketTunnel/PacketTunnel.entitlements
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_NAME: PacketTunnel
-        MARKETING_VERSION: "1.0.14"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "1.0.38"
+        CURRENT_PROJECT_VERSION: "38"
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: true
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"
@@ -262,8 +268,8 @@ targets:
       path: PacketTunnel/Info.plist
       properties:
         CFBundleDisplayName: BashX Tunnel
-        CFBundleShortVersionString: "1.0.14"
-        CFBundleVersion: "13"
+        CFBundleShortVersionString: "1.0.38"
+        CFBundleVersion: "38"
         CFBundlePackageType: XPC!
         NSExtension:
           NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel

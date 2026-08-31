@@ -20,9 +20,14 @@ struct WebsiteProbeStrip: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(t("probe.title"))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Image(systemName: "network")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(IOSTheme.accent)
+                    Text(t("probe.title"))
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 if let lastRun {
                     Text(lastRun, style: .time)
@@ -40,12 +45,15 @@ struct WebsiteProbeStrip: View {
                                 .font(.caption.weight(.bold))
                         }
                         Text(isRunning ? t("probe.testing") : t("probe.test"))
-                            .font(.caption.weight(.semibold))
+                            .font(.system(.caption, design: .rounded).weight(.semibold))
                     }
-                    .foregroundStyle(IOSTheme.accentDeep)
+                    .foregroundStyle(IOSTheme.accent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Capsule().fill(IOSTheme.accentSoft))
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(IOSTheme.accent.opacity(0.12))
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(isRunning)
@@ -57,11 +65,11 @@ struct WebsiteProbeStrip: View {
                 }
             }
         }
-        .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(IOSTheme.cardBackground.opacity(0.7))
-        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(IOSTheme.tertiaryFill.opacity(0.55))
+        )
         .id(lang.id)
         .onChange(of: vpn.isConnected) { connected in
             guard connected else { return }
@@ -78,28 +86,31 @@ struct WebsiteProbeStrip: View {
         return Button {
             Task { await runOne(target) }
         } label: {
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 Image(systemName: target.systemImage)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(chipColor(status))
+                    .frame(height: 20)
                 Text(target.localizedTitle)
-                    .font(.caption.weight(.semibold))
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.75)
                 Text(status.label)
                     .font(.caption2.monospacedDigit().weight(.medium))
                     .foregroundStyle(chipColor(status))
                     .lineLimit(1)
+                    .frame(height: 14)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .frame(minHeight: 72)
+            .padding(.vertical, 8)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(chipBackground(status))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(chipColor(status).opacity(status == .idle ? 0 : 0.25), lineWidth: 1)
+                            .strokeBorder(IOSTheme.cardStroke, lineWidth: 0.5)
                     )
             }
         }

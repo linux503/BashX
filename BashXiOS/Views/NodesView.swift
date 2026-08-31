@@ -13,6 +13,14 @@ struct NodesView: View {
         NodeCategory.fixedChipSummaries(among: state.nodes).filter { $0.count > 0 }
     }
 
+    private var selectedNode: ProxyNode? {
+        state.nodes.first { $0.name == state.settings.selectedNodeName }
+    }
+
+    private var testedCount: Int {
+        state.nodes.filter { ($0.delayMs ?? -1) >= 0 }.count
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -24,13 +32,16 @@ struct NodesView: View {
                     )
                 } else {
                     ScrollView {
-                        VStack(spacing: 0) {
+                        VStack(spacing: 10) {
+                            nodesSummaryCard
+                                .padding(.horizontal, 16)
+                                .padding(.top, 2)
+
                             if !activeCategories.isEmpty {
                                 regionFilterStrip
-                                    .padding(.bottom, 10)
                             }
 
-                            LazyVStack(spacing: 14, pinnedViews: [.sectionHeaders]) {
+                            LazyVStack(spacing: 8, pinnedViews: [.sectionHeaders]) {
                                 if state.filteredNodes.isEmpty {
                                     Text(t("nodes.noMatch"))
                                         .font(.subheadline)
@@ -40,7 +51,7 @@ struct NodesView: View {
                                 } else {
                                     ForEach(state.categoryGroups) { group in
                                         Section {
-                                            VStack(spacing: 8) {
+                                            VStack(spacing: 6) {
                                                 ForEach(group.nodes) { node in
                                                     nodeCard(node, flag: group.flag)
                                                 }
@@ -99,7 +110,61 @@ struct NodesView: View {
         }
     }
 
-    // MARK: - Region filter (inline, non-blocking)
+    // MARK: - Summary
+
+    private var nodesSummaryCard: some View {
+        IOSCard(padding: 8) {
+            HStack(spacing: 6) {
+                summaryStat(
+                    icon: "server.rack",
+                    value: "\(state.nodes.count)",
+                    label: lang == .zh ? "全部" : "Total",
+                    tint: IOSTheme.accent
+                )
+                summaryStat(
+                    icon: "checkmark.seal.fill",
+                    value: selectedNode.map { $0.delayText } ?? "—",
+                    label: lang == .zh ? "当前" : "Current",
+                    tint: IOSTheme.good
+                )
+                summaryStat(
+                    icon: "speedometer",
+                    value: "\(testedCount)",
+                    label: lang == .zh ? "已测" : "Tested",
+                    tint: IOSTheme.accentDeep
+                )
+            }
+        }
+    }
+
+    private func summaryStat(icon: String, value: String, label: String, tint: Color) -> some View {
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.14))
+                    .frame(width: 22, height: 22)
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
+            Text(value)
+                .font(.system(size: 13, design: .rounded).weight(.bold).monospacedDigit())
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(tint.opacity(0.06))
+        )
+    }
+
+    // MARK: - Region filter
 
     private var regionFilterStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -110,7 +175,7 @@ struct NodesView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 2)
         }
     }
 
@@ -157,8 +222,7 @@ struct NodesView: View {
             UISelectionFeedbackGenerator().selectionChanged()
         } label: {
             HStack(spacing: 5) {
-                Text(flag)
-                    .font(.system(size: 14))
+                Text(flag).font(.system(size: 14))
                 Text(title)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .lineLimit(1)
@@ -183,11 +247,9 @@ struct NodesView: View {
                     )
                     .overlay(
                         Capsule(style: .continuous)
-                            .strokeBorder(
-                                selected ? Color.clear : Color.primary.opacity(0.07),
-                                lineWidth: 0.5
-                            )
+                            .strokeBorder(selected ? Color.clear : Color.primary.opacity(0.07), lineWidth: 0.5)
                     )
+                    .shadow(color: selected ? IOSTheme.accent.opacity(0.22) : .clear, radius: 6, y: 2)
             }
             .foregroundStyle(selected ? .white : .primary)
         }
@@ -195,32 +257,29 @@ struct NodesView: View {
     }
 
     private func sectionHeader(_ group: NodeCategory.Group) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Text(group.flag)
-                .font(.title3)
-                .frame(width: 32, height: 32)
-                .background(
-                    Circle()
-                        .fill(IOSTheme.accentSoft)
-                )
+                .font(.callout)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(IOSTheme.accentSoft))
             Text(group.title)
-                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .font(.system(size: 13, design: .rounded).weight(.bold))
                 .foregroundStyle(IOSTheme.ink)
             Text("\(group.nodes.count)")
-                .font(.caption.weight(.bold).monospacedDigit())
+                .font(.system(size: 11, weight: .bold).monospacedDigit())
                 .foregroundStyle(IOSTheme.accentDeep)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
                 .background(Capsule().fill(IOSTheme.accentSoft))
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
         .background {
             Rectangle()
-                .fill(IOSTheme.groupedBackground.opacity(0.94))
+                .fill(.ultraThinMaterial)
                 .overlay(alignment: .bottom) {
-                    Divider().opacity(0.45)
+                    Divider().opacity(0.4)
                 }
         }
     }
@@ -232,66 +291,63 @@ struct NodesView: View {
         return Button {
             state.selectNode(node.name)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(
                             selected
                                 ? AnyShapeStyle(IOSTheme.accentGradient)
                                 : AnyShapeStyle(IOSTheme.tertiaryFill)
                         )
-                        .frame(width: 44, height: 44)
-                    Text(flag)
-                        .font(.title3)
+                        .frame(width: 34, height: 34)
+                        .shadow(color: selected ? IOSTheme.accent.opacity(0.22) : .clear, radius: 4, y: 1)
+                    Text(flag).font(.system(size: 15))
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(node.name)
-                        .font(.system(.body, design: .rounded).weight(selected ? .bold : .semibold))
+                        .font(.system(size: 14, design: .rounded).weight(selected ? .bold : .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text(node.endpointSubtitle)
-                        .font(.caption)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 4)
 
-                VStack(alignment: .trailing, spacing: 6) {
+                VStack(alignment: .trailing, spacing: 3) {
                     Text(node.delayText)
-                        .font(.system(.subheadline, design: .rounded).weight(.bold).monospacedDigit())
+                        .font(.system(size: 12, design: .rounded).weight(.bold).monospacedDigit())
                         .foregroundStyle(delayColor)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(delayColor.opacity(0.12))
-                        )
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule(style: .continuous).fill(delayColor.opacity(0.12)))
 
                     if selected {
                         Label(lang == .zh ? "当前" : "On", systemImage: "checkmark.circle.fill")
-                            .font(.caption2.weight(.bold))
+                            .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(IOSTheme.accent)
                     }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(.secondarySystemGroupedBackground))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(
-                                selected ? IOSTheme.accent.opacity(0.55) : Color.primary.opacity(0.05),
-                                lineWidth: selected ? 1.4 : 0.5
+                                selected ? IOSTheme.accent.opacity(0.5) : Color.primary.opacity(0.05),
+                                lineWidth: selected ? 1.2 : 0.5
                             )
                     )
                     .shadow(
-                        color: selected ? IOSTheme.accent.opacity(0.16) : Color.black.opacity(0.04),
-                        radius: selected ? 10 : 4,
-                        y: selected ? 4 : 2
+                        color: selected ? IOSTheme.accent.opacity(0.12) : Color.black.opacity(0.03),
+                        radius: selected ? 8 : 3,
+                        y: selected ? 3 : 1
                     )
             }
         }
@@ -306,6 +362,13 @@ struct NodesView: View {
                 state.selectNode(node.name)
             } label: {
                 Label(t("nodes.setCurrent"), systemImage: "checkmark.circle")
+            }
+            if vpn.isConnected {
+                Button {
+                    Task { await state.testSpeeds() }
+                } label: {
+                    Label(t("home.test"), systemImage: "gauge.with.dots.needle.50percent")
+                }
             }
         }
     }

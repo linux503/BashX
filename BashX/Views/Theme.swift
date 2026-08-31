@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+/// Shared density tokens for the Mac full panel — keep spacing/radii/fonts aligned.
+enum PanelMetrics {
+    /// Tuned for default full-panel window (~1100×740).
+    static let sidebarWidth: CGFloat = 228
+    static let sidebarInset: CGFloat = 10
+    static let sidebarStack: CGFloat = 9
+    static let cardPad: CGFloat = 10
+    static let cardRadius: CGFloat = 11
+    static let chipRadius: CGFloat = 8
+    static let topBarHeight: CGFloat = 48
+    static let sectionTitle = Font.system(size: 11, weight: .semibold, design: .rounded)
+    static let body = Font.system(size: 12.5, weight: .semibold, design: .rounded)
+    static let caption = Font.system(size: 10.5, weight: .medium, design: .rounded)
+    static let micro = Font.system(size: 9.5, weight: .medium, design: .rounded)
+}
+
 enum BashXTheme {
     // Sky blue (天蓝) — unified accent across panel, sidebar, and nodes
     static func accent(for appearance: AppAppearance) -> Color {
@@ -200,29 +216,133 @@ struct PanelAtmosphere: View {
     @Environment(\.bashxAppearance) private var appearance
 
     var body: some View {
-        ZStack {
-            BashXTheme.canvas(for: appearance)
-            LinearGradient(
-                colors: [
-                    BashXTheme.accent(for: appearance).opacity(appearance == .dark ? 0.10 : 0.08),
-                    Color(red: 0.45, green: 0.78, blue: 1.0).opacity(appearance == .dark ? 0.05 : 0.04),
-                    Color.clear,
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [
-                    BashXTheme.accentGlow(for: appearance).opacity(appearance == .dark ? 0.08 : 0.04),
-                    Color.clear,
-                ],
-                center: .topTrailing,
-                startRadius: 0,
-                endRadius: 420
-            )
+        // Flat canvas only — multi-layer gradients were janky on Apple Silicon menu-bar hosts.
+        BashXTheme.canvas(for: appearance)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+    }
+}
+
+/// Soft static backdrop for Mac minimal home (panel window only — not the menu bar).
+struct MinimalHomeBackdrop: View {
+    @Environment(\.bashxAppearance) private var appearance
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            ZStack {
+                BashXTheme.canvas(for: appearance)
+
+                Circle()
+                    .fill(BashXTheme.accent(for: appearance).opacity(appearance == .dark ? 0.22 : 0.16))
+                    .frame(width: w * 0.95, height: w * 0.95)
+                    .blur(radius: 42)
+                    .offset(x: -w * 0.28, y: -h * 0.22)
+
+                Circle()
+                    .fill(BashXTheme.good(for: appearance).opacity(appearance == .dark ? 0.14 : 0.10))
+                    .frame(width: w * 0.72, height: w * 0.72)
+                    .blur(radius: 48)
+                    .offset(x: w * 0.34, y: h * 0.18)
+
+                Circle()
+                    .fill(Color(red: 0.28, green: 0.72, blue: 0.92).opacity(appearance == .dark ? 0.10 : 0.07))
+                    .frame(width: w * 0.55, height: w * 0.55)
+                    .blur(radius: 36)
+                    .offset(x: w * 0.08, y: h * 0.42)
+
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(appearance == .dark ? 0.04 : 0.35),
+                        Color.clear,
+                    ],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            }
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
+    }
+}
+
+/// Prominent 极简 / 完整 layout switch used in both homes.
+struct PanelHomeModeToggle: View {
+    @Environment(\.bashxAppearance) private var appearance
+    let isMinimal: Bool
+    let lang: AppLanguage
+    let onSelectMinimal: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            toggleSide(
+                title: L10n.t("mac.minimal.mode", lang),
+                systemImage: "sparkles",
+                selected: isMinimal
+            ) {
+                onSelectMinimal(true)
+            }
+            toggleSide(
+                title: L10n.t("mac.minimal.full", lang),
+                systemImage: "rectangle.split.3x3.fill",
+                selected: !isMinimal
+            ) {
+                onSelectMinimal(false)
+            }
+        }
+        .padding(3)
+        .background {
+            Capsule(style: .continuous)
+                .fill(BashXTheme.card(for: appearance))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(
+                            BashXTheme.accent(for: appearance).opacity(0.35),
+                            lineWidth: 1
+                        )
+                )
+                .shadow(color: BashXTheme.accent(for: appearance).opacity(0.18), radius: 8, y: 2)
+        }
+        .help(isMinimal ? L10n.t("mac.minimal.toFull", lang) : L10n.t("mac.minimal.toSimple", lang))
+    }
+
+    private func toggleSide(
+        title: String,
+        systemImage: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .bold))
+                Text(title)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(selected ? Color.white : BashXTheme.secondaryLabel(for: appearance))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background {
+                if selected {
+                    Capsule(style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    BashXTheme.accent(for: appearance),
+                                    BashXTheme.accent(for: appearance).opacity(0.78),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .shadow(color: BashXTheme.accent(for: appearance).opacity(0.35), radius: 4, y: 1)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.14), value: selected)
     }
 }
 
@@ -256,21 +376,21 @@ struct PanelSection<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if let title {
                 Text(title)
-                    .font(.subheadline.weight(.medium))
+                    .font(PanelMetrics.sectionTitle)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
             content()
         }
-        .padding(14)
+        .padding(PanelMetrics.cardPad)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                         .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
                 )
         }
@@ -286,19 +406,19 @@ struct StatusPill: View {
     private var tint: Color { activeColor ?? BashXTheme.accent(for: appearance) }
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Circle()
                 .fill(active ? tint : BashXTheme.tertiaryLabel(for: appearance))
-                .frame(width: 5, height: 5)
+                .frame(width: 4, height: 4)
             Text(title)
-                .font(.caption.weight(active ? .medium : .regular))
-                .foregroundStyle(active ? .primary : BashXTheme.secondaryLabel(for: appearance))
+                .font(.system(size: 10, weight: active ? .semibold : .medium, design: .rounded))
+                .foregroundStyle(active ? BashXTheme.primaryLabel(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
         .background {
             Capsule(style: .continuous)
-                .fill(active ? tint.opacity(appearance == .dark ? 0.22 : 0.14) : BashXTheme.secondaryFill(for: appearance))
+                .fill(active ? tint.opacity(appearance == .dark ? 0.20 : 0.12) : BashXTheme.secondaryFill(for: appearance))
         }
     }
 }
@@ -306,14 +426,20 @@ struct StatusPill: View {
 struct SidebarSectionHeader: View {
     @Environment(\.bashxAppearance) private var appearance
     let title: String
+    var systemImage: String?
 
     var body: some View {
-        Text(title)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 2)
-            .padding(.bottom, 0)
+        HStack(spacing: 5) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+            }
+            Text(title)
+                .font(PanelMetrics.sectionTitle)
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+            Spacer(minLength: 0)
+        }
     }
 }
 
@@ -386,8 +512,8 @@ struct ActionChip: View {
 }
 
 struct SoftCard<Content: View>: View {
-    var padding: CGFloat = 14
-    var cornerRadius: CGFloat = 8
+    var padding: CGFloat = PanelMetrics.cardPad
+    var cornerRadius: CGFloat = PanelMetrics.cardRadius
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -403,8 +529,8 @@ struct SoftField<Content: View>: View {
 
     var body: some View {
         content()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
             .background {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(BashXTheme.field(for: appearance))

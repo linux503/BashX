@@ -256,19 +256,26 @@ struct AppSettings: Codable {
     var systemProxyEnabled: Bool = true
     /// User explicitly turned off system proxy in UI — skip auto-enable on launch.
     var userDisabledSystemProxy: Bool = false
-    var tunEnabled: Bool = false
+    /// Default on: Telegram MTProto/UDP needs TUN; system proxy alone often spins forever.
+    var tunEnabled: Bool = true
+    /// User explicitly turned off TUN in UI — skip auto-enable migration.
+    var userDisabledTun: Bool = false
     /// iOS: true = TUN 捕获全 App 流量；false = 仅 HTTP 系统代理（微信/Telegram 无效，实验用）。
     var iosTunnelCapture: Bool = true
     var tunStack: String = "mixed"
     /// Block video / streaming ad domains via REJECT rules.
     var videoAdBlockEnabled: Bool = true
+    /// Enabled Plugin Market ids (hub.kelee.one–style rule packs).
+    var enabledPluginIds: [String] = []
     /// Prefer launch at login (actual state comes from SMAppService).
     var launchAtLoginEnabled: Bool = false
     var menuNodeLimit: Int = 50
     /// Show ↓/↑ rates next to the menu-bar icon (off by default — wide glyphs hide in ❯❯ overflow).
     var showMenuBarTraffic: Bool = false
     /// Show BashX icon in the Dock (off = menu-bar only).
-    var showDockIcon: Bool = false
+    var showDockIcon: Bool = true
+    /// Mac control panel: compact home (connect + subs) vs full Stash-like layout.
+    var macMinimalHome: Bool = false
     /// Allow plain `http://` subscription URLs (ATS + explicit opt-in).
     var allowInsecureHTTPSubscriptions: Bool = false
     /// Periodically re-test nodes and keep fastest ranked first.
@@ -309,7 +316,9 @@ struct AppSettings: Codable {
     /// iOS: show wallpaper camouflage on launch; unlock via 果园防线 card 6 taps.
     var iosDisguiseEnabled: Bool = true
     /// iOS: NEOnDemand — auto-connect when network is available (after user connects once).
-    var iosOnDemandEnabled: Bool = true
+    var iosOnDemandEnabled: Bool = false
+    /// iOS: include APNs in VPN tunnel + route push via low-latency APNS group.
+    var iosTelegramPushEnabled: Bool = true
     /// UI language: system / Chinese / English.
     var uiLanguage: AppLanguage = .system
     /// Mac: route specific apps through different proxy lines.
@@ -320,12 +329,12 @@ struct AppSettings: Codable {
     enum CodingKeys: String, CodingKey {
         case subscriptions, selectedNodeName, testURL, testTimeoutMs, concurrency
         case clashBinaryPath, externalController, secret, mixedPort, allowLan
-        case systemProxyEnabled, userDisabledSystemProxy, tunEnabled, iosTunnelCapture, tunStack, videoAdBlockEnabled
-        case launchAtLoginEnabled, menuNodeLimit, showMenuBarTraffic, showDockIcon, allowInsecureHTTPSubscriptions
+        case systemProxyEnabled, userDisabledSystemProxy, tunEnabled, userDisabledTun, iosTunnelCapture, tunStack, videoAdBlockEnabled, enabledPluginIds
+        case launchAtLoginEnabled, menuNodeLimit, showMenuBarTraffic, showDockIcon, macMinimalHome, allowInsecureHTTPSubscriptions
         case autoSpeedTestEnabled, autoSpeedTestIntervalMinutes, autoSelectFastest, turboMode, domainSniffing, dnsPreference
         case rules, rulesPrepend, rulesVersion, closeConnectionsOnSwitch, proxyMode, proxyHubMode
         case logoStyle, nodeDisplayMode, appearance, nodeDelayCache, stableAINodeName, isolatedNodeKeys
-        case iosDisguiseEnabled, iosOnDemandEnabled, uiLanguage
+        case iosDisguiseEnabled, iosOnDemandEnabled, iosTelegramPushEnabled, uiLanguage
         case appRoutingRules
     }
 
@@ -345,15 +354,18 @@ struct AppSettings: Codable {
         allowLan = try c.decodeIfPresent(Bool.self, forKey: .allowLan) ?? false
         systemProxyEnabled = try c.decodeIfPresent(Bool.self, forKey: .systemProxyEnabled) ?? true
         userDisabledSystemProxy = try c.decodeIfPresent(Bool.self, forKey: .userDisabledSystemProxy) ?? false
-        tunEnabled = try c.decodeIfPresent(Bool.self, forKey: .tunEnabled) ?? false
+        tunEnabled = try c.decodeIfPresent(Bool.self, forKey: .tunEnabled) ?? true
+        userDisabledTun = try c.decodeIfPresent(Bool.self, forKey: .userDisabledTun) ?? false
         iosTunnelCapture = try c.decodeIfPresent(Bool.self, forKey: .iosTunnelCapture) ?? true
         tunStack = try c.decodeIfPresent(String.self, forKey: .tunStack) ?? "mixed"
         videoAdBlockEnabled = try c.decodeIfPresent(Bool.self, forKey: .videoAdBlockEnabled) ?? true
+        enabledPluginIds = try c.decodeIfPresent([String].self, forKey: .enabledPluginIds) ?? []
         launchAtLoginEnabled = try c.decodeIfPresent(Bool.self, forKey: .launchAtLoginEnabled) ?? false
         menuNodeLimit = try c.decodeIfPresent(Int.self, forKey: .menuNodeLimit) ?? 50
         // Default off: icon+rates is wide and often vanishes into menu-bar overflow (❯❯) on notch Macs.
         showMenuBarTraffic = try c.decodeIfPresent(Bool.self, forKey: .showMenuBarTraffic) ?? false
-        showDockIcon = try c.decodeIfPresent(Bool.self, forKey: .showDockIcon) ?? false
+        showDockIcon = try c.decodeIfPresent(Bool.self, forKey: .showDockIcon) ?? true
+        macMinimalHome = try c.decodeIfPresent(Bool.self, forKey: .macMinimalHome) ?? false
         allowInsecureHTTPSubscriptions = try c.decodeIfPresent(Bool.self, forKey: .allowInsecureHTTPSubscriptions) ?? false
         autoSpeedTestEnabled = try c.decodeIfPresent(Bool.self, forKey: .autoSpeedTestEnabled) ?? false
         autoSpeedTestIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .autoSpeedTestIntervalMinutes) ?? 10
@@ -374,7 +386,8 @@ struct AppSettings: Codable {
         stableAINodeName = try c.decodeIfPresent(String.self, forKey: .stableAINodeName)
         isolatedNodeKeys = try c.decodeIfPresent([String].self, forKey: .isolatedNodeKeys) ?? []
         iosDisguiseEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosDisguiseEnabled) ?? true
-        iosOnDemandEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosOnDemandEnabled) ?? true
+        iosOnDemandEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosOnDemandEnabled) ?? false
+        iosTelegramPushEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosTelegramPushEnabled) ?? true
         uiLanguage = try c.decodeIfPresent(AppLanguage.self, forKey: .uiLanguage) ?? .system
         appRoutingRules = try c.decodeIfPresent([AppRoutingRule].self, forKey: .appRoutingRules) ?? []
         L10n.apply(uiLanguage)

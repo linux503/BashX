@@ -53,13 +53,8 @@ DOMAIN-KEYWORD,pangolin-sdk-toutiao,REJECT
 DOMAIN-SUFFIX,pglstatp-toutiao.com,REJECT
 DOMAIN-SUFFIX,pangolin-sdk-toutiao.com,REJECT
 DOMAIN-SUFFIX,pangolin-sdk-toutiao1.com,REJECT
-DOMAIN-SUFFIX,is.snssdk.com,REJECT
 DOMAIN-SUFFIX,ad.toutiao.com,REJECT
 DOMAIN-SUFFIX,dm.toutiao.com,REJECT
-DOMAIN-SUFFIX,lf.snssdk.com,REJECT
-DOMAIN-SUFFIX,i.snssdk.com,REJECT
-DOMAIN-SUFFIX,bds.snssdk.com,REJECT
-DOMAIN-SUFFIX,dig.bdurl.net,REJECT
 DOMAIN-SUFFIX,ad.zijieapi.com,REJECT
 DOMAIN-SUFFIX,luckycat-dypay.ixigua.com,REJECT
 DOMAIN-SUFFIX,ad.oceanengine.com,REJECT
@@ -120,6 +115,13 @@ DOMAIN-SUFFIX,wxsnsdythumb.wxs.qq.com,REJECT
 DOMAIN-SUFFIX,adpm.app.qq.com,REJECT
 DOMAIN-SUFFIX,v.gdt.qq.com,REJECT
 DOMAIN-SUFFIX,xiuxiu.mobile.qq.com,REJECT
+DOMAIN,activity.video.qq.com,REJECT
+DOMAIN,ads.video.qq.com,REJECT
+DOMAIN,info4.video.qq.com,REJECT
+DOMAIN,info6.video.qq.com,REJECT
+DOMAIN,vv6.video.qq.com,REJECT
+DOMAIN,tmead.y.qq.com,REJECT
+DOMAIN,pgdt.ugdtimg.com,REJECT
 
 # —— 芒果 / 快手 / 搜狐 / PPTV / 乐视 / 咪咕 ——
 DOMAIN-SUFFIX,da.mgtv.com,REJECT

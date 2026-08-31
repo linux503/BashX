@@ -1,0 +1,22 @@
+{
+  "id": "amap-ads",
+  "name": "高德地图去广告",
+  "summary": "拦截高德开屏素材与广告 CDN（不拦 m5 主接口，避免影响导航）。",
+  "tag": "去广告",
+  "symbol": "map.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,amap-aos-info-nogw.amap.com,REJECT",
+    "DOMAIN,free-aos-cdn-image.amap.com,REJECT",
+    "DOMAIN,optimus-ads.amap.com,REJECT",
+    "DOMAIN-SUFFIX,optimus-ads.amap.com,REJECT",
+    "DOMAIN,ai.amap.com,REJECT",
+    "DOMAIN,oss.amap.com,REJECT",
+    "DOMAIN,sns.amap.com,REJECT",
+    "DOMAIN-SUFFIX,v.smtcdns.com,REJECT",
+    "DOMAIN-KEYWORD,amap-ad,REJECT",
+    "DOMAIN-KEYWORD,amap.ad,REJECT",
+    "DOMAIN-KEYWORD,aos-ads,REJECT",
+    "DOMAIN-KEYWORD,alimama,REJECT"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "123pan-ads",
+  "name": "123云盘去广告",
+  "summary": "规则拦截开屏与横幅广告域名。",
+  "tag": "去广告",
+  "symbol": "externaldrive.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,ad.123pan.com,REJECT",
+    "DOMAIN,ads.123pan.com,REJECT",
+    "DOMAIN,advert.123pan.com,REJECT",
+    "DOMAIN,ad-api.123pan.com,REJECT",
+    "DOMAIN,adapi.123pan.com,REJECT",
+    "DOMAIN-KEYWORD,123-ad,REJECT",
+    "DOMAIN-KEYWORD,123pan.ad,REJECT"
+  ]
+}

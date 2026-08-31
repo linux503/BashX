@@ -1,10 +1,10 @@
 {
   "name": "BashX Smart Rules",
   "id": "bashx-smart",
-  "version": 28,
+  "version": 32,
   "updated": "2026-08-31",
-  "description": "iOS 启动修复：剔除 GEOSITE/PROCESS · 国内优先分流",
-  "ruleCount": 360,
+  "description": "淘宝/闲鱼(goofish)/国内电商直连；阿里 HTTPDNS DIRECT；APNS 亚洲优先",
+  "ruleCount": 370,
   "source": "https://github.com/LingJingMaster/Shadowrocket-Rules",
   "files": {
     "rules": "bashx-smart-rules.txt",

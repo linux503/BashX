@@ -1,45 +1,87 @@
 import SwiftUI
+import UIKit
 
-// MARK: - Premium design tokens (Express / Nord / Surfshark class)
+// MARK: - Premium design tokens (adaptive light / dark)
 
 enum IOSTheme {
-    // Brand — sky azure (天蓝色)
-    static let accent = Color(red: 0.22, green: 0.64, blue: 0.96)
-    static let accentDeep = Color(red: 0.10, green: 0.42, blue: 0.78)
-    static let accentBright = Color(red: 0.52, green: 0.82, blue: 1.0)
-    static let accentSoft = Color(red: 0.22, green: 0.64, blue: 0.96).opacity(0.16)
-    static let accentMuted = Color(red: 0.22, green: 0.64, blue: 0.96).opacity(0.10)
+    // Brand — sky azure; lift luminance in dark so it stays vivid on navy canvas
+    static let accent = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.42, green: 0.78, blue: 1.00, alpha: 1)
+            : UIColor(red: 0.22, green: 0.64, blue: 0.96, alpha: 1)
+    })
+    static let accentDeep = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.28, green: 0.62, blue: 0.98, alpha: 1)
+            : UIColor(red: 0.10, green: 0.42, blue: 0.78, alpha: 1)
+    })
+    static let accentBright = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.62, green: 0.88, blue: 1.00, alpha: 1)
+            : UIColor(red: 0.52, green: 0.82, blue: 1.0, alpha: 1)
+    })
+    static let accentSoft = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.42, green: 0.78, blue: 1.00, alpha: 0.22)
+            : UIColor(red: 0.22, green: 0.64, blue: 0.96, alpha: 0.16)
+    })
+    static let accentMuted = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.42, green: 0.78, blue: 1.00, alpha: 0.14)
+            : UIColor(red: 0.22, green: 0.64, blue: 0.96, alpha: 0.10)
+    })
 
-    static let ink = Color(red: 0.08, green: 0.14, blue: 0.22)
-    static let mist = Color(red: 0.92, green: 0.96, blue: 1.0)
+    static let ink = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.94, green: 0.96, blue: 0.99, alpha: 1)
+            : UIColor(red: 0.08, green: 0.14, blue: 0.22, alpha: 1)
+    })
+    static let mist = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.10, green: 0.14, blue: 0.20, alpha: 1)
+            : UIColor(red: 0.92, green: 0.96, blue: 1.0, alpha: 1)
+    })
 
     static let accentGradient = LinearGradient(
         colors: [
-            Color(red: 0.55, green: 0.84, blue: 1.0),
-            Color(red: 0.22, green: 0.64, blue: 0.96),
-            Color(red: 0.08, green: 0.40, blue: 0.78),
+            Color(uiColor: UIColor { tc in
+                tc.userInterfaceStyle == .dark
+                    ? UIColor(red: 0.55, green: 0.86, blue: 1.0, alpha: 1)
+                    : UIColor(red: 0.55, green: 0.84, blue: 1.0, alpha: 1)
+            }),
+            accent,
+            accentDeep,
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
 
-    static let heroAtmosphere = LinearGradient(
-        colors: [
-            Color(red: 0.22, green: 0.64, blue: 0.96).opacity(0.28),
-            Color(red: 0.30, green: 0.58, blue: 0.92).opacity(0.12),
-            Color(red: 0.92, green: 0.96, blue: 1.0).opacity(0.4),
-            Color(.systemGroupedBackground),
-        ],
-        startPoint: .top,
-        endPoint: .bottom
-    )
+    static let good = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.40, green: 0.92, blue: 0.62, alpha: 1)
+            : UIColor(red: 0.18, green: 0.84, blue: 0.44, alpha: 1)
+    })
+    static let warn = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.82, blue: 0.40, alpha: 1)
+            : UIColor(red: 1.0, green: 0.74, blue: 0.28, alpha: 1)
+    })
+    static let bad = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.48, blue: 0.46, alpha: 1)
+            : UIColor(red: 1.0, green: 0.32, blue: 0.28, alpha: 1)
+    })
 
-    static let good = Color(red: 0.18, green: 0.84, blue: 0.44)
-    static let warn = Color(red: 1.0, green: 0.74, blue: 0.28)
-    static let bad = Color(red: 1.0, green: 0.32, blue: 0.28)
-
-    static let chartDown = Color(red: 0.98, green: 0.52, blue: 0.38)
-    static let chartUp = Color(red: 0.28, green: 0.70, blue: 0.98)
+    static let chartDown = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0, green: 0.58, blue: 0.46, alpha: 1)
+            : UIColor(red: 0.98, green: 0.52, blue: 0.38, alpha: 1)
+    })
+    static let chartUp = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.42, green: 0.82, blue: 1.0, alpha: 1)
+            : UIColor(red: 0.28, green: 0.70, blue: 0.98, alpha: 1)
+    })
     static let chartDownGradient = LinearGradient(
         colors: [chartDown.opacity(0.45), chartDown.opacity(0.02)],
         startPoint: .top, endPoint: .bottom
@@ -49,10 +91,89 @@ enum IOSTheme {
         startPoint: .top, endPoint: .bottom
     )
 
-    static let groupedBackground = Color(.systemGroupedBackground)
-    static let cardBackground = Color(.secondarySystemGroupedBackground)
-    static let tertiaryFill = Color(.tertiarySystemGroupedBackground)
-    static let cardStroke = Color.primary.opacity(0.06)
+    /// Deep navy canvas in dark — richer than plain system gray
+    static let groupedBackground = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.05, green: 0.07, blue: 0.11, alpha: 1)
+            : UIColor.systemGroupedBackground
+    })
+    static let cardBackground = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.11, green: 0.14, blue: 0.19, alpha: 1)
+            : UIColor.secondarySystemGroupedBackground
+    })
+    static let tertiaryFill = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor(red: 0.16, green: 0.19, blue: 0.25, alpha: 1)
+            : UIColor.tertiarySystemGroupedBackground
+    })
+    static let cardStroke = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor.white.withAlphaComponent(0.12)
+            : UIColor.label.withAlphaComponent(0.06)
+    })
+    static let cardShadow = Color(uiColor: UIColor { tc in
+        tc.userInterfaceStyle == .dark
+            ? UIColor.black.withAlphaComponent(0.45)
+            : UIColor.black.withAlphaComponent(0.06)
+    })
+
+    /// Traffic chart well (was hard-coded light blue — unreadable in dark)
+    static func trafficWellFill(for scheme: ColorScheme) -> LinearGradient {
+        if scheme == .dark {
+            return LinearGradient(
+                colors: [
+                    Color(red: 0.09, green: 0.13, blue: 0.20),
+                    Color(red: 0.07, green: 0.11, blue: 0.17),
+                    Color(red: 0.08, green: 0.14, blue: 0.18),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color(red: 0.93, green: 0.97, blue: 1.0),
+                Color(red: 0.88, green: 0.94, blue: 0.99),
+                Color(red: 0.91, green: 0.96, blue: 0.95),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static func trafficWellStroke(for scheme: ColorScheme) -> LinearGradient {
+        if scheme == .dark {
+            return LinearGradient(
+                colors: [
+                    accentBright.opacity(0.35),
+                    good.opacity(0.18),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color(red: 0.55, green: 0.78, blue: 0.98).opacity(0.45),
+                Color(red: 0.45, green: 0.85, blue: 0.80).opacity(0.25),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    static func trafficGrid(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color.white.opacity(0.08)
+            : Color(red: 0.45, green: 0.62, blue: 0.78).opacity(0.18)
+    }
+
+    static func trafficEmptyLabel(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color.white.opacity(0.45)
+            : Color(red: 0.35, green: 0.48, blue: 0.58).opacity(0.75)
+    }
 
     static let cardRadius: CGFloat = 22
     static let innerRadius: CGFloat = 14
@@ -72,7 +193,11 @@ enum IOSTheme {
         switch mode {
         case .rule: return accent
         case .global: return warn
-        case .direct: return Color(red: 0.45, green: 0.52, blue: 0.62)
+        case .direct: return Color(uiColor: UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.62, green: 0.68, blue: 0.76, alpha: 1)
+                : UIColor(red: 0.45, green: 0.52, blue: 0.62, alpha: 1)
+        })
         }
     }
 
@@ -89,6 +214,7 @@ enum IOSTheme {
 // MARK: - Surfaces
 
 struct IOSPageBackground<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -96,13 +222,12 @@ struct IOSPageBackground<Content: View>: View {
             IOSTheme.groupedBackground.ignoresSafeArea()
             GeometryReader { geo in
                 ZStack {
-                    // Soft radial wash (premium VPN atmosphere)
                     Circle()
                         .fill(
                             RadialGradient(
                                 colors: [
-                                    IOSTheme.accentBright.opacity(0.42),
-                                    IOSTheme.accent.opacity(0.16),
+                                    IOSTheme.accentBright.opacity(colorScheme == .dark ? 0.22 : 0.42),
+                                    IOSTheme.accent.opacity(colorScheme == .dark ? 0.10 : 0.16),
                                     Color.clear,
                                 ],
                                 center: .center,
@@ -114,12 +239,11 @@ struct IOSPageBackground<Content: View>: View {
                         .offset(y: -geo.size.width * 0.42)
                         .blur(radius: 10)
 
-                    // Secondary cool bloom
                     Ellipse()
                         .fill(
                             RadialGradient(
                                 colors: [
-                                    Color(red: 0.35, green: 0.78, blue: 1.0).opacity(0.18),
+                                    Color(red: 0.35, green: 0.78, blue: 1.0).opacity(colorScheme == .dark ? 0.10 : 0.18),
                                     Color.clear,
                                 ],
                                 center: .center,
@@ -132,13 +256,13 @@ struct IOSPageBackground<Content: View>: View {
                         .blur(radius: 28)
 
                     Circle()
-                        .fill(IOSTheme.accentDeep.opacity(0.12))
+                        .fill(IOSTheme.accentDeep.opacity(colorScheme == .dark ? 0.10 : 0.12))
                         .frame(width: 240, height: 240)
                         .offset(x: geo.size.width * 0.34, y: 28)
                         .blur(radius: 44)
 
                     Circle()
-                        .fill(Color(red: 0.2, green: 0.72, blue: 0.88).opacity(0.10))
+                        .fill(Color(red: 0.2, green: 0.72, blue: 0.88).opacity(colorScheme == .dark ? 0.06 : 0.10))
                         .frame(width: 200, height: 200)
                         .offset(x: -geo.size.width * 0.32, y: 100)
                         .blur(radius: 40)
@@ -154,6 +278,7 @@ struct IOSPageBackground<Content: View>: View {
 struct IOSCard<Content: View>: View {
     var padding: CGFloat = 18
     var elevated: Bool = true
+    @Environment(\.colorScheme) private var colorScheme
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -165,13 +290,17 @@ struct IOSCard<Content: View>: View {
                     .fill(.ultraThinMaterial)
                     .background(
                         RoundedRectangle(cornerRadius: IOSTheme.cardRadius, style: .continuous)
-                            .fill(IOSTheme.cardBackground.opacity(0.72))
+                            .fill(IOSTheme.cardBackground.opacity(colorScheme == .dark ? 0.88 : 0.72))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: IOSTheme.cardRadius, style: .continuous)
-                            .strokeBorder(IOSTheme.cardStroke, lineWidth: 0.5)
+                            .strokeBorder(IOSTheme.cardStroke, lineWidth: colorScheme == .dark ? 0.8 : 0.5)
                     )
-                    .shadow(color: .black.opacity(elevated ? 0.06 : 0), radius: elevated ? 16 : 0, y: elevated ? 8 : 0)
+                    .shadow(
+                        color: IOSTheme.cardShadow.opacity(elevated ? 1 : 0),
+                        radius: elevated ? (colorScheme == .dark ? 20 : 16) : 0,
+                        y: elevated ? 8 : 0
+                    )
             }
     }
 }

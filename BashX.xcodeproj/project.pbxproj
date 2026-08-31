@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00F6B4353F59116C53DB93AC /* MacConnectControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A5EC9A07B7439ED96272AA /* MacConnectControl.swift */; };
 		0259F972D3B6B5A2BA3AC583 /* CoreHealth.swift in Sources */ = {isa = PBXBuildFile; fileRef = C04468CEDD7BC8C78B0EF973 /* CoreHealth.swift */; };
 		0305B65D50E7D37646C3A86A /* GeoDataBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93CA516F1FFE0271064DA3A4 /* GeoDataBootstrap.swift */; };
 		04145F5FCC07C2245CE84E16 /* BashXApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C9D22F450290CC030F32E9 /* BashXApp.swift */; };
@@ -19,6 +20,8 @@
 		0CE671A5A30D73376BD2509D /* Paths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD540993DF70F793F76776BB /* Paths.swift */; };
 		0D9A6C8442E84A0B48739C55 /* Paths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD540993DF70F793F76776BB /* Paths.swift */; };
 		0DB9C34624836B6D9D8B694D /* IOSTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C98783511A14BB0AB6E850F /* IOSTheme.swift */; };
+		0E8E9442D9D6FA07A20A7A83 /* PluginEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E30CE943D1C2B850622E1C4 /* PluginEngine.swift */; };
+		1139C446C5BFE57B8E3D75E3 /* PluginMarketView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE6575147CC7EE1F32D25DCA /* PluginMarketView.swift */; };
 		11E0F436560AD1C875EA940B /* SubscriptionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFF2D5C5C6DD27C4E325BF58 /* SubscriptionViews.swift */; };
 		138ACFF912898D56409DDA61 /* Network.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2E2E3467A1B8C331440C9BA5 /* Network.framework */; };
 		14F7CD02745774E2ACD07D4D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0204E4BB23EF3F00659AD49F /* Assets.xcassets */; };
@@ -48,6 +51,7 @@
 		43C46183BC0F4939289AA737 /* SubscriptionFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85414B4028262BC94714A63D /* SubscriptionFetcher.swift */; };
 		487E1827ED65E4FCFFF06C27 /* BashXVPNControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79B018BA934378CA2281D016 /* BashXVPNControl.swift */; };
 		48A42E34A9E4C3497497CC16 /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 19DFC222E0C1101F791C9A10 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		48EDC980F146F0D5522ED792 /* PluginMarket.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF741C3CBAE70063E886EFF2 /* PluginMarket.swift */; };
 		4BF326B77479FA578BDF8312 /* TunnelDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5A7A4EE26B9065675FC421 /* TunnelDiagnostics.swift */; };
 		4DD7CB6344668FEF7D2060C5 /* IosProxyDomains.swift in Sources */ = {isa = PBXBuildFile; fileRef = 381EA102AD7F5BF7FF911983 /* IosProxyDomains.swift */; };
 		5026432F78466956F8333382 /* ChinaSmartRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB59AB7C2122B3BDAD003530 /* ChinaSmartRules.swift */; };
@@ -72,6 +76,7 @@
 		6B903B0451378CA4BC2763E1 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47497158EE36B0D8942B8611 /* Models.swift */; };
 		6F0E21CFA09F0467EB034203 /* PolicyGroupsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A2AEB8E49A82CB466C36BF /* PolicyGroupsView.swift */; };
 		6FBDB72A3BDEB65F76E20E2D /* SubscriptionURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76AFBB99833D8C2B09437A21 /* SubscriptionURL.swift */; };
+		7191B69187989DECD99A19CF /* plugin-packs in Resources */ = {isa = PBXBuildFile; fileRef = E34D4D24BB6409501BC9AC4A /* plugin-packs */; };
 		7540E919257DC7AED7F7C758 /* FruitIconView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66BB6794C7EB520D32744AA2 /* FruitIconView.swift */; };
 		7598FD400AA99835BFA28C61 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 960B3C918D3CF25B961DC8DC /* Yams */; };
 		771961BD2F6E03183497658C /* CursorReliability.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44B73A6DAAA038CFFABED58 /* CursorReliability.swift */; };
@@ -117,6 +122,8 @@
 		AE4E4A2D1865F5C9DF674E4E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C9A63E843433EAA78E218C52 /* Assets.xcassets */; };
 		B341B0D6EF9D7400FD5575B9 /* IosRoutingRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB496EBB5AB56B7854A8E9D3 /* IosRoutingRules.swift */; };
 		B362FBA82113022D8219A7D7 /* SettingsViewIOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = E36E925E51BC8591B18F4AAC /* SettingsViewIOS.swift */; };
+		B44D812BD9B2222E34AFA85F /* PluginMarket.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF741C3CBAE70063E886EFF2 /* PluginMarket.swift */; };
+		B63372EACD0E7DD3AEDA640A /* PluginMarketPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A80AA41B806198D555D37B0 /* PluginMarketPane.swift */; };
 		B75C505EB6D56888A590E290 /* RuntimeRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57BD00C6F4E1C534C3671363 /* RuntimeRules.swift */; };
 		BE1A5CFFED3D4728574575D8 /* DnsProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94F78DC4D192E20DD38DEC2C /* DnsProfile.swift */; };
 		BE206BDFD9090CC15402A5F1 /* connPool_stub.s in Resources */ = {isa = PBXBuildFile; fileRef = 9F87B9F27F9709BE925D12A7 /* connPool_stub.s */; };
@@ -125,6 +132,7 @@
 		BF8E2D354A27FDD377A6DF6F /* GameSFX.swift in Sources */ = {isa = PBXBuildFile; fileRef = C55DA0363853AAE3E302EB5B /* GameSFX.swift */; };
 		C7668B60B354A4447A632303 /* SwiftUICompat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4AEB1E8D30FB2E7FB4D2DD /* SwiftUICompat.swift */; };
 		CA343AE2A6F2CAC5004BC0C0 /* Core in Resources */ = {isa = PBXBuildFile; fileRef = 03B8C6DDFEFD4A9FEB4A91B9 /* Core */; };
+		CD74E1E0A81A96EE87D72715 /* PluginEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E30CE943D1C2B850622E1C4 /* PluginEngine.swift */; };
 		D0C64B01E325A66F1539EF65 /* ByteFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA52AAA929C806FCD9E60AD /* ByteFormat.swift */; };
 		D1F8E7926306B1D0DEAE94D1 /* SubscriptionQRShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D651BD5935080A2409F91806 /* SubscriptionQRShareSheet.swift */; };
 		D55C244752CE3458407283FD /* logo.png in Resources */ = {isa = PBXBuildFile; fileRef = CD525AAEBDF53BF953691941 /* logo.png */; };
@@ -220,6 +228,7 @@
 		381EA102AD7F5BF7FF911983 /* IosProxyDomains.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosProxyDomains.swift; sourceTree = "<group>"; };
 		3948FC3776C3CBD634D912AB /* VPNQuickControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VPNQuickControl.swift; sourceTree = "<group>"; };
 		3A224D4D62D9D22442052B3E /* TrafficChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrafficChartView.swift; sourceTree = "<group>"; };
+		3A80AA41B806198D555D37B0 /* PluginMarketPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginMarketPane.swift; sourceTree = "<group>"; };
 		3FC3FA339F18A2D37E33241E /* GameLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameLayout.swift; sourceTree = "<group>"; };
 		4489FD6F348854B86F6107C3 /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
 		462BB2796FCD6EFC3B1EED03 /* ClashConfigParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClashConfigParser.swift; sourceTree = "<group>"; };
@@ -240,6 +249,7 @@
 		58661F2D6C67EB19F79A16E1 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
 		5B5A7A4EE26B9065675FC421 /* TunnelDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelDiagnostics.swift; sourceTree = "<group>"; };
 		5C37DC809901EA48DDF7C0E4 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		5E30CE943D1C2B850622E1C4 /* PluginEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginEngine.swift; sourceTree = "<group>"; };
 		607BEE756F7FCA6D92B28146 /* BashX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BashX.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6339F5B4A86E0E609364EF7D /* BashXVPNIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BashXVPNIntents.swift; sourceTree = "<group>"; };
 		66BB6794C7EB520D32744AA2 /* FruitIconView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FruitIconView.swift; sourceTree = "<group>"; };
@@ -292,6 +302,7 @@
 		CD087325A3314275A3C49436 /* TunPrivilege.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunPrivilege.swift; sourceTree = "<group>"; };
 		CD1CDE0FE5EDA36D207567C4 /* ClashCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClashCore.swift; sourceTree = "<group>"; };
 		CD525AAEBDF53BF953691941 /* logo.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = logo.png; sourceTree = "<group>"; };
+		CE6575147CC7EE1F32D25DCA /* PluginMarketView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginMarketView.swift; sourceTree = "<group>"; };
 		CE8A83164369552472AD993F /* TrafficChartView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrafficChartView.swift; sourceTree = "<group>"; };
 		CFB4DE9AAC4101B12D14BBE3 /* IOSConfigWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSConfigWriter.swift; sourceTree = "<group>"; };
 		D1D29CE19103EDDEF916488D /* IOSConnectControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSConnectControl.swift; sourceTree = "<group>"; };
@@ -301,6 +312,7 @@
 		D87ABBA1076778D97AC9396E /* MonitorPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorPane.swift; sourceTree = "<group>"; };
 		DA574FE87EE70A6ED07EF348 /* GameProgression.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameProgression.swift; sourceTree = "<group>"; };
 		E2435EAF217B3B51E1ECE80B /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
+		E34D4D24BB6409501BC9AC4A /* plugin-packs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "plugin-packs"; path = "Resources/rules/plugin-packs"; sourceTree = SOURCE_ROOT; };
 		E36E925E51BC8591B18F4AAC /* SettingsViewIOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewIOS.swift; sourceTree = "<group>"; };
 		E48E25F6670401BF8BCE1164 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E5EDE9AEACF08387C464A865 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
@@ -310,6 +322,8 @@
 		EB99BE955D962C3A58632773 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		EB9AB48745A3F29877B39677 /* VideoAdBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoAdBlock.swift; sourceTree = "<group>"; };
 		ECCBAB998CF4E92BA923E7A1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		EF741C3CBAE70063E886EFF2 /* PluginMarket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginMarket.swift; sourceTree = "<group>"; };
+		F0A5EC9A07B7439ED96272AA /* MacConnectControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacConnectControl.swift; sourceTree = "<group>"; };
 		F58034D4327ADAB05F455274 /* bashx-adblock.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "bashx-adblock.txt"; sourceTree = "<group>"; };
 		F59B0282838D8E54998FED10 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		F61175246CC8ED0CD8FBE695 /* TrafficMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrafficMonitor.swift; sourceTree = "<group>"; };
@@ -399,6 +413,7 @@
 			children = (
 				F58034D4327ADAB05F455274 /* bashx-adblock.txt */,
 				7D1849BFF96C7E4AC25AE1A1 /* bashx-smart-rules.txt */,
+				E34D4D24BB6409501BC9AC4A /* plugin-packs */,
 			);
 			path = rules;
 			sourceTree = "<group>";
@@ -447,6 +462,8 @@
 				55446575F2CF86FC66065EC6 /* LogoStyle.swift */,
 				D7DA4155C9391915CEA2B3DD /* NodeCategory.swift */,
 				C4C6851514FB25BBA0AA8786 /* PanelPresenter.swift */,
+				5E30CE943D1C2B850622E1C4 /* PluginEngine.swift */,
+				EF741C3CBAE70063E886EFF2 /* PluginMarket.swift */,
 				06B8A4BC3B1296F08915B7DC /* RoutingGeoRules.swift */,
 				57BD00C6F4E1C534C3671363 /* RuntimeRules.swift */,
 				A2F13F1B333AA683481D4E43 /* SpeedTester.swift */,
@@ -469,6 +486,7 @@
 				1E907325912DF3EBDCF1DE90 /* IOSLogoStylePicker.swift */,
 				4C98783511A14BB0AB6E850F /* IOSTheme.swift */,
 				23D149304C64C6CE2B5EC00F /* NodesView.swift */,
+				CE6575147CC7EE1F32D25DCA /* PluginMarketView.swift */,
 				91A2AEB8E49A82CB466C36BF /* PolicyGroupsView.swift */,
 				80C919DCB3469820F7A22AA8 /* QRCodeImage.swift */,
 				EB922D01FD3D8818E06EF510 /* RootTabView.swift */,
@@ -505,9 +523,11 @@
 			children = (
 				9D79AA8915BD0C3DA239DD7A /* AppRoutingPane.swift */,
 				8B79C9E7C245CE6E4FFA57E2 /* ExternalProxyPane.swift */,
+				F0A5EC9A07B7439ED96272AA /* MacConnectControl.swift */,
 				E5EDE9AEACF08387C464A865 /* MainView.swift */,
 				C8E0D4FFCB9BCF0E74286244 /* MenuBarView.swift */,
 				D87ABBA1076778D97AC9396E /* MonitorPane.swift */,
+				3A80AA41B806198D555D37B0 /* PluginMarketPane.swift */,
 				5C37DC809901EA48DDF7C0E4 /* SettingsView.swift */,
 				3285D3FE2B6DE1D708E5DEB9 /* SubscriptionManageCard.swift */,
 				D651BD5935080A2409F91806 /* SubscriptionQRShareSheet.swift */,
@@ -769,6 +789,7 @@
 				AE4E4A2D1865F5C9DF674E4E /* Assets.xcassets in Resources */,
 				9D2EBCBD388877DB2366DED8 /* bashx-adblock.txt in Resources */,
 				64A4CEB536327502AB070985 /* bashx-smart-rules.txt in Resources */,
+				7191B69187989DECD99A19CF /* plugin-packs in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -849,6 +870,7 @@
 				35734EA6A860FC47AC8790DA /* LaunchAtLogin.swift in Sources */,
 				685D01AA747BCD91E905AE68 /* LocalNetwork.swift in Sources */,
 				7F6D555990F86C62D8D5584F /* LogoStyle.swift in Sources */,
+				00F6B4353F59116C53DB93AC /* MacConnectControl.swift in Sources */,
 				9147C1125445813FD547A914 /* MainView.swift in Sources */,
 				79041D41EB880437C954407F /* MenuBarView.swift in Sources */,
 				7C7EDB492903B0C3C81C6A40 /* MihomoConfigCheck.swift in Sources */,
@@ -857,6 +879,9 @@
 				438BBE2A9688606B3ABCA4FB /* NodeCategory.swift in Sources */,
 				AA55856A283A014CF5F7917B /* PanelPresenter.swift in Sources */,
 				0CE671A5A30D73376BD2509D /* Paths.swift in Sources */,
+				0E8E9442D9D6FA07A20A7A83 /* PluginEngine.swift in Sources */,
+				B44D812BD9B2222E34AFA85F /* PluginMarket.swift in Sources */,
+				B63372EACD0E7DD3AEDA640A /* PluginMarketPane.swift in Sources */,
 				9C9E941C65D2EC0EA0F9A5BA /* QRCodeGenerator.swift in Sources */,
 				DDA6B1331E3C280B9B664388 /* RoutingGeoRules.swift in Sources */,
 				B75C505EB6D56888A590E290 /* RuntimeRules.swift in Sources */,
@@ -953,6 +978,9 @@
 				364DC353A3A18656CFB93DE7 /* NodesView.swift in Sources */,
 				6323909DAC5168B7A9C82DA4 /* OutboundIPProbe.swift in Sources */,
 				5FEC2D81F8FDD59F53B942F2 /* Paths.swift in Sources */,
+				CD74E1E0A81A96EE87D72715 /* PluginEngine.swift in Sources */,
+				48EDC980F146F0D5522ED792 /* PluginMarket.swift in Sources */,
+				1139C446C5BFE57B8E3D75E3 /* PluginMarketView.swift in Sources */,
 				6F0E21CFA09F0467EB034203 /* PolicyGroupsView.swift in Sources */,
 				A375EED550E7BCD9C67DD671 /* QRCodeGenerator.swift in Sources */,
 				BEBC4D18B99C1C4A6FF6217E /* QRCodeImage.swift in Sources */,
@@ -1005,14 +1033,14 @@
 				ARCHS = "$(ARCHS_STANDARD)";
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				ENABLE_HARDENED_RUNTIME = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -1028,7 +1056,7 @@
 				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1037,7 +1065,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -1052,13 +1080,13 @@
 				CODE_SIGN_ENTITLEMENTS = BashXControls/BashXControls.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1132,7 +1160,7 @@
 				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1141,7 +1169,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -1158,7 +1186,7 @@
 				CODE_SIGN_ENTITLEMENTS = BashXiOS/BashXiOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXiOS/Info.plist;
@@ -1169,7 +1197,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;
@@ -1184,14 +1212,14 @@
 				ARCHS = "$(ARCHS_STANDARD)";
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				ENABLE_HARDENED_RUNTIME = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -1207,12 +1235,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = BashX/BashX.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1227,12 +1255,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = BashX/BashX.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1246,13 +1274,13 @@
 				CODE_SIGN_ENTITLEMENTS = BashXControls/BashXControls.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1333,7 +1361,7 @@
 				CODE_SIGN_ENTITLEMENTS = BashXiOS/BashXiOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 38;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXiOS/Info.plist;
@@ -1344,7 +1372,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.14;
+				MARKETING_VERSION = 1.0.38;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;

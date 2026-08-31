@@ -1,0 +1,24 @@
+{
+  "id": "cainiao-ads",
+  "name": "菜鸟去广告",
+  "summary": "拦截菜鸟裹裹全屏/开屏广告与广告流接口域名（物流主接口尽量保留）。",
+  "tag": "去广告",
+  "symbol": "shippingbox.fill",
+  "scriptHeavy": false,
+  "rules": [
+    "DOMAIN,netflow-mtop.cainiao.com,REJECT",
+    "DOMAIN,nbcps-mtop.cainiao.com,REJECT",
+    "DOMAIN,guoguo-corp.cainiao.com,REJECT",
+    "DOMAIN,cn-acs.m.cainiao.com,REJECT",
+    "DOMAIN,adashx.ut.taobao.com,REJECT",
+    "DOMAIN,wgo.mmstat.com,REJECT",
+    "DOMAIN,log.mmstat.com,REJECT",
+    "DOMAIN,gm.mmstat.com,REJECT",
+    "DOMAIN,ytx-offline.alicdn.com,REJECT",
+    "DOMAIN-KEYWORD,nbnetflow,REJECT",
+    "DOMAIN-KEYWORD,cainiao-ad,REJECT",
+    "DOMAIN-KEYWORD,cainiao.ad,REJECT",
+    "DOMAIN-KEYWORD,guoguo.ads,REJECT",
+    "DOMAIN-KEYWORD,adkeyword,REJECT"
+  ]
+}

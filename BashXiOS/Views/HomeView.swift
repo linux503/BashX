@@ -4,9 +4,10 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject private var state: IOSAppState
     @EnvironmentObject private var vpn: VPNManager
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showNodePicker = false
     @State private var showPolicyGroups = false
-    @State private var showQuickTools = false
+    @State private var showQuickTools = true
     @State private var showModePicker = false
     @State private var brandAppear = false
     @State private var heroBreath = false
@@ -54,6 +55,8 @@ struct HomeView: View {
                         quickTools
                             .padding(.horizontal, 20)
                             .padding(.bottom, 36)
+                            // Avoid spring on vpn.isConnected animating DNS / chip text frames.
+                            .transaction { $0.animation = nil }
                     }
                 }
                 .background(Color.clear)
@@ -355,8 +358,8 @@ struct HomeView: View {
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color.white.opacity(0.14),
-                            Color.white.opacity(0.02),
+                            Color.white.opacity(colorScheme == .dark ? 0.08 : 0.14),
+                            Color.white.opacity(colorScheme == .dark ? 0.01 : 0.02),
                             Color.clear,
                         ],
                         center: .center,
@@ -430,51 +433,6 @@ struct HomeView: View {
             // Orbit sparks
             ForEach(0..<10, id: \.self) { i in
                 orbitSpark(index: i)
-            }
-
-            if vpn.isBusyConnecting {
-                // Taiji dual-glow while establishing tunnel
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color.white.opacity(heroBreath ? 0.22 : 0.08),
-                                IOSTheme.warn.opacity(0.28),
-                                Color.black.opacity(0.12),
-                                Color.clear,
-                            ],
-                            center: .center,
-                            startRadius: 20,
-                            endRadius: 160
-                        )
-                    )
-                    .frame(width: 280, height: 280)
-                    .blur(radius: 18)
-                    .scaleEffect(heroBreath ? 1.12 : 0.9)
-
-                Circle()
-                    .strokeBorder(
-                        AngularGradient(
-                            colors: [
-                                Color.white.opacity(0),
-                                Color.white.opacity(0.7),
-                                IOSTheme.warn.opacity(0.8),
-                                Color.black.opacity(0.45),
-                                Color.white.opacity(0),
-                            ],
-                            center: .center
-                        ),
-                        lineWidth: 3
-                    )
-                    .frame(width: 220, height: 220)
-                    .rotationEffect(.degrees(ringSpin * 1.6))
-                    .opacity(0.85)
-
-                Circle()
-                    .strokeBorder(IOSTheme.warn.opacity(0.4), lineWidth: 2.5)
-                    .frame(width: 210, height: 210)
-                    .scaleEffect(heroBreath ? 1.22 : 0.86)
-                    .opacity(heroBreath ? 0.12 : 0.6)
             }
 
             if vpn.isConnected {
@@ -750,6 +708,8 @@ struct HomeView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
             .background(groupBarBackground)
         }
         .buttonStyle(.plain)
@@ -774,65 +734,141 @@ struct HomeView: View {
             .fill(.ultraThinMaterial)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.systemBackground).opacity(0.55))
+                    .fill(IOSTheme.cardBackground.opacity(0.72))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(IOSTheme.cardStroke, lineWidth: 0.5)
+                    .strokeBorder(IOSTheme.cardStroke, lineWidth: 0.8)
             )
+            .shadow(color: IOSTheme.cardShadow.opacity(0.55), radius: 10, y: 4)
     }
 
     // MARK: - Quick tools (secondary, below fold)
 
     private var quickTools: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) { showQuickTools.toggle() }
+                withAnimation(.easeInOut(duration: 0.28)) { showQuickTools.toggle() }
             } label: {
-                HStack {
-                    Text(t("home.quick"))
-                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(IOSTheme.accentSoft)
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(IOSTheme.accentDeep)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(t("home.quick"))
+                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                            .foregroundStyle(.primary)
+                        Text(showQuickTools ? t("home.quickOpenHint") : t("home.quickHint"))
+                            .font(.system(.caption, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
                     Image(systemName: showQuickTools ? "chevron.up" : "chevron.down")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.tertiary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(IOSTheme.tertiaryFill.opacity(0.9)))
                 }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityHint(showQuickTools ? t("home.quickOpenHint") : t("home.quickHint"))
 
             if showQuickTools {
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
+                    Divider().opacity(0.28).padding(.horizontal, 14)
+
                     dnsPicker
-                    HStack(spacing: 10) {
-                        miniTool(
-                            title: t("home.test"),
-                            icon: "gauge.with.dots.needle.50percent",
-                            disabled: state.nodes.isEmpty || state.isTesting
-                        ) { Task { await state.testSpeeds() } }
-                        miniTool(
-                            title: t("home.fastest"),
-                            icon: "bolt.fill",
-                            disabled: state.nodes.isEmpty || state.isTesting
-                        ) { Task { await state.testSpeeds(selectFastest: true) } }
-                        miniTool(
-                            title: t("home.nodes"),
-                            icon: "list.bullet",
-                            disabled: false
-                        ) { showNodePicker = true }
-                    }
+                        .padding(.horizontal, 14)
+
+                    quickActionGrid
+                        .padding(.horizontal, 14)
+
                     WebsiteProbeStrip()
                         .environmentObject(vpn)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 14)
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            // 不展示「未连接/已连接」等 VPN 状态文案（状态pill 已有）；只留操作反馈。
             if shouldShowStatusHint(state.statusText) {
                 Text(state.statusText)
-                    .font(.caption)
+                    .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .background(groupBarBackground)
+    }
+
+    private var quickActionGrid: some View {
+        let cols = [
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+            GridItem(.flexible(), spacing: 10),
+        ]
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(t("home.quick.actions"))
+                .font(.system(.caption, design: .rounded).weight(.semibold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: cols, spacing: 10) {
+                quickTile(
+                    title: t("home.test"),
+                    icon: "gauge.with.dots.needle.50percent",
+                    tint: IOSTheme.accent,
+                    disabled: state.nodes.isEmpty || state.isTesting
+                ) { Task { await state.testSpeeds() } }
+                quickTile(
+                    title: t("home.fastest"),
+                    icon: "bolt.fill",
+                    tint: IOSTheme.warn,
+                    disabled: state.nodes.isEmpty || state.isTesting
+                ) { Task { await state.testSpeeds(selectFastest: true) } }
+                quickTile(
+                    title: t("home.nodes"),
+                    icon: "list.bullet.rectangle.portrait",
+                    tint: IOSTheme.accentDeep,
+                    disabled: false
+                ) { showNodePicker = true }
+                quickTile(
+                    title: t("home.quick.reconnect"),
+                    icon: "arrow.triangle.2.circlepath",
+                    tint: IOSTheme.good,
+                    disabled: vpn.isBusyConnecting || state.nodes.isEmpty
+                ) {
+                    Task {
+                        if vpn.isConnected || vpn.isBusyConnecting {
+                            await vpn.reconnect()
+                        } else {
+                            await state.toggleVPN()
+                        }
+                    }
+                }
+                quickTile(
+                    title: t("home.quick.update"),
+                    icon: "arrow.down.circle",
+                    tint: IOSTheme.accent,
+                    disabled: state.isBusy || state.settings.subscriptions.isEmpty
+                ) { Task { await state.updateAllSubscriptions() } }
+                quickTile(
+                    title: t("home.quick.groups"),
+                    icon: "square.stack.3d.up.fill",
+                    tint: IOSTheme.accentDeep,
+                    disabled: !vpn.isConnected
+                ) { showPolicyGroups = true }
             }
         }
     }
@@ -856,45 +892,88 @@ struct HomeView: View {
 
     private var dnsPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("DNS")
-                .font(.caption.weight(.semibold))
+            Text(t("home.quick.dns"))
+                .font(.system(.caption, design: .rounded).weight(.semibold))
                 .foregroundStyle(.secondary)
-            Picker("DNS", selection: Binding(
-                get: { state.settings.dnsPreference },
-                set: { state.setDnsPreference($0) }
-            )) {
+            HStack(spacing: 8) {
                 ForEach(DnsPreference.allCases) { pref in
-                    Text(pref.title).tag(pref)
+                    let selected = state.settings.dnsPreference == pref
+                    Button {
+                        state.setDnsPreference(pref)
+                        UISelectionFeedbackGenerator().selectionChanged()
+                    } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: dnsIcon(pref))
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(pref.shortTitle(lang: lang))
+                                .font(.system(.caption2, design: .rounded).weight(.bold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .foregroundStyle(selected ? Color.white : .primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(selected ? AnyShapeStyle(IOSTheme.accentGradient) : AnyShapeStyle(IOSTheme.tertiaryFill.opacity(0.95)))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(selected ? Color.clear : Color.primary.opacity(0.05), lineWidth: 0.5)
+                                )
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .pickerStyle(.segmented)
-        }
-        .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(IOSTheme.cardBackground.opacity(0.7))
         }
     }
 
-    private func miniTool(title: String, icon: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+    private func dnsIcon(_ pref: DnsPreference) -> String {
+        switch pref {
+        case .smart: return "sparkles"
+        case .domestic: return "building.2.fill"
+        case .foreign: return "globe.asia.australia.fill"
+        }
+    }
+
+    private func quickTile(
+        title: String,
+        icon: String,
+        tint: Color,
+        disabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.caption.weight(.semibold))
+            VStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(tint.opacity(0.14))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(tint)
+                        .symbolRenderingMode(.hierarchical)
+                }
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(.caption, design: .rounded).weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
-            .foregroundStyle(IOSTheme.accentDeep)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(IOSTheme.accentSoft)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.secondarySystemGroupedBackground).opacity(0.9))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.05), lineWidth: 0.5)
+                    )
             }
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .opacity(disabled ? 0.4 : 1)
+        .opacity(disabled ? 0.42 : 1)
     }
 }
 
