@@ -86,8 +86,8 @@ targets:
       properties:
         CFBundleName: BashX
         CFBundleDisplayName: BashX
-        CFBundleShortVersionString: "1.0.38"
-        CFBundleVersion: "38"
+        CFBundleShortVersionString: "1.0.39"
+        CFBundleVersion: "39"
         LSMinimumSystemVersion: "13.0"
         LSUIElement: true
         NSAppTransportSecurity:
@@ -162,8 +162,8 @@ targets:
       path: BashXiOS/Info.plist
       properties:
         CFBundleDisplayName: BashX
-        CFBundleShortVersionString: "1.0.38"
-        CFBundleVersion: "38"
+        CFBundleShortVersionString: "1.0.39"
+        CFBundleVersion: "39"
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIImageRespectsSafeAreaInsets: true
@@ -218,8 +218,8 @@ targets:
       path: BashXControls/Info.plist
       properties:
         CFBundleDisplayName: BashX 控制
-        CFBundleShortVersionString: "1.0.38"
-        CFBundleVersion: "38"
+        CFBundleShortVersionString: "1.0.39"
+        CFBundleVersion: "39"
         CFBundlePackageType: XPC!
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -268,8 +268,8 @@ targets:
       path: PacketTunnel/Info.plist
       properties:
         CFBundleDisplayName: BashX Tunnel
-        CFBundleShortVersionString: "1.0.38"
-        CFBundleVersion: "38"
+        CFBundleShortVersionString: "1.0.39"
+        CFBundleVersion: "39"
         CFBundlePackageType: XPC!
         NSExtension:
           NSExtensionPointIdentifier: com.apple.networkextension.packet-tunnel
