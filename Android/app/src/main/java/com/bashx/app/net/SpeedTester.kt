@@ -8,15 +8,21 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
+/**
+ * Clash Verge / Stash style latency:
+ * - Prefer mihomo `GET /proxies/{name}/delay` (URLTest through that node).
+ * - TCP host:port only when controller is unavailable (reachability, not tunnel quality).
+ */
 object SpeedTester {
     data class Result(val name: String, val delayMs: Int)
 
@@ -32,15 +38,16 @@ object SpeedTester {
         val testables = nodes.filter { ClashConfigParser.isSpeedTestable(it) }
         if (testables.isEmpty()) return@coroutineScope emptyList()
 
-        val apiTimeout = timeoutMs.coerceAtLeast(5000)
-        val limit = Semaphore(concurrency.coerceIn(1, 6))
+        val apiTimeout = timeoutMs.coerceIn(2000, 8000)
+        val limit = Semaphore(concurrency.coerceIn(1, 8))
         val catalog = if (controller != null) fetchProxyCatalog(controller, secret) else emptyMap()
+        val urls = testURLCandidates(testURL)
 
         testables.map { node ->
             async(Dispatchers.IO) {
                 limit.withPermit {
                     val delay = if (controller != null) {
-                        apiDelay(node, controller, secret, apiTimeout, testURL, catalog)
+                        apiDelay(node, controller, secret, apiTimeout, urls, catalog)
                     } else {
                         tcpDelay(node.server, node.port, apiTimeout)
                     }
@@ -49,6 +56,19 @@ object SpeedTester {
                 }
             }
         }.awaitAll()
+    }
+
+    private fun testURLCandidates(primary: String): List<String> {
+        val out = linkedSetOf<String>()
+        fun add(u: String) {
+            val t = u.trim()
+            if (t.isNotEmpty()) out += t
+        }
+        add(primary)
+        add("http://www.gstatic.com/generate_204")
+        add("http://cp.cloudflare.com/generate_204")
+        add("http://www.msftconnecttest.com/connecttest.txt")
+        return out.toList()
     }
 
     private fun fetchProxyCatalog(controller: String, secret: String): Map<String, String> {
@@ -82,12 +102,14 @@ object SpeedTester {
         return catalog["${node.server.lowercase()}:${node.port}"] ?: node.name
     }
 
+    /** Fallback: TCP connect RTT. Prefer IPv4 to avoid Happy Eyeballs ~1s stall. */
     private fun tcpDelay(host: String, port: Int, timeoutMs: Int): Int {
         if (host.isBlank() || port <= 0) return -1
         val start = System.nanoTime()
         return try {
+            val address = resolveIPv4(host) ?: InetAddress.getByName(host)
             Socket().use { socket ->
-                socket.connect(InetSocketAddress(host, port), timeoutMs.coerceAtLeast(500))
+                socket.connect(InetSocketAddress(address, port), timeoutMs.coerceAtLeast(500))
             }
             ((System.nanoTime() - start) / 1_000_000L).toInt().coerceAtLeast(1)
         } catch (_: Exception) {
@@ -95,19 +117,37 @@ object SpeedTester {
         }
     }
 
+    private fun resolveIPv4(host: String): InetAddress? = runCatching {
+        InetAddress.getAllByName(host).firstOrNull { it is Inet4Address }
+    }.getOrNull()
+
     private fun apiDelay(
         node: ProxyNode,
         controller: String,
         secret: String,
         timeoutMs: Int,
-        testURL: String,
+        urls: List<String>,
         catalog: Map<String, String>,
     ): Int {
         val name = resolveProxyName(node, catalog)
+        for (testURL in urls) {
+            val ms = apiDelayOnce(name, controller, secret, timeoutMs, testURL)
+            if (ms > 0) return ms
+        }
+        return -1
+    }
+
+    private fun apiDelayOnce(
+        name: String,
+        controller: String,
+        secret: String,
+        timeoutMs: Int,
+        testURL: String,
+    ): Int {
         val encoded = encodePath(name)
         val url = "http://$controller/proxies/$encoded/delay" +
-            "?timeout=${timeoutMs.coerceAtLeast(3000)}&url=${URLEncoder.encode(testURL, Charsets.UTF_8.name())}"
-        val client = apiClient(secret, timeoutMs + 4000)
+            "?timeout=${timeoutMs.coerceAtLeast(2000)}&url=${URLEncoder.encode(testURL, Charsets.UTF_8.name())}"
+        val client = apiClient(secret, timeoutMs + 3000)
         return runCatching {
             client.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@use -1
@@ -133,6 +173,7 @@ object SpeedTester {
         val builder = OkHttpClient.Builder()
             .connectTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
             .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            .proxy(java.net.Proxy.NO_PROXY) // API call must not go through system / mixed-port proxy
         if (secret.isNotBlank()) {
             builder.addInterceptor { chain ->
                 chain.proceed(

@@ -4,12 +4,12 @@ import Foundation
 /// https://github.com/LingJingMaster/Shadowrocket-Rules
 ///
 /// Order (top → bottom):
-/// 0. (Mac) PROCESS-NAME app routing from base — prepended first
+/// 0. (Mac) ClashFX process DIRECT (cn-apps-direct + fingerprint browsers)
 /// 1. WeChat local + LAN
 /// 2. Google / AI / Telegram / GitHub / YouTube  → strategy groups
 /// 3. Apple (push optional PROXY; rest APPLE/DIRECT)
 /// 4. 国内服务 blanket DIRECT（含 B 站/抖音 — 勿默认进策略组）
-/// 5. GeoIP（Mac）/ 外国 TLD；漏网之鱼 → MATCH,PROXY（ACL4SSR）
+/// 5. GFWList + GeoIP；Mac 漏网之鱼 → MATCH,PROXY（ACL4SSR）；iOS → MATCH,DIRECT（小火箭 FINAL）
 enum IosRoutingRules {
     /// Highest-priority APNs rules — prepended on iOS so apple.com DIRECT/APPLE cannot steal push.
     static let apnsPriorityRules: [String] = [
@@ -32,30 +32,70 @@ enum IosRoutingRules {
     ]
 
     /// Full rule list written into mihomo (Packet Tunnel on iOS / local core on Mac).
-    static func build(fromBase base: [String]) -> [String] {
+    /// `prepend` = Clash Verge 自定义前置（MATCH 除外）；`extraProcess` = 应用分流.
+    static func build(
+        fromBase base: [String],
+        prepend: [String] = [],
+        extraProcess: [String] = []
+    ) -> [String] {
         var out: [String] = []
         out.reserveCapacity(512)
 
         #if os(macOS)
-        // App-level routing must beat domain rules.
+        // IPFoxy / residential gates before any process DIRECT (Ads leftover rules).
+        out.append(contentsOf: MacAppBypassRules.residentialProxyChainRules)
+        out.append(contentsOf: prepend)
+        out.append(contentsOf: extraProcess)
+        // ClashFX cn-apps-direct: CN apps process DIRECT; AdsPower is domain-only.
+        // https://github.com/Clash-FX/cn-apps-direct
+        out.append(contentsOf: AppRoutingRules.macAppBypassRules)
+        // Extra PROCESS lines from smart rules / plugins (AdsPower helper never hijacked).
         for raw in base {
             let t = raw.trimmingCharacters(in: .whitespaces)
             let u = t.uppercased()
-            if u.hasPrefix("PROCESS-NAME,") { out.append(t) }
+            if u.hasPrefix("PROCESS-NAME,") || u.hasPrefix("PROCESS-PATH,")
+                || u.hasPrefix("PROCESS-NAME-REGEX,") || u.hasPrefix("PROCESS-PATH-REGEX,") {
+                if u.contains("ADSPOWER") || u.contains("SUNBROWSER") { continue }
+                out.append(t)
+            }
         }
+        #else
+        out.append(contentsOf: prepend)
         #endif
 
         // WeChat CDN/upload first — bare-IP dials must not fall through to MATCH,PROXY.
         out.append(contentsOf: IosDirectDomains.wechatPriorityRules)
-        // TikTok 必须在抖音 DIRECT 之前（共用 byteoversea / bytedance 基础设施）.
+        out.append(contentsOf: apnsPriorityRules)
+        // AnyDesk before DOMAIN-SUFFIX,cn (*.anydesk.com.cn otherwise forced DIRECT → offline).
+        out.append(contentsOf: IosDirectDomains.anydeskPriorityRules)
+        // TikTok 国际域名先匹配；大陆抖音（含 snssdk.com）在 douyinPriorityRules 里一律 DIRECT。
+        #if os(iOS)
+        out.append(contentsOf: IosDirectDomains.tiktokRulesForPlatform(forIOS: true))
+        #else
         out.append(contentsOf: IosDirectDomains.tiktokPriorityRules)
+        #endif
+        // Plugin / VideoAdBlock REJECT must beat china/ecommerce DIRECT blankets
+        // (e.g. DOMAIN-SUFFIX,kugou.com,DIRECT would otherwise swallow ads.service.kugou.com).
+        let earlyRejects = rejectRulesHoisted(from: base)
+        let earlyRejectSet = Set(earlyRejects)
+        out.append(contentsOf: earlyRejects)
+        // Shadowrocket-ADBlock-Rules-Forever — 5w+ REJECT + 3w+ GFW PROXY (local RULE-SET).
+        out.append(contentsOf: ShadowrocketForeverRules.headerRules())
         // 淘宝 / 闲鱼 / 国内电商 — goofish 等须在 MATCH,PROXY 之前；也盖过 adblock 误伤.
         out.append(contentsOf: IosDirectDomains.ecommercePriorityRules)
         out.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules)
         out.append(contentsOf: IosDirectDomains.bankPriorityRules)
+        // 抖音在 TikTok 之后：isnssdk 已被 TIKTOK 吃掉；snssdk.com 在此 DIRECT。
         out.append(contentsOf: IosDirectDomains.douyinPriorityRules)
+        // GFWList upstream — fallback until Shadowrocket banlist RULE-SET is cached.
+        if !ShadowrocketForeverRules.isReady {
+            out.append(contentsOf: GfwListRules.directRules())
+        }
         out.append(contentsOf: bootstrap)
-        out.append(contentsOf: proxyFirst)   // must precede China blanket
+        out.append(contentsOf: proxyFirst)
+        if !ShadowrocketForeverRules.isReady {
+            out.append(contentsOf: GfwListRules.proxyRules())   // must precede China blanket
+        }
         out.append(contentsOf: apple)
         out.append(contentsOf: chinaDirect) // 国内一律直连
         out.append(contentsOf: chinaIP)
@@ -65,13 +105,16 @@ enum IosRoutingRules {
         for raw in base {
             let t = raw.trimmingCharacters(in: .whitespaces)
             guard !t.isEmpty, !t.hasPrefix("#") else { continue }
+            if earlyRejectSet.contains(t) { continue }
             if RoutingGeoRules.shouldSkipBaseRule(t) { continue }
             #if os(macOS)
-            if t.uppercased().hasPrefix("PROCESS-NAME,") || t.uppercased().hasPrefix("PROCESS-PATH,") {
+            if t.uppercased().hasPrefix("PROCESS-NAME,") || t.uppercased().hasPrefix("PROCESS-PATH,")
+                || t.uppercased().hasPrefix("PROCESS-NAME-REGEX,") || t.uppercased().hasPrefix("PROCESS-PATH-REGEX,") {
                 continue // already prepended
             }
             #else
-            if t.uppercased().hasPrefix("PROCESS-NAME,") || t.uppercased().hasPrefix("PROCESS-PATH,") {
+            if t.uppercased().hasPrefix("PROCESS-NAME,") || t.uppercased().hasPrefix("PROCESS-PATH,")
+                || t.uppercased().hasPrefix("PROCESS-NAME-REGEX,") || t.uppercased().hasPrefix("PROCESS-PATH-REGEX,") {
                 continue
             }
             if t.uppercased().hasPrefix("GEOSITE,") || t.uppercased().hasPrefix("GEOIP,") {
@@ -94,7 +137,41 @@ enum IosRoutingRules {
         }
 
         out.append(contentsOf: RoutingGeoRules.tail(useGeoDB: GeoDataBootstrap.isReady()))
-        return GeoSiteRules.sanitize(out)
+        return ClashRuleSyntax.dedupeKeepingFirst(GeoSiteRules.sanitize(out))
+    }
+
+    /// Pull REJECT lines from plugin / VideoAdBlock / user base so they outrank DIRECT blankets.
+    private static func rejectRulesHoisted(from base: [String]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for raw in base {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty, !t.hasPrefix("#") else { continue }
+            let parts = t.split(separator: ",", omittingEmptySubsequences: false).map {
+                String($0).trimmingCharacters(in: .whitespaces)
+            }
+            guard parts.count >= 3 else { continue }
+            let type = parts[0].uppercased()
+            // Logical rules keep commas inside — do not hoist/mangle them.
+            if type == "AND" || type == "OR" || type == "NOT" {
+                continue
+            }
+            let policy = parts[2].uppercased()
+            guard policy == "REJECT" || policy.hasPrefix("REJECT") else { continue }
+            let u = t.uppercased()
+            // Never hoist REJECT onto critical DNS / feed APIs.
+            if u.contains("DNS.WEIXIN.QQ.COM") || u.contains("HTTPDNS.ALICDN.COM") || u.contains("HTTPDNS.BAIDU.COM")
+                || u.contains("I.SNSSDK.COM") || u.contains("IS.SNSSDK.COM") || u.contains("LF.SNSSDK.COM")
+                || u.contains("BDS.SNSSDK.COM") {
+                continue
+            }
+            let normalized = "\(parts[0]),\(parts[1]),REJECT"
+                + (parts.count > 3 && parts[3].lowercased() == "no-resolve" ? ",no-resolve" : "")
+            guard !seen.contains(normalized) else { continue }
+            seen.insert(normalized)
+            out.append(normalized)
+        }
+        return out
     }
 
     // MARK: - 1. Bootstrap (WeChat local + LAN)
@@ -119,6 +196,14 @@ enum IosRoutingRules {
         // 腾讯云 IM / 豆包 — Shadowrocket 前置国内
         "DOMAIN,shortconn.im.qcloud.com,DIRECT",
         "DOMAIN-SUFFIX,doubao.com,DIRECT",
+        // Foreign DoH IPs — MUST NOT hit MATCH,DIRECT (CN blocks 1.1.1.1/8.8.8.8).
+        // WhatsApp/Telegram nameserver-policy uses these; bare-IP dials skip DOMAIN rules.
+        "IP-CIDR,1.1.1.1/32,PROXY,no-resolve",
+        "IP-CIDR,1.0.0.1/32,PROXY,no-resolve",
+        "IP-CIDR,8.8.8.8/32,PROXY,no-resolve",
+        "IP-CIDR,8.8.4.4/32,PROXY,no-resolve",
+        "IP-CIDR,9.9.9.9/32,PROXY,no-resolve",
+        "DOMAIN-SUFFIX,cloudflare-dns.com,PROXY",
     ]
 
     // MARK: - 2. Proxy-first (before China blanket)
@@ -185,6 +270,56 @@ enum IosRoutingRules {
         "IP-CIDR6,2001:b28:f23c::/48,TELEGRAM,no-resolve",
         "IP-CIDR6,2001:b28:f23d::/48,TELEGRAM,no-resolve",
         "IP-CIDR6,2001:b28:f23f::/48,TELEGRAM,no-resolve",
+        // 🪙 币安 / 火币 — 必须在 MATCH,DIRECT 与国内毯式规则之前；行情 WS 不可直连
+        "DOMAIN-SUFFIX,binance.com,PROXY",
+        "DOMAIN-SUFFIX,binance.me,PROXY",
+        "DOMAIN-SUFFIX,binance.us,PROXY",
+        "DOMAIN-SUFFIX,binance.cc,PROXY",
+        "DOMAIN-SUFFIX,binance.co,PROXY",
+        "DOMAIN-SUFFIX,binance.net,PROXY",
+        "DOMAIN-SUFFIX,binance.org,PROXY",
+        "DOMAIN-SUFFIX,binance.info,PROXY",
+        "DOMAIN-SUFFIX,binance.vision,PROXY",
+        "DOMAIN-SUFFIX,binance.cloud,PROXY",
+        "DOMAIN-SUFFIX,binance.charity,PROXY",
+        "DOMAIN-SUFFIX,binancezh.com,PROXY",
+        "DOMAIN-SUFFIX,binancezh.pro,PROXY",
+        "DOMAIN-SUFFIX,binancezh.net,PROXY",
+        "DOMAIN-SUFFIX,binanceapi.com,PROXY",
+        "DOMAIN-SUFFIX,binancefuture.com,PROXY",
+        "DOMAIN-SUFFIX,binancecnt.com,PROXY",
+        "DOMAIN-SUFFIX,binancecorp.com,PROXY",
+        "DOMAIN-SUFFIX,binancecnl.com,PROXY",
+        "DOMAIN-SUFFIX,binance-cdn.com,PROXY",
+        "DOMAIN-SUFFIX,binanceavg.com,PROXY",
+        "DOMAIN-SUFFIX,bnbstatic.com,PROXY",
+        "DOMAIN-SUFFIX,nftstatic.com,PROXY",
+        "DOMAIN-SUFFIX,bnappzh.com,PROXY",
+        "DOMAIN-SUFFIX,bnappzh.co,PROXY",
+        "DOMAIN-SUFFIX,bntrace.com,PROXY",
+        "DOMAIN-SUFFIX,appsbinance.com,PROXY",
+        "DOMAIN-SUFFIX,saasexch.com,PROXY",
+        "DOMAIN-SUFFIX,saasexch.cc,PROXY",
+        "DOMAIN-SUFFIX,ficus.cc,PROXY",
+        "DOMAIN-KEYWORD,binance,PROXY",
+        "DOMAIN-KEYWORD,bnbstatic,PROXY",
+        "DOMAIN-KEYWORD,saasexch,PROXY",
+        "DOMAIN-KEYWORD,nftstatic,PROXY",
+        "DOMAIN-SUFFIX,htx.com,PROXY",
+        "DOMAIN-SUFFIX,huobi.com,PROXY",
+        "DOMAIN-SUFFIX,huobi.pro,PROXY",
+        "DOMAIN-SUFFIX,huobi.co,PROXY",
+        "DOMAIN-SUFFIX,huobi.me,PROXY",
+        "DOMAIN-SUFFIX,huobi.sc,PROXY",
+        "DOMAIN-SUFFIX,huobipro.com,PROXY",
+        "DOMAIN-SUFFIX,huobigroup.com,PROXY",
+        "DOMAIN-SUFFIX,huobiapi.com,PROXY",
+        "DOMAIN-SUFFIX,huobiasia.vip,PROXY",
+        "DOMAIN-SUFFIX,hbfile.net,PROXY",
+        "DOMAIN-SUFFIX,hbg.com,PROXY",
+        "DOMAIN-SUFFIX,huobicdn.com,PROXY",
+        "DOMAIN-KEYWORD,huobi,PROXY",
+        "DOMAIN-KEYWORD,hbfile,PROXY",
         // 🐱 代码托管 / Wiki（须在 .org 直连之前）
         "DOMAIN-SUFFIX,github.com,PROXY",
         "DOMAIN-SUFFIX,githubusercontent.com,PROXY",
@@ -198,12 +333,24 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,x.com,TWITTER",
         "DOMAIN-SUFFIX,twimg.com,TWITTER",
         "DOMAIN-SUFFIX,t.co,TWITTER",
-        "DOMAIN-SUFFIX,facebook.com,PROXY",
-        "DOMAIN-SUFFIX,fbcdn.net,PROXY",
+        "DOMAIN-SUFFIX,facebook.com,WHATSAPP",
+        "DOMAIN-SUFFIX,fbcdn.net,WHATSAPP",
         "DOMAIN-SUFFIX,instagram.com,PROXY",
         "DOMAIN-SUFFIX,cdninstagram.com,PROXY",
+        // WhatsApp — whole app tree (QR WebSocket often from WAAppKitBridgeService, not main binary)
+        "PROCESS-NAME,WhatsApp,WHATSAPP",
+        "PROCESS-NAME,WAAppKitBridgeService,WHATSAPP",
+        "PROCESS-PATH,*WhatsApp.app/*,WHATSAPP",
         "DOMAIN-SUFFIX,whatsapp.com,WHATSAPP",
         "DOMAIN-SUFFIX,whatsapp.net,WHATSAPP",
+        "DOMAIN-SUFFIX,whatsapp.biz,WHATSAPP",
+        "DOMAIN-KEYWORD,whatsapp,WHATSAPP",
+        "DOMAIN,graph.facebook.com,WHATSAPP",
+        // Meta IPv6 Happy-Eyeballs: many exits blackhole 2a03:2880::/32:5222 (QR/chat).
+        "IP-CIDR6,2a03:2880::/32,REJECT,no-resolve",
+        "IP-CIDR6,2a03::/16,REJECT,no-resolve",
+        "AND,((PROCESS-NAME,WhatsApp),(NETWORK,UDP)),REJECT",
+        "AND,((DOMAIN-SUFFIX,fbcdn.net),(NETWORK,UDP)),REJECT",
         "DOMAIN-SUFFIX,discord.com,PROXY",
         "DOMAIN-SUFFIX,discordapp.com,PROXY",
         "DOMAIN-SUFFIX,reddit.com,PROXY",
@@ -211,15 +358,28 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,spotify.com,PROXY",
         "DOMAIN-SUFFIX,tiktok.com,TIKTOK",
         "DOMAIN-SUFFIX,tiktokv.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokv.us,TIKTOK",
         "DOMAIN-SUFFIX,tiktokcdn.com,TIKTOK",
         "DOMAIN-SUFFIX,tiktokcdn-us.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokcdn-eu.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokcdn-in.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokd.net,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokd.org,TIKTOK",
+        "DOMAIN-SUFFIX,tik-tokapi.com,TIKTOK",
         "DOMAIN-SUFFIX,ttlivecdn.com,TIKTOK",
         "DOMAIN-SUFFIX,musical.ly,TIKTOK",
+        "DOMAIN-SUFFIX,muscdn.com,TIKTOK",
         "DOMAIN-SUFFIX,byteoversea.com,TIKTOK",
+        "DOMAIN-SUFFIX,byteintlapi.com,TIKTOK",
         "DOMAIN-SUFFIX,ibyteimg.com,TIKTOK",
         "DOMAIN-SUFFIX,ibytedtos.com,TIKTOK",
+        "DOMAIN-SUFFIX,isnssdk.com,TIKTOK",
+        "DOMAIN-SUFFIX,sgsnssdk.com,TIKTOK",
+        // snssdk.com = 大陆抖音 → DIRECT（见 chinaDirect / douyinPriorityRules）
         "DOMAIN-KEYWORD,tiktok,TIKTOK",
+        "DOMAIN-KEYWORD,tiktokcdn,TIKTOK",
         "DOMAIN-KEYWORD,byteoversea,TIKTOK",
+        "DOMAIN-KEYWORD,isnssdk,TIKTOK",
         "DOMAIN-SUFFIX,cloudflare.com,PROXY",
         // 📺 .tv TLD + 流媒体（必须在 QUIC REJECT 之前）
         "DOMAIN-SUFFIX,tv,PROXY",
@@ -231,23 +391,6 @@ enum IosRoutingRules {
         // QUIC→TCP（仅 CDN 域名，勿用泛 .tv 以免误伤）
         "AND,((DOMAIN-SUFFIX,ttvnw.net),(NETWORK,UDP),(DST-PORT,443)),REJECT",
         "AND,((DOMAIN-SUFFIX,jtvnw.net),(NETWORK,UDP),(DST-PORT,443)),REJECT",
-        // 🍎 苹果推送 — 专用 APNS 组（见 apnsPriorityRules；此处保留一份供 Mac/非 iOS 预置）
-        "DOMAIN-SUFFIX,push.apple.com,APNS",
-        "DOMAIN,gateway.push.apple.com,APNS",
-        "DOMAIN,api.push.apple.com,APNS",
-        "DOMAIN,sandbox.push.apple.com,APNS",
-        "DOMAIN-SUFFIX,push-apple.com.akadns.net,APNS",
-        "DOMAIN-KEYWORD,push.apple,APNS",
-        // Apple APNs IPv4 (support.apple.com/102266) — must NOT fall to DIRECT
-        "IP-CIDR,17.249.0.0/16,APNS,no-resolve",
-        "IP-CIDR,17.252.0.0/16,APNS,no-resolve",
-        "IP-CIDR,17.57.144.0/22,APNS,no-resolve",
-        "IP-CIDR,17.188.128.0/18,APNS,no-resolve",
-        "IP-CIDR,17.188.20.0/23,APNS,no-resolve",
-        "IP-CIDR6,2620:149:a44::/48,APNS,no-resolve",
-        "IP-CIDR6,2403:300:a42::/48,APNS,no-resolve",
-        "IP-CIDR6,2403:300:a51::/48,APNS,no-resolve",
-        "IP-CIDR6,2a01:b740:a42::/48,APNS,no-resolve",
     ]
 
     // MARK: - 3. Apple DIRECT (non-push)
@@ -348,7 +491,7 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,byteimg.com,DIRECT",
         "DOMAIN-SUFFIX,bytescm.com,DIRECT",
         "DOMAIN-SUFFIX,byteacctimg.com,DIRECT",
-        // byteoversea → TikTok（见 tiktokPriorityRules），勿 DIRECT
+        // byteoversea → TikTok；snssdk.com → 抖音 DIRECT
         "DOMAIN-SUFFIX,douyin.com,DIRECT",
         "DOMAIN-SUFFIX,douyincdn.com,DIRECT",
         "DOMAIN-SUFFIX,douyinpic.com,DIRECT",
@@ -365,7 +508,7 @@ enum IosRoutingRules {
         "DOMAIN-SUFFIX,huoshanstatic.com,DIRECT",
         "DOMAIN-KEYWORD,zijieapi,DIRECT",
         "DOMAIN-KEYWORD,douyin,DIRECT",
-        "DOMAIN-KEYWORD,snssdk,DIRECT",
+        // 不用 DOMAIN-KEYWORD,snssdk — 会误伤 isnssdk / TikTok
         // 小红书
         "DOMAIN-SUFFIX,xiaohongshu.com,DIRECT",
         "DOMAIN-SUFFIX,xhscdn.com,DIRECT",

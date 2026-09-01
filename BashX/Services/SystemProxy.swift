@@ -21,6 +21,8 @@ enum SystemProxy {
     private(set) static var lastError: String?
 
     /// ClashX-style LAN / loopback bypass when system proxy is on.
+    /// WhatsApp Mac: HTTP/SOCKS system proxy breaks WebSocket QR (`wss://…/ws/chat`).
+    /// Bypass → dial via TUN (fake-ip domain map) so PROCESS/DOMAIN rules apply.
     private static let bypassDomains = [
         "localhost",
         "127.0.0.1",
@@ -30,6 +32,25 @@ enum SystemProxy {
         "10.0.0.0/8",
         "172.16.0.0/12",
         "169.254.0.0/16",
+        "*.whatsapp.com",
+        "*.whatsapp.net",
+        "*.whatsapp.biz",
+        "web.whatsapp.com",
+        "api.whatsapp.net",
+        "g.whatsapp.net",
+        "v.whatsapp.net",
+        "*.fbcdn.net",
+        "*.facebook.com",
+        "graph.facebook.com",
+        // AdsPower / IPFoxy: system SOCKS + app SOCKS stacks = 连接测试失败.
+        // Bypass → raw dial via TUN (same as WhatsApp).
+        "*.ipfoxy.io",
+        "*.ipfoxy.com",
+        "ipfoxy.io",
+        "ipfoxy.com",
+        "gate.ipfoxy.io",
+        "gate-sg.ipfoxy.io",
+        "gate-us.ipfoxy.io",
     ]
 
     static func listServices() -> [String] {
@@ -68,6 +89,9 @@ enum SystemProxy {
                 saveSnapshot(capture(services: services))
             }
             if applyElevatedSet(host: host, port: port, allowPrompt: allowPrivilegePrompt) {
+                for service in services {
+                    applyBypass(for: service)
+                }
                 return
             }
             // Fallback: unprivileged (works on some admin sessions).

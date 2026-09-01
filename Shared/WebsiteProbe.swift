@@ -42,7 +42,7 @@ enum WebsiteProbe {
             url: "https://www.gstatic.com/generate_204",
             fallbackURL: "https://www.google.com/generate_204",
             systemImage: "magnifyingglass.circle.fill",
-            proxyGroup: "GOOGLE"
+            proxyGroup: "DIRECT"
         ),
         Target(
             id: "baidu",
@@ -58,7 +58,7 @@ enum WebsiteProbe {
             url: "https://www.githubstatus.com/api/v2/status.json",
             fallbackURL: "https://api.github.com/zen",
             systemImage: "chevron.left.forwardslash.chevron.right",
-            proxyGroup: "PROXY"
+            proxyGroup: "DIRECT"
         ),
         Target(
             id: "youtube",
@@ -66,7 +66,7 @@ enum WebsiteProbe {
             url: "https://www.youtube.com/generate_204",
             fallbackURL: "https://www.youtube.com/favicon.ico",
             systemImage: "play.rectangle.fill",
-            proxyGroup: "GOOGLE"
+            proxyGroup: "DIRECT"
         ),
         Target(
             id: "telegram",
@@ -74,7 +74,7 @@ enum WebsiteProbe {
             url: "https://api.telegram.org",
             fallbackURL: "https://core.telegram.org/",
             systemImage: "paperplane.fill",
-            proxyGroup: "TELEGRAM"
+            proxyGroup: "DIRECT"
         ),
         Target(
             id: "cloudflare",
@@ -82,7 +82,7 @@ enum WebsiteProbe {
             url: "https://www.cloudflare.com/cdn-cgi/trace",
             fallbackURL: "https://1.1.1.1/cdn-cgi/trace",
             systemImage: "cloud.fill",
-            proxyGroup: "PROXY"
+            proxyGroup: "DIRECT"
         ),
     ]
 

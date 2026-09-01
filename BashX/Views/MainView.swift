@@ -2,10 +2,12 @@ import Combine
 import SwiftUI
 
 struct MainView: View {
-    @ObservedObject var state: AppState
+    let state: AppState
     let monitor: TrafficMonitor
     let rates: MenuBarRateStore
     @Environment(\.bashxAppearance) private var appearance
+    /// Selective refresh — avoid rebuilding the panel on every statusText/testedCount tick.
+    @State private var panelTick = 0
     @State private var showLogoPicker = false
     @State private var detailTab: DetailTab = .nodes
     @State private var monitorSegment: MonitorPane.MonitorSegment = .connections
@@ -21,9 +23,6 @@ struct MainView: View {
     @State private var minimalSwitchingNode = false
     @State private var showMinimalModePicker = false
     @State private var minimalBrandAppear = false
-    @State private var minimalHeroBreath = false
-    @State private var minimalRingSpin: Double = 0
-    @State private var minimalShimmer: CGFloat = -0.4
 
     /// Single-row panel menus: 订阅 · 节点 · 应用分流 · 域名规则 · 监控
     private enum DetailTab: CaseIterable, Identifiable {
@@ -52,15 +51,13 @@ struct MainView: View {
     private var lang: AppLanguage { state.settings.uiLanguage }
 
     var body: some View {
+        let _ = panelTick
         BashXThemed(appearance: state.settings.appearance) {
             panelContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(BashXTheme.canvas(for: appearance))
         }
         .onAppear {
-            consumePanelIntent()
-        }
-        .onValueChange(state.panelIntent) { _ in
             consumePanelIntent()
         }
         .alert("重命名订阅", isPresented: Binding(
@@ -78,11 +75,6 @@ struct MainView: View {
         } message: {
             Text("修改显示名称，不影响订阅链接。")
         }
-        .task {
-            // 极简首页：用户点连接再启动；完整版才自动保活内核。
-            guard !state.settings.macMinimalHome else { return }
-            _ = await state.ensureCoreRunning()
-        }
         .onAppear {
             monitor.chartSamplesEnabled = true
             syncMonitorExtras()
@@ -91,15 +83,18 @@ struct MainView: View {
             monitor.chartSamplesEnabled = false
             monitor.stopConnectionsAndLogs()
         }
-        .onReceive(state.$coreRunning.receive(on: RunLoop.main)) { _ in syncMonitorExtras() }
-        .onReceive(state.$chromeRevision.receive(on: RunLoop.main)) { _ in syncMonitorExtras() }
+        .onReceive(state.$layoutRevision.receive(on: RunLoop.main)) { _ in panelTick &+= 1 }
+        .onReceive(state.$coreRunning.receive(on: RunLoop.main)) { _ in
+            syncMonitorExtras()
+        }
         .onReceive(state.$searchText.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
         .onReceive(state.$sortByDelay.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
         .onReceive(state.$selectedCategoryKey.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
-        .onValueChange(detailTab) { tab in
-            if tab == .rules {
-                state.ensureRulesTextLoaded()
-            }
+        .onReceive(state.$panelIntent.receive(on: RunLoop.main)) { intent in
+            guard intent != .none else { return }
+            consumePanelIntent()
+        }
+        .onValueChange(detailTab) { _ in
             syncMonitorExtras()
         }
     }
@@ -112,7 +107,9 @@ struct MainView: View {
                 PanelAtmosphere()
             }
             if state.settings.macMinimalHome {
-                minimalHome
+                PanelSidebarHost(state: state) {
+                    minimalHome
+                }
             } else {
                 VStack(spacing: 0) {
                     PanelTopBarHost(state: state) {
@@ -228,15 +225,6 @@ struct MainView: View {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                 minimalBrandAppear = true
             }
-            withAnimation(.easeInOut(duration: 2.8).repeatForever(autoreverses: true)) {
-                minimalHeroBreath = true
-            }
-            withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) {
-                minimalRingSpin = 360
-            }
-            withAnimation(.linear(duration: 3.6).repeatForever(autoreverses: false)) {
-                minimalShimmer = 1.2
-            }
         }
     }
 
@@ -246,7 +234,6 @@ struct MainView: View {
                 minimalHeroLogoMark
                     .scaleEffect(minimalBrandAppear ? 1 : 0.82)
                     .opacity(minimalBrandAppear ? 1 : 0)
-                    .scaleEffect(minimalHeroBreath ? 1.03 : 1)
 
                 minimalBrandTitle
                     .opacity(minimalBrandAppear ? 1 : 0)
@@ -304,12 +291,9 @@ struct MainView: View {
             if !state.statusText.isEmpty,
                state.statusText != "就绪",
                !state.statusText.contains("代理已") {
-                Text(state.statusText)
-                    .font(.system(size: 10))
-                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, 16)
+                PanelStatusLine(state: state)
+                    .frame(maxWidth: 220)
+                    .padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity)
@@ -318,29 +302,12 @@ struct MainView: View {
     private var minimalHeroLogoMark: some View {
         ZStack {
             Circle()
-                .fill(minimalHeroAccent.opacity(minimalHeroBreath ? 0.22 : 0.10))
+                .fill(minimalHeroAccent.opacity(0.14))
                 .frame(width: 78, height: 78)
-                .blur(radius: 10)
-                .scaleEffect(minimalHeroBreath ? 1.12 : 0.92)
 
-            ForEach(0..<2, id: \.self) { i in
-                Circle()
-                    .strokeBorder(
-                        AngularGradient(
-                            colors: [
-                                minimalHeroAccent.opacity(0),
-                                minimalHeroAccent.opacity(0.55),
-                                BashXTheme.accent(for: appearance).opacity(0.35),
-                                minimalHeroAccent.opacity(0),
-                            ],
-                            center: .center
-                        ),
-                        lineWidth: i == 0 ? 1.3 : 1
-                    )
-                    .frame(width: 64 + CGFloat(i) * 12, height: 64 + CGFloat(i) * 12)
-                    .rotationEffect(.degrees(minimalRingSpin * (i == 0 ? 1 : -0.7)))
-                    .opacity(0.7)
-            }
+            Circle()
+                .strokeBorder(minimalHeroAccent.opacity(0.28), lineWidth: 1.2)
+                .frame(width: 70, height: 70)
 
             LogoIconView(style: state.settings.logoStyle, size: 46, colored: true, panel: true)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -359,7 +326,7 @@ struct MainView: View {
                             lineWidth: 1.1
                         )
                 )
-                .shadow(color: minimalHeroAccent.opacity(0.32), radius: minimalHeroBreath ? 14 : 8, y: 4)
+                .shadow(color: minimalHeroAccent.opacity(0.28), radius: 8, y: 4)
         }
         .frame(width: 88, height: 88)
     }
@@ -379,25 +346,6 @@ struct MainView: View {
                     endPoint: .trailing
                 )
             )
-            .overlay {
-                LinearGradient(
-                    colors: [
-                        Color.clear,
-                        Color.white.opacity(appearance == .dark ? 0.35 : 0.55),
-                        Color.clear,
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                .frame(width: 48)
-                .offset(x: minimalShimmer * 130)
-                .blendMode(.softLight)
-                .mask(
-                    Text("BashX")
-                        .font(.system(size: 32, weight: .heavy, design: .rounded))
-                        .tracking(-1.0)
-                )
-            }
     }
 
     private var minimalStatusPill: some View {
@@ -745,18 +693,16 @@ struct MainView: View {
     private func consumePanelIntent() {
         switch state.panelIntent {
         case .none:
-            break
+            return
         case .subscriptions:
             detailTab = .subscriptions
-            state.panelIntent = .none
         case .addSubscription:
             detailTab = .subscriptions
-            state.panelIntent = .none
             AddSubscriptionOpener.open(state: state)
         case .groups:
             detailTab = .nodes
-            state.panelIntent = .none
         }
+        state.panelIntent = .none
     }
 
     // MARK: - Top bar
@@ -931,7 +877,9 @@ struct MainView: View {
                     icon: "network",
                     tint: BashXTheme.accent(for: appearance),
                     title: "系统代理",
-                    subtitle: "127.0.0.1:\(state.settings.mixedPort)",
+                    subtitle: state.settings.tunEnabled
+                        ? "浏览器/HTTP · 可与 TUN 同开"
+                        : "127.0.0.1:\(state.settings.mixedPort)",
                     isOn: Binding(
                         get: { state.systemProxyOn },
                         set: { v in Task { await state.setSystemProxy(v) } }
@@ -941,7 +889,9 @@ struct MainView: View {
                     icon: "point.3.connected.trianglepath.dotted",
                     tint: Color(red: 0.36, green: 0.72, blue: 0.88),
                     title: "TUN",
-                    subtitle: TunPrivilege.isReady ? "已授权 · Telegram 稳" : "首次需管理员密码",
+                    subtitle: TunPrivilege.isReady
+                        ? "全局接管 · TG/UDP/不走代理的 App"
+                        : "首次需管理员密码",
                     isOn: Binding(
                         get: { state.settings.tunEnabled },
                         set: { v in Task { await state.setTUN(v) } }
@@ -969,9 +919,6 @@ struct MainView: View {
                 )
             }
             .onAppear {
-                state.refreshLaunchAtLogin()
-            }
-            .onReceive(state.$chromeRevision.receive(on: RunLoop.main)) { _ in
                 state.refreshLaunchAtLogin()
             }
 
@@ -1161,30 +1108,23 @@ struct MainView: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: mode.systemImage)
+                Image(systemName: selected ? "checkmark.circle.fill" : mode.systemImage)
                     .font(.system(size: 10, weight: .semibold))
                 Text(mode.title)
                     .font(.system(size: 11, weight: selected ? .bold : .semibold, design: .rounded))
             }
-            .foregroundStyle(selected ? color : BashXTheme.secondaryLabel(for: appearance))
+            .foregroundStyle(selected ? Color.white : BashXTheme.secondaryLabel(for: appearance))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 7)
             .background {
                 RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
-                    .fill(selected ? color.opacity(appearance == .dark ? 0.16 : 0.10) : BashXTheme.secondaryFill(for: appearance).opacity(0.55))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
-                            .strokeBorder(
-                                selected ? color.opacity(0.50) : Color.clear,
-                                lineWidth: selected ? 1 : 0
-                            )
-                    )
+                    .fill(selected ? color : BashXTheme.secondaryFill(for: appearance).opacity(0.55))
             }
             .contentShape(RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous))
         }
         .buttonStyle(PanelPressButtonStyle())
         .help(mode.subtitle)
-        .animation(.easeOut(duration: 0.12), value: selected)
+        .transaction { $0.animation = nil }
     }
 
     private func selectNodeFromPanel(_ name: String) {
@@ -1452,9 +1392,9 @@ struct MainView: View {
                 case .nodes:
                     nodesPane
                 case .apps:
-                    AppRoutingPane()
+                    AppRoutingPane(state: state)
                 case .rules:
-                    RulesEditorPane()
+                    RulesEditorPane(state: state)
                         .padding(12)
                 case .subscriptions:
                     subscriptionsPane
@@ -1513,7 +1453,7 @@ struct MainView: View {
                         .frame(width: 90)
                         .help("卡片 / 列表")
 
-                        Text("\(state.filteredNodes.count)/\(state.nodes.count)")
+                        Text("\(state.searchText.isEmpty ? state.nodes.count : state.filteredNodes.count)/\(state.nodes.count)")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .monospacedDigit()
                             .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
@@ -1583,7 +1523,7 @@ struct MainView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.12), value: selected)
+        .animation(nil, value: selected)
     }
 
     private var nodesPane: some View {
@@ -1604,7 +1544,7 @@ struct MainView: View {
                 .fill(BashXTheme.hairline(for: appearance))
                 .frame(height: 1)
 
-            if state.filteredNodes.isEmpty {
+            if state.nodes.isEmpty {
                 nodesEmptyState
             } else {
                 NodesCategoriesView(
@@ -1663,8 +1603,18 @@ struct MainView: View {
                     }
                     Task {
                         await state.runSpeedTest()
-                        if state.settings.proxyHubMode == .smart || state.settings.autoSelectFastest {
+                        // Hub modes must stay on AUTO/BALANCE/FALLBACK — pinning a leaf flips to 手动.
+                        if state.settings.proxyHubMode == .manual, state.settings.autoSelectFastest {
                             await state.selectFastestNodeIfAvailable()
+                        } else if state.settings.proxyHubMode == .smart {
+                            _ = await ClashCore.retestProxyGroup(
+                                controller: state.settings.externalController,
+                                secret: state.settings.secret,
+                                group: "AUTO",
+                                url: state.settings.testURL,
+                                timeoutMs: max(state.settings.testTimeoutMs, 4000)
+                            )
+                            await state.syncSelectedOutbound()
                         }
                     }
                 } label: {
@@ -1822,7 +1772,7 @@ struct MainView: View {
         }
         .buttonStyle(PanelPressButtonStyle())
         .help("\(mode.subtitle(lang: lang)) — 切换 PROXY 策略（智能选路/负载均衡/故障转移）")
-        .animation(.spring(response: 0.22, dampingFraction: 0.84), value: on)
+        .transaction { $0.animation = nil }
     }
 
     private var nodesEmptyState: some View {
@@ -1846,12 +1796,13 @@ struct MainView: View {
 
     private var categoryBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            LazyHStack(spacing: 6) {
                 categoryChip(key: nil, title: "全部", flag: "🌐", count: state.nodes.count)
                 ForEach(state.categorySummary, id: \.key) { item in
                     categoryChip(key: item.key, title: item.title, flag: item.flag, count: item.count)
                 }
             }
+            .frame(height: 24)
             .padding(.horizontal, 12)
         }
         .padding(.vertical, 6)
@@ -1907,10 +1858,10 @@ struct MainView: View {
                         LazyVStack(spacing: 8) {
                             ForEach(state.settings.subscriptions) { sub in
                                 SubscriptionManageCard(
+                                    state: state,
                                     subscriptionId: sub.id,
                                     index: state.settings.subscriptions.firstIndex(where: { $0.id == sub.id }) ?? 0
                                 )
-                                .environmentObject(state)
                             }
                         }
                     }
@@ -2021,7 +1972,7 @@ struct MainView: View {
     }
 
     private var rulesPane: some View {
-        RulesEditorPane()
+        RulesEditorPane(state: state)
     }
 
     private var searchTextBinding: Binding<String> {
@@ -2091,7 +2042,7 @@ struct MainView: View {
 
 /// Isolated rules editor — observes AppState so text appears immediately (MainView itself is not Observable).
 private struct RulesEditorPane: View {
-    @EnvironmentObject private var state: AppState
+    let state: AppState
     @Environment(\.bashxAppearance) private var appearance
 
     private enum Layer: String, CaseIterable, Identifiable {
@@ -2103,11 +2054,30 @@ private struct RulesEditorPane: View {
     @State private var layer: Layer = .base
     @State private var draft = ""
     @State private var prependDraft = ""
+    @State private var baseLines: [String] = []
+    @State private var query = ""
+    @State private var editAsText = false
     @State private var ready = false
     @State private var dirty = false
     @State private var issues: [String] = []
     @State private var statusLine = ""
     @State private var validateTask: Task<Void, Never>?
+    @State private var showQuickAdd = false
+    @State private var quickInput = ""
+    @State private var quickPolicy = "PROXY"
+    @State private var quickHint = ""
+
+    private let quickPolicies = ["PROXY", "DIRECT", "REJECT", "AUTO", "GOOGLE", "TELEGRAM", "US", "JP", "HK"]
+
+    private var externalRulesCaption: String? {
+        if let sr = ShadowrocketForeverRules.statusLine {
+            return "云端规则已生效（config 内 RULE-SET）：\(sr)。本页「基础规则」仅显示智能规则 v\(ChinaSmartRules.version)（约 \(state.settings.rules.count) 条）。"
+        }
+        if let gfw = GfwListRules.statusLine {
+            return "GFWList 已加载（\(gfw)），Shadowrocket 规则仍在后台下载…"
+        }
+        return "GFWList / Shadowrocket 规则启动后在后台下载，完成后自动写入 config.yaml。"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2119,6 +2089,21 @@ private struct RulesEditorPane: View {
                         .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 }
                 Spacer(minLength: 8)
+                Button {
+                    quickInput = ""
+                    quickPolicy = "PROXY"
+                    quickHint = ""
+                    showQuickAdd = true
+                } label: {
+                    Label("快捷添加", systemImage: "plus.circle.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("快速添加 IP / 域名到自定义前置规则")
+                .popover(isPresented: $showQuickAdd, arrowEdge: .bottom) {
+                    quickAddPopover
+                }
                 if dirty {
                     Text("未保存")
                         .font(.caption2.weight(.semibold))
@@ -2153,31 +2138,51 @@ private struct RulesEditorPane: View {
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
 
-            ZStack {
-                TextEditor(text: activeDraftBinding)
-                    .font(.system(size: 11, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .opacity(ready ? 1 : 0)
-                    .disabled(!ready)
+            if let cloud = externalRulesCaption {
+                Text(cloud)
+                    .font(.caption2)
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-                if !ready {
-                    ProgressView("加载规则…")
-                        .controlSize(.small)
+            if layer == .prepend {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        quickChip("IP→代理", systemImage: "network") {
+                            quickPolicy = "PROXY"
+                            showQuickAdd = true
+                        }
+                        quickChip("IP→直连", systemImage: "arrow.down.to.line") {
+                            quickPolicy = "DIRECT"
+                            showQuickAdd = true
+                        }
+                        quickChip("域名→代理", systemImage: "globe") {
+                            quickPolicy = "PROXY"
+                            showQuickAdd = true
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    SoftField {
+                        HStack(spacing: 5) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                                .font(.system(size: 10, weight: .semibold))
+                            TextField("搜索规则", text: $query)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, design: .rounded))
+                        }
+                    }
+                    Button(editAsText ? "列表" : "文本编辑") {
+                        toggleBaseEditor()
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.bordered)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(BashXTheme.field(for: appearance))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(
-                        issues.isEmpty
-                            ? BashXTheme.separator(for: appearance)
-                            : BashXTheme.warn(for: appearance).opacity(0.55),
-                        lineWidth: 0.8
-                    )
-            )
+
+            rulesEditorBody
 
             if !issues.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -2224,12 +2229,176 @@ private struct RulesEditorPane: View {
             }
         }
         .padding(16)
-        .onAppear { reloadFromState() }
-        .onReceive(state.$rulesText.receive(on: RunLoop.main)) { text in
-            guard layer == .base, !dirty, text != draft, !text.isEmpty else { return }
+        .onAppear {
+            DispatchQueue.main.async { reloadFromState() }
+        }
+        .onReceive(state.$rulesText.dropFirst().receive(on: RunLoop.main)) { text in
+            guard layer == .base, editAsText, !dirty, text != draft, !text.isEmpty else { return }
             draft = text
             refreshMeta(for: text)
         }
+    }
+
+    private var rulesEditorBody: some View {
+        ZStack {
+            if !ready {
+                ProgressView("加载规则…")
+                    .controlSize(.small)
+            } else if layer == .prepend || editAsText {
+                TextEditor(text: activeDraftBinding)
+                    .font(.system(size: 11, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+            } else {
+                baseRulesList
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(BashXTheme.field(for: appearance))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    issues.isEmpty
+                        ? BashXTheme.separator(for: appearance)
+                        : BashXTheme.warn(for: appearance).opacity(0.55),
+                    lineWidth: 0.8
+                )
+        )
+    }
+
+    private var baseRulesList: some View {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rows = q.isEmpty ? baseLines : baseLines.filter { $0.localizedCaseInsensitiveContains(q) }
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    private func toggleBaseEditor() {
+        if editAsText {
+            baseLines = ClashRuleSyntax.parseLines(draft)
+            editAsText = false
+            refreshMeta(for: baseLines.joined(separator: "\n"), validate: false)
+        } else {
+            draft = baseLines.joined(separator: "\n")
+            editAsText = true
+            refreshMeta(for: draft, validate: false)
+        }
+    }
+
+    private var quickAddPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("快捷添加规则")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+            Text("支持：`23.254.208.185` · `1.2.3.0/24` · `example.com` · `*.google.com`")
+                .font(.system(size: 10))
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("IP / CIDR / 域名", text: $quickInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .onSubmit { Task { await commitQuickAdd() } }
+
+            HStack(spacing: 8) {
+                Text("策略")
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                Picker("", selection: $quickPolicy) {
+                    ForEach(quickPolicies, id: \.self) { p in
+                        Text(p).tag(p)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                Spacer(minLength: 0)
+            }
+
+            if let preview = ClashRuleSyntax.quickRule(from: quickInput, policy: quickPolicy) {
+                Text(preview)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(BashXTheme.accentSoft(for: appearance))
+                    )
+            } else if !quickInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("无法识别，请输入 IP、网段或域名")
+                    .font(.caption2)
+                    .foregroundStyle(BashXTheme.warn(for: appearance))
+            }
+
+            if !quickHint.isEmpty {
+                Text(quickHint)
+                    .font(.caption2)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+            }
+
+            HStack {
+                Button("取消") { showQuickAdd = false }
+                    .controlSize(.small)
+                Spacer()
+                Button("添加到前置并生效") {
+                    Task { await commitQuickAdd() }
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.defaultAction)
+                .disabled(ClashRuleSyntax.quickRule(from: quickInput, policy: quickPolicy) == nil)
+            }
+        }
+        .padding(12)
+        .frame(width: 340)
+        .background(BashXTheme.card(for: appearance))
+    }
+
+    private func quickChip(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(BashXTheme.secondaryFill(for: appearance))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func commitQuickAdd() async {
+        guard let rule = ClashRuleSyntax.quickRule(from: quickInput, policy: quickPolicy) else {
+            quickHint = "格式不对"
+            return
+        }
+        layer = .prepend
+        var lines = ClashRuleSyntax.parseLines(prependDraft)
+        if lines.contains(rule) {
+            quickHint = "已存在相同规则"
+            showQuickAdd = false
+            return
+        }
+        lines.insert(rule, at: 0)
+        prependDraft = lines.joined(separator: "\n")
+        await state.saveRulesPrependFromEditor(prependDraft)
+        prependDraft = state.settings.rulesPrepend.joined(separator: "\n")
+        reloadActiveDraft()
+        quickHint = "已添加并生效"
+        quickInput = ""
+        showQuickAdd = false
+        state.statusText = "已添加规则：\(rule)"
     }
 
     private var activeDraftBinding: Binding<String> {
@@ -2240,7 +2409,6 @@ private struct RulesEditorPane: View {
                     prependDraft = newValue
                 } else {
                     draft = newValue
-                    state.rulesText = newValue
                 }
                 scheduleValidate()
             }
@@ -2248,22 +2416,25 @@ private struct RulesEditorPane: View {
     }
 
     private func reloadFromState() {
-        state.ensureRulesTextLoaded()
-        let text = state.rulesText.isEmpty
-            ? state.settings.rules.joined(separator: "\n")
-            : state.rulesText
-        if state.rulesText.isEmpty, !text.isEmpty {
-            state.rulesText = text
-        }
-        draft = text
+        baseLines = state.settings.rules
         prependDraft = state.settings.rulesPrepend.joined(separator: "\n")
+        draft = ""
+        editAsText = false
+        query = ""
         ready = true
         reloadActiveDraft()
     }
 
     private func reloadActiveDraft() {
-        let text = layer == .prepend ? prependDraft : draft
-        refreshMeta(for: text)
+        let text: String
+        if layer == .prepend {
+            text = prependDraft
+        } else if editAsText {
+            text = draft
+        } else {
+            text = ""
+        }
+        refreshMeta(for: text, validate: layer == .prepend || editAsText)
     }
 
     private func saveActive() async {
@@ -2271,9 +2442,13 @@ private struct RulesEditorPane: View {
             await state.saveRulesPrependFromEditor(prependDraft)
             prependDraft = state.settings.rulesPrepend.joined(separator: "\n")
         } else {
+            if !editAsText {
+                draft = baseLines.joined(separator: "\n")
+            }
             state.rulesText = draft
             await state.saveRulesFromEditor()
-            draft = state.rulesText
+            baseLines = state.settings.rules
+            draft = editAsText ? state.rulesText : ""
         }
         reloadActiveDraft()
     }
@@ -2281,32 +2456,46 @@ private struct RulesEditorPane: View {
     private func scheduleValidate() {
         validateTask?.cancel()
         validateTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled else { return }
             let text = layer == .prepend ? prependDraft : draft
-            refreshMeta(for: text)
+            refreshMeta(for: text, validate: true)
         }
     }
 
-    private func refreshMeta(for text: String) {
-        let parsed = ClashRuleSyntax.parseLines(text)
-        if layer == .prepend {
-            dirty = parsed != state.settings.rulesPrepend
-        } else {
-            dirty = parsed != state.settings.rules
-        }
-        issues = ClashRuleSyntax.validate(text)
+    private func refreshMeta(for text: String, validate: Bool = true) {
         let prependCount = state.settings.rulesPrepend.count
-        let baseCount = layer == .base ? parsed.count : state.settings.rules.count
+        let parsedPrepend = layer == .prepend ? ClashRuleSyntax.parseLines(prependDraft) : nil
+        if layer == .prepend {
+            dirty = (parsedPrepend ?? []) != state.settings.rulesPrepend
+        } else if editAsText {
+            dirty = ClashRuleSyntax.parseLines(draft) != state.settings.rules
+        } else {
+            dirty = baseLines != state.settings.rules
+        }
+        if validate, layer == .prepend || editAsText {
+            issues = ClashRuleSyntax.validate(text)
+        } else {
+            issues = []
+        }
+        let shownPrepend = parsedPrepend?.count ?? prependCount
+        let baseCount = layer == .base
+            ? (editAsText ? ClashRuleSyntax.parseLines(draft).count : baseLines.count)
+            : state.settings.rules.count
         let extra = state.settings.videoAdBlockEnabled ? VideoAdBlock.ruleCount : 0
-        let runtime = (layer == .prepend ? parsed.count : prependCount) + baseCount + extra
+        let runtime = shownPrepend + baseCount + extra
         var parts: [String] = []
         if state.settings.rulesVersion > 0 {
-            parts.append("智能规则基准 v\(state.settings.rulesVersion)")
+            parts.append("智能规则 v\(state.settings.rulesVersion)")
         }
-        parts.append("前置 \(layer == .prepend ? parsed.count : prependCount) 条")
-        parts.append("基础 \(baseCount) 条")
-        parts.append("生效约 \(runtime) 条")
+        parts.append("前置 \(shownPrepend)")
+        parts.append("基础 \(baseCount)")
+        if let sr = ShadowrocketForeverRules.statusLine {
+            parts.append(sr)
+        } else if let gfw = GfwListRules.statusLine {
+            parts.append(gfw)
+        }
+        parts.append("运行时 \(runtime) 条")
         statusLine = parts.joined(separator: " · ")
     }
 }
@@ -2331,8 +2520,7 @@ private struct PanelStatusLine: View {
             }
         }
         .onAppear { text = state.statusText }
-        .onReceive(Timer.publish(every: 1.2, on: .main, in: .common).autoconnect()) { _ in
-            let next = state.statusText
+        .onReceive(state.$statusText.receive(on: RunLoop.main)) { next in
             if next != text { text = next }
         }
         .transaction { $0.animation = nil }
@@ -2502,9 +2690,6 @@ private struct PanelNodesHost<Content: View>: View {
             .onReceive(state.$nodeListRevision.receive(on: RunLoop.main)) { _ in
                 revision &+= 1
             }
-            .onReceive(state.$chromeRevision.receive(on: RunLoop.main)) { _ in
-                revision &+= 1
-            }
             .onReceive(state.$hubModeRevision.receive(on: RunLoop.main)) { _ in
                 revision &+= 1
             }
@@ -2526,18 +2711,32 @@ private struct NodesCategoriesView: View {
     @State private var collapsed: Set<String> = []
     @State private var groups: [NodeCategory.Group] = []
     @State private var testingTick = 0
+    @State private var cardsReady = false
+    @State private var expandedVisibleLimit: [String: Int] = [:]
+    private static let initialVisiblePerGroup = 18
+    private static let cardsPerRow = 3
 
     var body: some View {
         let _ = testingTick
         Group {
-            if displayMode == .card {
+            if !cardsReady {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if displayMode == .card {
                 cardPane
             } else {
                 listPane
             }
         }
         .transaction { $0.animation = nil }
-        .onAppear(perform: reload)
+        .onAppear {
+            reload()
+            seedCollapseIfNeeded()
+            if !cardsReady {
+                // Let the window chrome paint first — headers+cards on the same turn freeze open.
+                DispatchQueue.main.async { cardsReady = true }
+            }
+        }
         .onReceive(state.$nodeListRevision.receive(on: RunLoop.main)) { _ in
             reload()
         }
@@ -2548,9 +2747,20 @@ private struct NodesCategoriesView: View {
 
     private func reload() {
         groups = state.categoryGroups
-        // Drop stale keys; keep user's open/closed choices for still-visible groups.
         let keys = Set(groups.map(\.key))
         collapsed = collapsed.intersection(keys).union(state.collapsedCategories.intersection(keys))
+    }
+
+    /// ClashX-style: only the selected region is expanded so first paint isn't hundreds of cards.
+    private func seedCollapseIfNeeded() {
+        guard groups.count > 1, collapsed.isEmpty, state.collapsedCategories.isEmpty else { return }
+        var next = Set(groups.map(\.key))
+        let keep = groups.first(where: { group in
+            group.nodes.contains(where: { $0.name == selectedNodeName })
+        })?.key ?? groups.first?.key
+        if let keep { next.remove(keep) }
+        collapsed = next
+        state.collapsedCategories = next
     }
 
     private func toggle(_ key: String) {
@@ -2562,6 +2772,33 @@ private struct NodesCategoriesView: View {
         }
         collapsed = next
         state.collapsedCategories = next
+        if !next.contains(key) {
+            expandedVisibleLimit[key] = Self.initialVisiblePerGroup
+        }
+    }
+
+    private func visibleNodes(in group: NodeCategory.Group) -> [ProxyNode] {
+        let limit = expandedVisibleLimit[group.key] ?? Self.initialVisiblePerGroup
+        if group.nodes.count <= limit { return group.nodes }
+        return Array(group.nodes.prefix(limit))
+    }
+
+    @ViewBuilder
+    private func moreNodesButton(_ group: NodeCategory.Group) -> some View {
+        let limit = expandedVisibleLimit[group.key] ?? Self.initialVisiblePerGroup
+        let hidden = group.nodes.count - min(limit, group.nodes.count)
+        if hidden > 0 {
+            Button {
+                expandedVisibleLimit[group.key] = group.nodes.count
+            } label: {
+                Text("显示其余 \(hidden) 个节点")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(BashXTheme.accent(for: appearance))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var listPane: some View {
@@ -2585,13 +2822,15 @@ private struct NodesCategoriesView: View {
                     ForEach(groups) { group in
                         Section {
                             if !collapsed.contains(group.key) {
-                                ForEach(Array(group.nodes.enumerated()), id: \.element.id) { idx, node in
+                                let visible = visibleNodes(in: group)
+                                ForEach(Array(visible.enumerated()), id: \.element.id) { idx, node in
                                     nodeRow(node, index: idx + 1)
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 1)
                                         .contentShape(Rectangle())
                                         .onTapGesture { onSelect(node.name) }
                                 }
+                                moreNodesButton(group)
                             }
                         } header: {
                             categoryHeader(group)
@@ -2616,16 +2855,25 @@ private struct NodesCategoriesView: View {
                 ForEach(groups) { group in
                     Section {
                         if !collapsed.contains(group.key) {
-                            LazyVGrid(
-                                columns: [GridItem(.adaptive(minimum: 156, maximum: 260), spacing: 8)],
-                                spacing: 8
-                            ) {
-                                ForEach(group.nodes) { node in
-                                    nodeCard(node, group: group)
+                            let visible = visibleNodes(in: group)
+                            ForEach(cardRowStarts(visible.count), id: \.self) { start in
+                                let end = min(start + Self.cardsPerRow, visible.count)
+                                HStack(alignment: .top, spacing: 8) {
+                                    ForEach(Array(visible[start..<end])) { node in
+                                        nodeCard(node, group: group)
+                                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                                    }
+                                    if end - start < Self.cardsPerRow {
+                                        ForEach(0..<(Self.cardsPerRow - (end - start)), id: \.self) { _ in
+                                            Color.clear.frame(maxWidth: .infinity)
+                                        }
+                                    }
                                 }
                             }
                             .padding(.horizontal, 10)
-                            .padding(.bottom, 2)
+                            moreNodesButton(group)
+                                .padding(.horizontal, 10)
+                                .padding(.bottom, 2)
                         }
                     } header: {
                         categoryHeader(group)
@@ -2639,9 +2887,13 @@ private struct NodesCategoriesView: View {
         }
     }
 
+    private func cardRowStarts(_ count: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        return Array(stride(from: 0, to: count, by: Self.cardsPerRow))
+    }
+
     private func categoryHeader(_ group: NodeCategory.Group) -> some View {
         let isCollapsed = collapsed.contains(group.key)
-        let best = group.nodes.lazy.compactMap(\.delayMs).filter { $0 > 0 }.min()
         return HStack(spacing: 6) {
             Button {
                 toggle(group.key)
@@ -2660,44 +2912,40 @@ private struct NodesCategoriesView: View {
                         .font(.system(size: 8, weight: .medium, design: .monospaced))
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                     Spacer(minLength: 4)
-                    if let best {
-                        Text("\(best) ms")
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(BashXTheme.delayColor(best, appearance: appearance))
-                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(PanelPressButtonStyle())
 
-            Button {
-                Task {
-                    await state.runSpeedTest(nodes: group.nodes, label: group.title, groupKey: group.key)
-                    await state.selectFastestNodeIfAvailable()
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    if state.isTesting && state.speedTestScopeKey == group.key {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "gauge.with.dots.needle.67percent")
-                            .font(.system(size: 10, weight: .bold))
+            if !isCollapsed {
+                Button {
+                    Task {
+                        await state.runSpeedTest(nodes: group.nodes, label: group.title, groupKey: group.key)
+                        await state.selectFastestNodeIfAvailable()
                     }
-                    Text(state.isTesting && state.speedTestScopeKey == group.key ? "测速中" : "测速")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                } label: {
+                    HStack(spacing: 4) {
+                        if state.isTesting && state.speedTestScopeKey == group.key {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "gauge.with.dots.needle.67percent")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        Text(state.isTesting && state.speedTestScopeKey == group.key ? "测速中" : "测速")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background {
+                        Capsule(style: .continuous)
+                            .fill(BashXTheme.accent(for: appearance))
+                    }
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
-                .background {
-                    Capsule(style: .continuous)
-                        .fill(BashXTheme.accent(for: appearance))
-                }
+                .buttonStyle(.plain)
+                .disabled(state.isTesting || group.nodes.isEmpty)
             }
-            .buttonStyle(.plain)
-            .disabled(state.isTesting || group.nodes.isEmpty)
-            .help("仅测速「\(group.title)」分组（\(group.nodes.count) 个节点）")
         }
         .padding(.vertical, 3)
     }
@@ -2720,11 +2968,8 @@ private struct NodesCategoriesView: View {
                         Text(node.name)
                             .font(.system(size: 11, weight: highlighted ? .semibold : .medium, design: .rounded))
                             .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .help(node.name)
                         Text(group.title)
                             .font(PanelMetrics.micro)
                             .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
@@ -2780,7 +3025,6 @@ private struct NodesCategoriesView: View {
             }
         }
         .buttonStyle(PanelPressButtonStyle())
-        .help(node.name)
     }
 
     private func delayText(_ delay: Int?) -> String {

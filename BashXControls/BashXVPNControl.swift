@@ -33,20 +33,19 @@ struct BashXVPNControl: ControlWidget {
             provider: BashXVPNStatusProvider()
         ) { isOn in
             ControlWidgetToggle(
-                "BashX",
+                isOn ? "已连接" : "BashX",
                 isOn: isOn,
                 action: SetBashXVPNIntent()
             ) { on in
-                Label {
-                    Text(on ? "已连接" : "未连接")
-                } icon: {
-                    Image("bashx.mark")
-                        .symbolRenderingMode(.monochrome)
-                }
+                // Custom SF Symbol — bold hex + X (see scripts/gen_control_symbol.py)
+                Label(on ? "已连接" : "未连接", image: "bashx.mark")
+                    .symbolRenderingMode(.monochrome)
             }
-            .tint(Color(red: 1.0, green: 0.82, blue: 0.14))
+            .tint(isOn
+                  ? Color(red: 0.20, green: 0.78, blue: 0.45)
+                  : Color(red: 1.0, green: 0.78, blue: 0.12))
         }
-        .displayName("BashX VPN")
-        .description("一键连接或断开 BashX")
+        .displayName("BashX")
+        .description("一键连接或断开 BashX VPN")
     }
 }

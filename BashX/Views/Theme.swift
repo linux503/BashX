@@ -224,43 +224,30 @@ struct PanelAtmosphere: View {
 }
 
 /// Soft static backdrop for Mac minimal home (panel window only — not the menu bar).
+/// Gradients only — large blurs were re-rasterized whenever the panel redrawn.
 struct MinimalHomeBackdrop: View {
     @Environment(\.bashxAppearance) private var appearance
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            ZStack {
-                BashXTheme.canvas(for: appearance)
-
-                Circle()
-                    .fill(BashXTheme.accent(for: appearance).opacity(appearance == .dark ? 0.22 : 0.16))
-                    .frame(width: w * 0.95, height: w * 0.95)
-                    .blur(radius: 42)
-                    .offset(x: -w * 0.28, y: -h * 0.22)
-
-                Circle()
-                    .fill(BashXTheme.good(for: appearance).opacity(appearance == .dark ? 0.14 : 0.10))
-                    .frame(width: w * 0.72, height: w * 0.72)
-                    .blur(radius: 48)
-                    .offset(x: w * 0.34, y: h * 0.18)
-
-                Circle()
-                    .fill(Color(red: 0.28, green: 0.72, blue: 0.92).opacity(appearance == .dark ? 0.10 : 0.07))
-                    .frame(width: w * 0.55, height: w * 0.55)
-                    .blur(radius: 36)
-                    .offset(x: w * 0.08, y: h * 0.42)
-
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(appearance == .dark ? 0.04 : 0.35),
-                        Color.clear,
-                    ],
-                    startPoint: .top,
-                    endPoint: .center
-                )
-            }
+        ZStack {
+            BashXTheme.canvas(for: appearance)
+            LinearGradient(
+                colors: [
+                    BashXTheme.accent(for: appearance).opacity(appearance == .dark ? 0.18 : 0.12),
+                    Color.clear,
+                    BashXTheme.good(for: appearance).opacity(appearance == .dark ? 0.10 : 0.07),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(appearance == .dark ? 0.04 : 0.28),
+                    Color.clear,
+                ],
+                startPoint: .top,
+                endPoint: .center
+            )
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

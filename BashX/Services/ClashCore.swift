@@ -9,6 +9,8 @@ enum ClashCore {
         config.timeoutIntervalForResource = 12
         config.httpMaximumConnectionsPerHost = 4
         config.waitsForConnectivity = false
+        // Never send 127.0.0.1:19090 through mixed-port — that stalls the panel and drops PUT /proxies.
+        config.connectionProxyDictionary = [:]
         return URLSession(configuration: config)
     }()
 

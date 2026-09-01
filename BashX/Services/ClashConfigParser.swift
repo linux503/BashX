@@ -82,6 +82,8 @@ enum ClashConfigParser {
             if node.port > 0 { dict["port"] = node.port }
             // Mac Telegram / QUIC need UDP; subscription nodes often omit `udp: true`.
             normalizeProxyUDP(&dict)
+            // Residential SOCKS (IPFoxy) must dial via overseas front hop from CN.
+            normalizeResidentialDialer(&dict)
             return dict
         }
 
@@ -112,7 +114,7 @@ enum ClashConfigParser {
             var out = IosDirectDomains.dnsBootstrapDirectRules
             out.append(contentsOf: IosRoutingRules.apnsPriorityRules)
             out.append(contentsOf: IosDirectDomains.wechatPriorityRules)
-            out.append(contentsOf: IosDirectDomains.tiktokPriorityRules)
+            out.append(contentsOf: IosDirectDomains.tiktokRulesForPlatform(forIOS: true))
             out.append(contentsOf: IosDirectDomains.ecommercePriorityRules)
             out.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules)
             out.append(contentsOf: IosDirectDomains.bankPriorityRules)
@@ -126,7 +128,7 @@ enum ClashConfigParser {
                 return !apnsMarkers.contains { u.contains($0) }
             }
             out.append(contentsOf: filteredHead)
-            out.append("MATCH,PROXY")
+            out.append("MATCH,DIRECT")
             return out
         }()
 
@@ -341,8 +343,9 @@ enum ClashConfigParser {
             "log-level": forIOS ? "warning" : "warning",
             "external-controller": controller,
             "secret": secret,
-            // TUN + Telegram DC literals (Telegra2/keepcoder) need IPv6 stack; dns.ipv6 stays false.
-            "ipv6": forIOS || tunEnabled,
+            // Mac + TUN: disable IPv6 stack — Meta Happy-Eyeballs dials AAAA:5222 and QR WebSocket dies.
+            // iOS NE still needs v6 for Telegram DC literals when utun is on.
+            "ipv6": forIOS && tunEnabled,
             // Same as Clash Verge / Meta — one delay per proxy instead of per hop.
             "unified-delay": true,
             "dns": forIOS
@@ -359,6 +362,8 @@ enum ClashConfigParser {
             ] + auxiliaryGroups,
             "rules": finalRules
         ]
+
+        mergeShadowrocketRuleProviders(into: &root)
 
         if forIOS {
             // iOS NE: never auto-download geo DBs during tunnel start (deadlocks under utun).
@@ -383,8 +388,8 @@ enum ClashConfigParser {
         if !forIOS {
             root["tcp-concurrent"] = true
             root["keep-alive-interval"] = 30
-            // `strict` is enough for PROCESS-NAME under most Mac setups and costs far less CPU.
-            root["find-process-mode"] = "strict"
+            // TUN + PROCESS-NAME (AdsPower S5 by IP) needs always — `strict` often misses helper processes.
+            root["find-process-mode"] = "always"
             if domainSniffing {
                 root["sniffer"] = snifferBlock
             }
@@ -392,9 +397,10 @@ enum ClashConfigParser {
             root["find-process-mode"] = "off"
             // Concurrent dials + large proxy graphs spike RAM → iOS jetsam kills the NE.
             root["tcp-concurrent"] = false
-            root["keep-alive-interval"] = 10
-            // Sniffer was a major RSS contributor on iPhone (80MB+ → silent jetsam restarts).
-            // DOMAIN rules + WeChat IP bypass routes cover the important cases without sniff.
+            // Longer keep-alive for Binance / trading WebSockets (10s was too chatty + flappy).
+            root["keep-alive-interval"] = 25
+            // Sniffer OFF — enabling it in 1.0.48 jetsam'd the NE so TikTok (and often all
+            // tunnel traffic) could not open. Domain rules + fake-ip-filter cover named hosts.
             root["sniffer"] = ["enable": false]
             root["profile"] = ["store-selected": true, "store-fake-ip": false]
         }
@@ -478,18 +484,17 @@ enum ClashConfigParser {
             // url-test health checks + RULE-SET downloads blow the NE jetsam budget.
             sanitizeIOSPassthroughGroups(&root)
             applyPassthroughSelectedNode(&root, selectedName: selectedName)
-            root.removeValue(forKey: "rule-providers")
             let scrubbed = scrubIOSIncompatibleRules(stringList(root["rules"]) ?? [])
             root["rules"] = patchIOSPassthroughRules(scrubbed, groupNames: proxyGroupNames(in: root))
             root["geodata-mode"] = false
             root["geo-auto-update"] = false
             root["find-process-mode"] = "off"
             root["tcp-concurrent"] = false
-            root["keep-alive-interval"] = 10
+            root["keep-alive-interval"] = 25
             root["sniffer"] = ["enable": false]
             root["profile"] = ["store-selected": true, "store-fake-ip": false]
         } else {
-            if root["find-process-mode"] == nil { root["find-process-mode"] = "strict" }
+            root["find-process-mode"] = "always"
             if root["tcp-concurrent"] == nil { root["tcp-concurrent"] = true }
             if root["keep-alive-interval"] == nil { root["keep-alive-interval"] = 30 }
             if domainSniffing, root["sniffer"] == nil {
@@ -506,6 +511,8 @@ enum ClashConfigParser {
             applyPassthroughSelectedNode(&root, selectedName: selectedName)
             applyPassthroughHubMode(&root, mode: proxyHubMode, turboMode: turboMode)
         }
+
+        mergeShadowrocketRuleProviders(into: &root)
 
         if tunEnabled {
             root["tun"] = tunBlock(stack: tunStack, forIOS: forIOS)
@@ -526,12 +533,13 @@ enum ClashConfigParser {
             "auto-route": true,
             "auto-detect-interface": true,
             "dns-hijack": ["any:53"],
-            "strict-route": false
+            "strict-route": !forIOS
         ]
         if forIOS {
             tun["mtu"] = 1400
-            // Exclude WeChat/Tencent + ByteDance CDN CIDRs so video/chat bypasses gVisor
-            // (TUN still sees DNS; missing these → Douyin/WeChat inflate NE RSS → jetsam).
+            // Exclude WeChat/Tencent CDN CIDRs so chat media bypasses gVisor (RSS).
+            // Do NOT exclude ByteDance ranges — TikTok shares that infra; excluding it
+            // sends TikTok CDN DIRECT outside the tunnel →「无法连接」.
             tun["route-exclude-address"] = [
                 // Tencent / WeChat
                 "1.12.0.0/14",
@@ -548,29 +556,13 @@ enum ClashConfigParser {
                 "183.57.0.0/16", "183.60.0.0/16",
                 "183.192.0.0/16", "183.232.0.0/16",
                 "203.205.128.0/19", "211.95.0.0/16",
-                // ByteDance / Douyin / Toutiao CDN (common CN egress)
-                "49.51.0.0/16",
-                "101.33.0.0/16", "101.126.0.0/16",
-                "110.249.0.0/16",
-                "111.225.0.0/16",
-                "116.63.0.0/16",
-                "117.71.0.0/16",
-                "119.3.0.0/16", "119.8.0.0/16",
-                "120.46.0.0/16", "120.92.0.0/16",
-                "121.36.0.0/16", "121.46.0.0/16",
-                "123.249.0.0/16",
-                "124.243.0.0/16",
-                "140.143.0.0/16",
-                "180.184.0.0/16",
-                "220.243.0.0/16",
             ]
-        } else {
-            // fake-ip auto-route only installs 198.18/16. Setting inet*-route-address
-            // replaces that table — keep fake-ip and add Telegram DC CIDRs so
-            // Telegra2/keepcoder bare-IP MTProto enters TUN (system proxy alone never sees it).
-            tun["inet4-route-address"] = ["198.18.0.0/16"] + TelegramReliability.dcIPv4CIDRs
-            tun["inet6-route-address"] = TelegramReliability.dcIPv6CIDRs
         }
+        // Mac: do NOT set inet4-route-address. Restricting to 198.18/16 + Telegram DCs
+        // drops WhatsApp when system DNS returns real Meta IPs (bypass/DoH) — those
+        // dials never enter TUN → DIRECT → QR WebSocket never opens.
+        // Full auto-route + strict-route: destination IPs enter TUN, then
+        // GEOIP CN/PRIVATE → DIRECT；其余 MATCH,PROXY（ACL4SSR 漏网之鱼）.
         return tun
     }
 
@@ -640,21 +632,26 @@ enum ClashConfigParser {
         ]
     ]
 
-    /// iOS NE: sniff SNI so bare-IP WeChat CDN hits DOMAIN→DIRECT (do NOT skip weixin/qpic).
+    /// iOS NE: sniff SNI so bare-IP TikTok/WeChat CDN hits DOMAIN rules (not MATCH,DIRECT).
     private static let iosSnifferBlock: [String: Any] = [
         "enable": true,
         "force-dns-mapping": true,
         "parse-pure-ip": true,
         "override-destination": false,
         "sniff": [
-            "TLS": ["ports": [443, 8443, 8080, 80]],
-            "HTTP": ["ports": [80, 8080, 8880, 8000]],
-            "QUIC": ["ports": [443]]
+            "TLS": ["ports": [443, 8443]],
+            "HTTP": ["ports": [80, 8080]],
         ],
         "skip-domain": [
             "+.push.apple.com",
             "+.apple.com",
             "+.icloud.com",
+            "+.cdn-apple.com",
+            "+.mzstatic.com",
+            "+.qq.com",
+            "+.weixin.qq.com",
+            "+.baidu.com",
+            "+.alicdn.com",
         ]
     ]
 
@@ -710,12 +707,37 @@ enum ClashConfigParser {
         var tiktokHubs: [String] = []
         if hasHub(jpProxies) { tiktokHubs.append("JP") }
         if hasHub(hkProxies) { tiktokHubs.append("HK") }
+        if hasHub(usProxies) { tiktokHubs.append("US") }
+
+        // iOS: prefer one JP/SG leaf as TIKTOK default (TikTok geo-blocks many US/ME exits),
+        // then PROXY. No nested JP/HK hubs (those broke NE boot on Air).
+        let tiktokMembers: [String] = {
+            if !forIOS {
+                return members(hubs: tiktokHubs, preferDirect: false, includeProxy: true)
+            }
+            let preferKeys = ["日本", "JP", "Japan", "东京", "大阪", "新加坡", "SG", "Singapore"]
+            let preferred = leaves.first { name in
+                preferKeys.contains(where: { name.localizedCaseInsensitiveContains($0) })
+            }
+            var list: [String] = []
+            if let preferred { list.append(preferred) }
+            list.append("PROXY")
+            list.append("DIRECT")
+            return list
+        }()
 
         return [
             iosSelectGroup(name: "NETFLIX", proxies: members(hubs: streamingHubs, preferDirect: false, includeProxy: true)),
-            iosSelectGroup(name: "TIKTOK", proxies: members(hubs: tiktokHubs, preferDirect: false, includeProxy: true)),
-            iosSelectGroup(name: "TWITTER", proxies: members(hubs: socialHubs, preferDirect: false, includeProxy: true)),
-            iosSelectGroup(name: "WHATSAPP", proxies: members(hubs: socialHubs, preferDirect: false, includeProxy: true)),
+            iosSelectGroup(name: "TIKTOK", proxies: tiktokMembers),
+            iosSelectGroup(name: "TWITTER", proxies: members(hubs: socialHubs, preferDirect: false, includeProxy: true, proxyFirst: true)),
+        ]
+        + whatsappGroups(
+            socialHubs: socialHubs,
+            leaves: leaves,
+            iosMembers: members(hubs: socialHubs, preferDirect: false, includeProxy: true, proxyFirst: true),
+            forIOS: forIOS
+        )
+        + [
             iosSelectGroup(name: "STEAM", proxies: members(hubs: [], preferDirect: false, includeProxy: false, proxyFirst: true)),
             iosSelectGroup(name: "MICROSOFT", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
             iosSelectGroup(name: "APPLE", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
@@ -724,6 +746,39 @@ enum ClashConfigParser {
             iosSelectGroup(name: "BILIBILI", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
             iosSelectGroup(name: "DOUYIN", proxies: members(hubs: [], preferDirect: true, includeProxy: true)),
         ])
+    }
+
+    /// Mac: WHATSAPP-AUTO url-tests `web.whatsapp.com` (login + `/ws/chat` share the host).
+    /// PROXY's gstatic health-check often stays green while WhatsApp WebSocket is DPI-killed.
+    private static func whatsappGroups(
+        socialHubs: [String],
+        leaves: [String],
+        iosMembers: [String],
+        forIOS: Bool
+    ) -> [[String: Any]] {
+        if forIOS {
+            return [iosSelectGroup(name: "WHATSAPP", proxies: iosMembers)]
+        }
+        let pool = Array(leaves.prefix(20))
+        let autoProxies = pool.isEmpty ? ["PROXY"] : pool
+        let auto: [String: Any] = [
+            "name": "WHATSAPP-AUTO",
+            "type": "url-test",
+            "proxies": autoProxies,
+            "url": "https://web.whatsapp.com",
+            "interval": 300,
+            "tolerance": 150,
+            "lazy": true,
+            "expected-status": "200"
+        ]
+        var selectMembers = ["WHATSAPP-AUTO", "PROXY"]
+        for hub in socialHubs where !selectMembers.contains(hub) { selectMembers.append(hub) }
+        for leaf in pool where !selectMembers.contains(leaf) { selectMembers.append(leaf) }
+        if !selectMembers.contains("DIRECT") { selectMembers.append("DIRECT") }
+        return [
+            auto,
+            iosSelectGroup(name: "WHATSAPP", proxies: selectMembers)
+        ]
     }
 
     /// High-availability Telegram path (Shadowrocket 电报消息 + mihomo failover):
@@ -945,10 +1000,19 @@ enum ClashConfigParser {
             let t = raw.trimmingCharacters(in: .whitespaces)
             guard !t.isEmpty, !t.hasPrefix("#") else { return nil }
             let u = t.uppercased()
-            if u.hasPrefix("PROCESS-NAME,") || u.hasPrefix("PROCESS-PATH,") { return nil }
+            if u.hasPrefix("PROCESS-NAME,") || u.hasPrefix("PROCESS-PATH,")
+                || u.hasPrefix("PROCESS-NAME-REGEX,") || u.hasPrefix("PROCESS-PATH-REGEX,") {
+                return nil
+            }
             if u.hasPrefix("GEOSITE,") || u.hasPrefix("GEOIP,") { return nil }
-            // RULE-SET needs rule-providers + often geo payloads — stripped with providers.
-            if u.hasPrefix("RULE-SET,") { return nil }
+            // RULE-SET needs rule-providers — keep bundled SR local sets only.
+            if u.hasPrefix("RULE-SET,") {
+                let parts = t.split(separator: ",").map(String.init)
+                if parts.count >= 2, ShadowrocketForeverRules.isLocalRuleSet(parts[1]) {
+                    return t
+                }
+                return nil
+            }
             if u.hasPrefix("SUB-RULE,") { return nil }
             return t
         }
@@ -1071,8 +1135,9 @@ enum ClashConfigParser {
                 .replacingOccurrences(of: ",PROXY", with: ",\(proxyTarget)")
         }
 
-        var inject = IosDirectDomains.wechatPriorityRules.map(retarget)
-        inject.append(contentsOf: IosDirectDomains.tiktokPriorityRules.map(retarget))
+        var inject = ShadowrocketForeverRules.headerRules()
+        inject.append(contentsOf: IosDirectDomains.wechatPriorityRules.map(retarget))
+        inject.append(contentsOf: IosDirectDomains.tiktokRulesForPlatform(forIOS: true).map(retarget))
         inject.append(contentsOf: IosDirectDomains.ecommercePriorityRules.map(retarget))
         inject.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules.map(retarget))
         inject.append(contentsOf: IosDirectDomains.bankPriorityRules.map(retarget))
@@ -1090,8 +1155,8 @@ enum ClashConfigParser {
             "IP-CIDR,9.9.9.9/32,\(proxyTarget),no-resolve",
         ])
         let head = rules.filter { !$0.uppercased().hasPrefix("MATCH,") }
-        // After stripping GEOSITE/GEOIP, airport MATCH,DIRECT leaves Google/X/TG on a dead path.
-        let match = "MATCH,\(proxyTarget)"
+        // Unmatched (bare IP / unknown host) → DIRECT; domain PROXY rules still cover GFW/Google/TG.
+        let match = "MATCH,DIRECT"
         var out = inject + head
         out.append(match)
         return out
@@ -1252,9 +1317,11 @@ enum ClashConfigParser {
 
         root["proxy-groups"] = groups
 
-        // Prepend Telegram/Cursor routing so airport MATCH can't steal them.
+        // Prepend service-specific routing so imported broad rule sets (notably
+        // SR-PROXY) cannot steal long-lived app/API traffic and pick an
+        // incompatible region.
         var rules = stringList(root["rules"]) ?? []
-        let inject = [
+        var inject = [
             "PROCESS-NAME,Telegram,TELEGRAM",
             "PROCESS-NAME,org.telegram.desktop,TELEGRAM",
             "PROCESS-PATH,*Telegram.app/Contents/MacOS/Telegram,TELEGRAM",
@@ -1287,15 +1354,29 @@ enum ClashConfigParser {
             "DOMAIN,api3.cursor.sh,CURSOR",
             "DOMAIN,api4.cursor.sh,CURSOR",
             "DOMAIN-KEYWORD,gcpp.cursor,CURSOR",
+            "DOMAIN-SUFFIX,anthropic.com,ANTHROPIC",
+            "DOMAIN-SUFFIX,claude.ai,ANTHROPIC",
+            "DOMAIN-SUFFIX,claude.com,ANTHROPIC",
+            "DOMAIN-SUFFIX,claudeusercontent.com,ANTHROPIC",
+            "DOMAIN-SUFFIX,claudemcpclient.com,ANTHROPIC",
+            "DOMAIN-KEYWORD,claude,ANTHROPIC",
+            "DOMAIN-KEYWORD,anthropic,ANTHROPIC",
         ]
-        let missing = inject.filter { rule in
-            let needle = rule.split(separator: ",").prefix(2).joined(separator: ",").uppercased()
-            return !rules.contains { $0.uppercased().contains(needle) }
+        #if os(macOS)
+        inject = AppRoutingRules.macAppBypassRules + inject
+        #endif
+        // Existing configs commonly already contain these domains, but much
+        // farther down the list after imported RULE-SET,SR-PROXY.  Deduplicate
+        // by matcher then force this complete set to the front.
+        let injectMatchers = Set(inject.map {
+            $0.split(separator: ",").prefix(2).joined(separator: ",").uppercased()
+        })
+        rules.removeAll { rule in
+            let matcher = rule.split(separator: ",").prefix(2).joined(separator: ",").uppercased()
+            return injectMatchers.contains(matcher)
         }
-        if !missing.isEmpty {
-            rules.insert(contentsOf: missing, at: 0)
-            root["rules"] = rules
-        }
+        rules.insert(contentsOf: inject, at: 0)
+        root["rules"] = rules
     }
 
     /// Mac: keep PROXY as select; put the hub chip (AUTO/BALANCE/FALLBACK) first.
@@ -1489,25 +1570,62 @@ enum ClashConfigParser {
         return limited.isEmpty ? ["DIRECT"] : limited
     }
 
-    /// Prefer low-latency hubs for url-test groups (Telegram / Google / AUTO fallback).
+    /// Prefer low-latency Asia hubs for url-test / auto-pick (never Middle East first).
     static func preferredRegionNodes(from names: [String]) -> [String] {
-        let keys = [
-            "香港", "HK", "Hong Kong",
-            "台湾", "TW", "Taiwan",
-            "新加坡", "SG", "Singapore",
-            "日本", "JP", "Japan", "东京", "大阪",
-            "韩国", "KR", "Korea", "首尔",
-            "马来", "MY", "Malaysia",
-            "美国", "US", "USA", "Los Angeles", "San Jose", "Seattle",
-            "英国", "UK", "London",
-            "德国", "DE", "Frankfurt",
-            "荷兰", "NL", "Amsterdam"
-        ]
-        let preferred = names.filter { name in
-            keys.contains { name.localizedCaseInsensitiveContains($0) }
-        }
-        if preferred.count >= 4 { return preferred }
+        let core = coreAsiaPreferredNodes(from: names)
+        if core.count >= 2 { return core }
+        let asia = asiaPreferredNodes(from: names)
+        if asia.count >= 2 { return asia }
         return names
+    }
+
+    /// Tier-1: HK / TW / SG / JP / KR — default auto-connect prefers these.
+    static func isCoreAsiaPreferredNodeName(_ name: String) -> Bool {
+        let keys = [
+            "香港", "HK", "Hong Kong", "澳门", "MO", "Macao", "Macau",
+            "台湾", "台灣", "TW", "Taiwan",
+            "新加坡", "SG", "Singapore",
+            "日本", "JP", "Japan", "东京", "大阪", "名古屋",
+            "韩国", "韓國", "KR", "Korea", "首尔", "首爾",
+        ]
+        return keys.contains { name.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// Tier-2 SEA — used only when no Tier-1 Asia node is healthy.
+    static func isAsiaPreferredNodeName(_ name: String) -> Bool {
+        if isCoreAsiaPreferredNodeName(name) { return true }
+        let keys = [
+            "马来", "馬來", "MY", "Malaysia",
+            "泰国", "TH", "越南", "VN", "菲律宾", "PH", "印尼", "ID",
+        ]
+        return keys.contains { name.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// Bahrain / UAE / etc. — fine as manual pick, never auto-preferred over Asia.
+    static func isDeprioritizedRegionNodeName(_ name: String) -> Bool {
+        let keys = [
+            "巴林", "BH", "Bahrain",
+            "迪拜", "阿联酋", "阿聯酋", "AE", "Dubai", "UAE",
+            "沙特", "SA", "Saudi",
+            "卡塔尔", "卡達", "QA", "Qatar",
+            "科威特", "KW", "Kuwait",
+            "以色列", "IL", "Israel",
+            "土耳其", "TR", "Turkey", "Türkiye",
+            "印度", "IN", "India",
+            "巴西", "BR", "Brazil",
+            "阿根廷", "AR", "Argentina",
+            "南非", "ZA", "Africa",
+            "尼日利亚", "NG", "Nigeria",
+        ]
+        return keys.contains { name.localizedCaseInsensitiveContains($0) }
+    }
+
+    static func coreAsiaPreferredNodes(from names: [String]) -> [String] {
+        names.filter { isCoreAsiaPreferredNodeName($0) && !isDeprioritizedRegionNodeName($0) }
+    }
+
+    static func asiaPreferredNodes(from names: [String]) -> [String] {
+        names.filter { isAsiaPreferredNodeName($0) && !isDeprioritizedRegionNodeName($0) }
     }
 
     /// Traffic / expiry / remark rows that are not real proxies.
@@ -1815,7 +1933,7 @@ enum ClashConfigParser {
             .prefix(5)
             .map { $0.trimmingCharacters(in: .whitespaces) }
         guard !sample.isEmpty else { return false }
-        let prefixes = ["ss://", "ssr://", "vmess://", "vless://", "trojan://", "hysteria2://", "hy2://", "tuic://"]
+        let prefixes = ["ss://", "ssr://", "vmess://", "vless://", "trojan://", "hysteria2://", "hy2://", "tuic://", "socks5://", "socks5h://", "socks://"]
         return sample.contains { line in prefixes.contains(where: { line.lowercased().hasPrefix($0) }) }
     }
 
@@ -1887,11 +2005,33 @@ enum ClashConfigParser {
     /// then groups report "UDP is not supported" and fall back to DIRECT.
     private static func normalizeProxyUDP(_ dict: inout [String: Any]) {
         let type = (dict["type"] as? String)?.lowercased() ?? ""
-        let udpCapable = ["vmess", "vless", "trojan", "ss", "ssr", "hysteria", "hysteria2", "tuic"]
+        let udpCapable = ["vmess", "vless", "trojan", "ss", "ssr", "hysteria", "hysteria2", "tuic", "socks5"]
         guard udpCapable.contains(type) else { return }
         if dict["udp"] == nil {
             dict["udp"] = true
         }
+    }
+
+    /// IPFoxy etc. block CN — socks5 leaves dial through AUTO (airport), not DIRECT.
+    private static func normalizeResidentialDialer(_ dict: inout [String: Any]) {
+        let type = (dict["type"] as? String)?.lowercased() ?? ""
+        guard type == "socks5" || type == "http" else { return }
+        let server = ((dict["server"] as? String) ?? "").lowercased()
+        guard server.contains("ipfoxy") else { return }
+        if dict["dialer-proxy"] == nil {
+            dict["dialer-proxy"] = "AUTO"
+        }
+    }
+
+    /// Local SR-REJECT / SR-PROXY classical files (no runtime HTTP fetch in mihomo).
+    private static func mergeShadowrocketRuleProviders(into root: inout [String: Any]) {
+        let incoming = ShadowrocketForeverRules.ruleProvidersBlock()
+        guard !incoming.isEmpty else { return }
+        var merged = (root["rule-providers"] as? [String: Any]) ?? [:]
+        for (key, value) in incoming {
+            merged[key] = value
+        }
+        root["rule-providers"] = merged
     }
 }
 
@@ -1908,6 +2048,9 @@ enum ShareLinkParser {
         let lower = line.lowercased()
         if lower.hasPrefix("ss://") { return parseShadowsocks(line) }
         if lower.hasPrefix("trojan://") { return parseTrojan(line) }
+        if lower.hasPrefix("socks5://") || lower.hasPrefix("socks5h://") || lower.hasPrefix("socks://") {
+            return parseSocks5(line)
+        }
         return nil
     }
 
@@ -2022,6 +2165,72 @@ enum ShareLinkParser {
             dict["sni"] = sni
         }
         return dict
+    }
+
+    /// Supports:
+    /// - `socks5://user:pass@host:port#name`
+    /// - IPFoxy style `socks5://host:port:user:pass`
+    private static func parseSocks5(_ line: String) -> [String: Any]? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hashParts = trimmed.split(separator: "#", maxSplits: 1).map(String.init)
+        let main = hashParts[0]
+        let fragName = hashParts.count > 1 ? (hashParts[1].removingPercentEncoding ?? hashParts[1]) : nil
+
+        // Standard URL: socks5://user:pass@host:port
+        if let url = URLComponents(string: main), let host = url.host, let port = url.port {
+            var dict: [String: Any] = [
+                "name": fragName ?? "SOCKS5-\(host)",
+                "type": "socks5",
+                "server": host,
+                "port": port,
+                "udp": true
+            ]
+            if let user = url.user?.removingPercentEncoding, !user.isEmpty {
+                dict["username"] = user
+            }
+            if let pass = url.password?.removingPercentEncoding {
+                dict["password"] = pass
+            }
+            applyResidentialDialerIfNeeded(&dict)
+            return dict
+        }
+
+        // IPFoxy / vendor style: socks5://host:port:user:pass
+        var body = main
+        for prefix in ["socks5h://", "socks5://", "socks://"] where body.lowercased().hasPrefix(prefix) {
+            body = String(body.dropFirst(prefix.count))
+            break
+        }
+        let parts = body.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+        // host:port:user:pass  — user/pass may contain ':' so take first two as host/port, rest split once
+        guard parts.count >= 4, let port = Int(parts[1]), port > 0, port <= 65535 else { return nil }
+        let host = parts[0]
+        guard !host.isEmpty, !host.contains("/") else { return nil }
+        let rest = parts.dropFirst(2).joined(separator: ":")
+        guard let cut = rest.firstIndex(of: ":") else { return nil }
+        let user = String(rest[..<cut])
+        let pass = String(rest[rest.index(after: cut)...])
+        guard !user.isEmpty, !pass.isEmpty else { return nil }
+        var dict: [String: Any] = [
+            "name": fragName ?? "SOCKS5-\(host)",
+            "type": "socks5",
+            "server": host,
+            "port": port,
+            "username": user,
+            "password": pass,
+            "udp": true
+        ]
+        applyResidentialDialerIfNeeded(&dict)
+        return dict
+    }
+
+    /// IPFoxy / similar residential gates refuse mainland China dials — chain via airport AUTO.
+    private static func applyResidentialDialerIfNeeded(_ dict: inout [String: Any]) {
+        let server = ((dict["server"] as? String) ?? "").lowercased()
+        guard server.contains("ipfoxy") || server.contains("gate-sg") || server.contains("gate-us") else { return }
+        if dict["dialer-proxy"] == nil {
+            dict["dialer-proxy"] = "AUTO"
+        }
     }
 
     private static func decodeUserInfo(_ user: String) -> String? {

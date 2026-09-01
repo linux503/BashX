@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct MonitorPane: View {
-    @ObservedObject var monitor: TrafficMonitor
-    @ObservedObject var panel: PanelRateStore
+    let monitor: TrafficMonitor
+    let panel: PanelRateStore
     @Binding var segment: MonitorSegment
     var coreAlive: Bool
     var lang: AppLanguage
@@ -31,39 +31,27 @@ struct MonitorPane: View {
 
     private func t(_ key: String) -> String { L10n.t(key, lang) }
 
-    private var trafficLive: Bool { panel.isLive && coreAlive }
-    private var downTint: Color { BashXTheme.accent(for: appearance) }
-    private var upTint: Color { Color(red: 0.98, green: 0.58, blue: 0.28) }
-
     var body: some View {
         VStack(spacing: 0) {
-            trafficHeader
+            MonitorTrafficHeader(
+                panel: panel,
+                coreAlive: coreAlive,
+                lang: lang
+            )
             Rectangle().fill(BashXTheme.hairline(for: appearance)).frame(height: 1)
 
             HStack(spacing: 10) {
                 monitorSegmentBar
-
                 Spacer(minLength: 8)
-
                 if segment == .connections {
-                    Text(t("mac.monitor.count").replacingOccurrences(of: "%@", with: "\(monitor.connectionCount)"))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(BashXTheme.secondaryFill(for: appearance))
-                        )
-                    Button(t("mac.monitor.clearConn")) { onCloseAll() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(!coreAlive || monitor.connections.isEmpty)
+                    MonitorConnectionsToolbar(
+                        monitor: monitor,
+                        coreAlive: coreAlive,
+                        lang: lang,
+                        onCloseAll: onCloseAll
+                    )
                 } else {
-                    Button(t("mac.monitor.clearLogs")) { monitor.logLines = [] }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(monitor.logLines.isEmpty)
+                    MonitorLogsToolbar(monitor: monitor, lang: lang)
                 }
             }
             .padding(.horizontal, 14)
@@ -74,13 +62,14 @@ struct MonitorPane: View {
             Group {
                 switch segment {
                 case .connections:
-                    connectionsList
+                    MonitorConnectionsList(monitor: monitor, coreAlive: coreAlive, lang: lang)
                 case .logs:
-                    logsList
+                    MonitorLogsList(monitor: monitor, coreAlive: coreAlive, lang: lang)
                 }
             }
             .frame(maxHeight: .infinity)
         }
+        .transaction { $0.animation = nil }
     }
 
     private var monitorSegmentBar: some View {
@@ -88,7 +77,7 @@ struct MonitorPane: View {
             ForEach(MonitorSegment.allCases) { s in
                 let selected = segment == s
                 Button {
-                    withAnimation(.easeOut(duration: 0.14)) { segment = s }
+                    segment = s
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: s.systemImage)
@@ -118,8 +107,22 @@ struct MonitorPane: View {
                 )
         }
     }
+}
 
-    private var trafficHeader: some View {
+// MARK: - Traffic header (only this redraws on 1Hz rates)
+
+private struct MonitorTrafficHeader: View {
+    @ObservedObject var panel: PanelRateStore
+    var coreAlive: Bool
+    var lang: AppLanguage
+    @Environment(\.bashxAppearance) private var appearance
+
+    private func t(_ key: String) -> String { L10n.t(key, lang) }
+    private var trafficLive: Bool { panel.isLive && coreAlive }
+    private var downTint: Color { BashXTheme.accent(for: appearance) }
+    private var upTint: Color { Color(red: 0.98, green: 0.58, blue: 0.28) }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
                 ZStack {
@@ -159,18 +162,8 @@ struct MonitorPane: View {
             }
 
             HStack(spacing: 8) {
-                monitorRateCard(
-                    title: t("mac.monitor.down"),
-                    symbol: "arrow.down.circle.fill",
-                    value: panel.downMbps,
-                    tint: downTint
-                )
-                monitorRateCard(
-                    title: t("mac.monitor.up"),
-                    symbol: "arrow.up.circle.fill",
-                    value: panel.upMbps,
-                    tint: upTint
-                )
+                monitorRateCard(title: t("mac.monitor.down"), symbol: "arrow.down.circle.fill", value: panel.downMbps, tint: downTint)
+                monitorRateCard(title: t("mac.monitor.up"), symbol: "arrow.up.circle.fill", value: panel.upMbps, tint: upTint)
             }
 
             TrafficSessionTotalsView(
@@ -190,7 +183,7 @@ struct MonitorPane: View {
                 style: .monitor,
                 lang: lang
             )
-            .frame(height: 132)
+            .frame(height: 110)
             .padding(8)
             .background {
                 RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
@@ -202,17 +195,6 @@ struct MonitorPane: View {
             }
         }
         .padding(12)
-        .background {
-            LinearGradient(
-                colors: [
-                    downTint.opacity(appearance == .dark ? 0.10 : 0.06),
-                    upTint.opacity(appearance == .dark ? 0.05 : 0.03),
-                    Color.clear,
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
         .transaction { $0.animation = nil }
     }
 
@@ -222,7 +204,6 @@ struct MonitorPane: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(tint)
                 .symbolRenderingMode(.hierarchical)
-
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(PanelMetrics.micro)
@@ -244,160 +225,187 @@ struct MonitorPane: View {
         .background {
             RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
-                .overlay(
-                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
-                        .strokeBorder(tint.opacity(0.22), lineWidth: 0.6)
-                )
         }
     }
+}
 
-    private var connectionsList: some View {
+private struct MonitorConnectionsToolbar: View {
+    let monitor: TrafficMonitor
+    var coreAlive: Bool
+    var lang: AppLanguage
+    var onCloseAll: () -> Void
+    @Environment(\.bashxAppearance) private var appearance
+    @State private var count = 0
+    @State private var empty = true
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(L10n.t("mac.monitor.count", lang).replacingOccurrences(of: "%@", with: "\(count)"))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(BashXTheme.secondaryFill(for: appearance))
+                )
+            Button(L10n.t("mac.monitor.clearConn", lang)) { onCloseAll() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!coreAlive || empty)
+        }
+        .onAppear {
+            count = monitor.connectionCount
+            empty = monitor.connections.isEmpty
+        }
+        .onReceive(monitor.$connectionCount) { count = $0 }
+        .onReceive(monitor.$connections) { empty = $0.isEmpty }
+    }
+}
+
+private struct MonitorLogsToolbar: View {
+    let monitor: TrafficMonitor
+    var lang: AppLanguage
+    @State private var empty = true
+
+    var body: some View {
+        Button(L10n.t("mac.monitor.clearLogs", lang)) { monitor.logLines = [] }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(empty)
+            .onAppear { empty = monitor.logLines.isEmpty }
+            .onReceive(monitor.$logLines) { empty = $0.isEmpty }
+    }
+}
+
+private struct MonitorConnectionsList: View {
+    let monitor: TrafficMonitor
+    var coreAlive: Bool
+    var lang: AppLanguage
+    @Environment(\.bashxAppearance) private var appearance
+    @State private var rows: [ConnectionRow] = []
+
+    var body: some View {
         Group {
             if !coreAlive {
-                emptyState(
+                MonitorEmptyState(
                     icon: "bolt.slash.fill",
-                    title: t("mac.monitor.coreOff"),
-                    subtitle: t("mac.monitor.coreOffHint")
+                    title: L10n.t("mac.monitor.coreOff", lang),
+                    subtitle: L10n.t("mac.monitor.coreOffHint", lang)
                 )
-            } else if monitor.connections.isEmpty {
-                emptyState(
+            } else if rows.isEmpty {
+                MonitorEmptyState(
                     icon: "antenna.radiowaves.left.and.right",
-                    title: t("mac.monitor.noConn"),
-                    subtitle: t("mac.monitor.noConnHint")
+                    title: L10n.t("mac.monitor.noConn", lang),
+                    subtitle: L10n.t("mac.monitor.noConnHint", lang)
                 )
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 7) {
-                        ForEach(monitor.connections) { row in
-                            connectionCard(row)
+                    LazyVStack(spacing: 4) {
+                        ForEach(rows) { row in
+                            connectionRow(row)
                                 .contextMenu {
-                                    Button(t("mac.monitor.closeConn")) {
+                                    Button(L10n.t("mac.monitor.closeConn", lang)) {
                                         Task { await monitor.closeConnection(id: row.id) }
                                     }
                                 }
                         }
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 8)
                 }
             }
         }
+        .onAppear { rows = monitor.connections }
+        .onReceive(monitor.$connections) { rows = $0 }
+        .transaction { $0.animation = nil }
     }
 
-    private func connectionCard(_ row: ConnectionRow) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 8) {
+    private func connectionRow(_ row: ConnectionRow) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(row.host)
-                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                     .lineLimit(1)
-                Spacer(minLength: 6)
-                if !row.network.isEmpty {
-                    Text(row.network.uppercased())
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .foregroundStyle(BashXTheme.accent(for: appearance))
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(BashXTheme.accentSoft(for: appearance))
-                        )
-                }
-            }
-
-            HStack(spacing: 8) {
-                if !row.process.isEmpty {
-                    Label(row.process, systemImage: "app.fill")
-                        .font(PanelMetrics.caption)
-                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                HStack(spacing: 6) {
+                    if !row.process.isEmpty {
+                        Text(row.process)
+                            .lineLimit(1)
+                    }
+                    Text(row.chain)
                         .lineLimit(1)
+                        .foregroundStyle(BashXTheme.accent(for: appearance))
                 }
-                Text(row.chain)
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                Text("↓\(ByteFormat.size(row.download))  ↑\(ByteFormat.size(row.upload))")
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
-
-            if !row.rule.isEmpty {
-                Text(row.rule)
-                    .font(PanelMetrics.micro)
-                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                    .lineLimit(1)
-            }
+            Spacer(minLength: 4)
+            Text("↓\(ByteFormat.size(row.download))  ↑\(ByteFormat.size(row.upload))")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background {
-            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
-                .fill(BashXTheme.card(for: appearance))
-                .overlay(
-                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
-                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
-                )
-        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(BashXTheme.card(for: appearance))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
+}
 
-    private var logsList: some View {
+private struct MonitorLogsList: View {
+    let monitor: TrafficMonitor
+    var coreAlive: Bool
+    var lang: AppLanguage
+    @Environment(\.bashxAppearance) private var appearance
+    @State private var lines: [String] = []
+
+    var body: some View {
         Group {
             if !coreAlive {
-                emptyState(
+                MonitorEmptyState(
                     icon: "bolt.slash.fill",
-                    title: t("mac.monitor.coreOff"),
-                    subtitle: t("mac.monitor.logsOffHint")
+                    title: L10n.t("mac.monitor.coreOff", lang),
+                    subtitle: L10n.t("mac.monitor.logsOffHint", lang)
                 )
-            } else if monitor.logLines.isEmpty {
-                emptyState(
+            } else if lines.isEmpty {
+                MonitorEmptyState(
                     icon: "text.badge.plus",
-                    title: t("mac.monitor.waitLogs"),
-                    subtitle: t("mac.monitor.waitLogsHint")
+                    title: L10n.t("mac.monitor.waitLogs", lang),
+                    subtitle: L10n.t("mac.monitor.waitLogsHint", lang)
                 )
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 3) {
-                            ForEach(Array(monitor.logLines.enumerated()), id: \.offset) { idx, line in
-                                Text(line)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(BashXTheme.primaryLabel(for: appearance).opacity(0.88))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background {
-                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .fill(idx % 2 == 0
-                                                  ? BashXTheme.card(for: appearance)
-                                                  : BashXTheme.secondaryFill(for: appearance).opacity(0.35))
-                                    }
-                                    .id(idx)
-                            }
-                        }
-                        .padding(12)
-                    }
-                    .onChange(of: monitor.logLines.count) { _ in
-                        if let last = monitor.logLines.indices.last {
-                            proxy.scrollTo(last, anchor: .bottom)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(BashXTheme.primaryLabel(for: appearance).opacity(0.88))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 3)
                         }
                     }
+                    .padding(10)
                 }
             }
         }
+        .onAppear { lines = monitor.logLines }
+        .onReceive(monitor.$logLines) { lines = $0 }
+        .transaction { $0.animation = nil }
     }
+}
 
-    private func emptyState(icon: String, title: String, subtitle: String) -> some View {
+private struct MonitorEmptyState: View {
+    @Environment(\.bashxAppearance) private var appearance
+    let icon: String
+    let title: String
+    let subtitle: String
+
+    var body: some View {
         VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(BashXTheme.accentSoft(for: appearance))
-                    .frame(width: 52, height: 52)
-                Image(systemName: icon)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-            }
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(BashXTheme.accent(for: appearance))
             Text(title)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
             Text(subtitle)

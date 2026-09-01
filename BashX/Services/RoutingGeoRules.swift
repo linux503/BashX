@@ -1,11 +1,10 @@
 import Foundation
 
-/// Geo routing fallback — Shadowrocket / Surge / Clash Verge (ACL4SSR) pattern.
+/// Geo routing fallback — Clash ACL4SSR + Shadowrocket 规则模式.
 ///
-/// Standard tail (industry top 3):
-/// 1. GEOSITE,gfw + geolocation-!cn → PROXY
-/// 2. GEOIP,CN → DIRECT
-/// 3. GEOIP,!CN or MATCH → PROXY（漏网之鱼 / 无法判断 → 代理）
+/// ACL4SSR.ini: GEOIP,CN → 直连；FINAL → 漏网之鱼（默认「节点选择」= PROXY）
+/// 小火箭: GEOIP,CN,DIRECT + FINAL（iOS 用 DIRECT，避免坏节点拖死整机）
+/// 两家都不用 GEOIP,!CN（会把指纹浏览器 S5 / 游戏 DC 等境外 IP 再套一层代理）
 enum RoutingGeoRules {
     /// Mac: full GEOSITE + GEOIP (needs geoip.metadb + geosite.dat in mihomo home).
     static let macWithGeoDB: [String] = [
@@ -20,19 +19,18 @@ enum RoutingGeoRules {
         "GEOSITE,cloudflare,PROXY",
         "GEOIP,PRIVATE,DIRECT,no-resolve",
         "GEOIP,CN,DIRECT,no-resolve",
-        "GEOIP,!CN,PROXY,no-resolve",
     ]
 
-    /// Mac without geo DB yet — specific foreign TLDs + MATCH,PROXY.
+    /// Mac without geo DB yet — foreign TLD catch-all; unmatched IP → PROXY.
     static let macLite: [String] = foreignTLDProxy + [
         "MATCH,PROXY",
     ]
 
-    /// iOS NE: no geo DB — foreign TLD catch-all + MATCH,PROXY (ACL4SSR / Clash Verge).
-    /// Never MATCH,DIRECT: with fake-ip, unknown hosts would blackhole when DIRECT path flaps.
+    /// iOS NE: no geo DB — foreign TLD catch-all; unmatched → DIRECT (user IP panels / LAN).
+    /// Domain PROXY rules above still cover Google/TG/GFW-style lists.
     static let iosLite: [String] = foreignTLDProxy + [
         "DOMAIN-SUFFIX,bank,DIRECT",
-        "MATCH,PROXY",
+        "MATCH,DIRECT",
     ]
 
     /// Foreign TLD catch-all when GEOSITE,tld-!cn unavailable.
@@ -132,7 +130,8 @@ enum RoutingGeoRules {
         }
         if u.hasPrefix("GEOIP,") {
             let code = geoipCode(u) ?? ""
-            if macGeoCodes.contains(code) { return true }
+            // Drop GEOIP,!CN from user/smart lists — ACL4SSR / 小火箭都不写这条.
+            if code == "!CN" || macGeoCodes.contains(code) { return true }
         }
         // Skip foreign TLD lines from smart rules — covered by tail or proxyFirst.
         // Keep explicit .tv — must not rely on GEOSITE,tld-!cn alone.
@@ -155,7 +154,7 @@ enum RoutingGeoRules {
     ]
 
     private static let macGeoCodes: Set<String> = [
-        "PRIVATE", "CN", "!CN",
+        "PRIVATE", "CN",
     ]
 
     private static let foreignTLDS: Set<String> = {

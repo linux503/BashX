@@ -73,6 +73,15 @@ final class IOSAppState: ObservableObject {
             Task { await vpn.syncOnDemandPreference(enabled: false) }
         }
         writeConfig()
+        Task { [weak self] in
+            try? await GfwListRules.ensurePresent { msg in
+                Task { @MainActor in self?.statusText = msg }
+            }
+            try? await ShadowrocketForeverRules.ensurePresent { msg in
+                Task { @MainActor in self?.statusText = msg }
+            }
+            await MainActor.run { self?.writeConfig() }
+        }
         UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
             .set(settings.iosTelegramPushEnabled, forKey: AppConstants.iosTelegramPushKey)
         UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
@@ -652,27 +661,52 @@ final class IOSAppState: ObservableObject {
             isTesting = false
             statusText = L10n.t("status.tested")
         }
-        let snapshot = nodes
-        let results = await tester.testAll(
-            nodes: snapshot,
-            timeoutMs: settings.testTimeoutMs,
-            concurrency: settings.concurrency,
-            controller: vpn.status == .connected ? AppConstants.externalController : nil,
-            secret: settings.secret,
-            testURL: settings.testURL
-        ) { [weak self] name, delay in
-            guard let self else { return }
-            if let i = self.nodes.firstIndex(where: { $0.name == name }) {
-                self.nodes[i].delayMs = delay
-                self.nodes[i].testedAt = Date()
-                self.settings.nodeDelayCache[self.nodes[i].delayCacheKey] = delay
+        let snapshot = nodes.filter { ClashConfigParser.isSpeedTestable($0) }
+        guard !snapshot.isEmpty else { return }
+
+        let timeoutMs = max(settings.testTimeoutMs, 3000)
+        let workers = min(max(settings.concurrency, 1), 6)
+        let testURL = settings.testURL.isEmpty ? "http://www.gstatic.com/generate_204" : settings.testURL
+
+        // VPN up → real URLTest through each node inside NE (Clash Verge / Stash).
+        // VPN down → TCP fallback only (host reachability, not tunnel quality).
+        if let viaTunnel = await vpn.testNodeDelays(
+            names: snapshot.map(\.name),
+            testURL: testURL,
+            timeoutMs: timeoutMs,
+            concurrency: workers
+        ), !viaTunnel.isEmpty {
+            for name in snapshot.map(\.name) {
+                let delay = viaTunnel[name] ?? -1
+                if let i = nodes.firstIndex(where: { $0.name == name }) {
+                    nodes[i].delayMs = delay
+                    nodes[i].testedAt = Date()
+                    settings.nodeDelayCache[nodes[i].delayCacheKey] = delay
+                }
+                testedCount += 1
             }
-            self.testedCount += 1
-        }
-        for r in results {
-            if let i = nodes.firstIndex(where: { $0.name == r.name }) {
-                nodes[i].delayMs = r.delayMs
-                settings.nodeDelayCache[nodes[i].delayCacheKey] = r.delayMs
+        } else {
+            let results = await tester.testAll(
+                nodes: snapshot,
+                timeoutMs: timeoutMs,
+                concurrency: workers,
+                controller: nil,
+                secret: settings.secret,
+                testURL: testURL
+            ) { [weak self] name, delay in
+                guard let self else { return }
+                if let i = self.nodes.firstIndex(where: { $0.name == name }) {
+                    self.nodes[i].delayMs = delay
+                    self.nodes[i].testedAt = Date()
+                    self.settings.nodeDelayCache[self.nodes[i].delayCacheKey] = delay
+                }
+                self.testedCount += 1
+            }
+            for r in results {
+                if let i = nodes.firstIndex(where: { $0.name == r.name }) {
+                    nodes[i].delayMs = r.delayMs
+                    settings.nodeDelayCache[nodes[i].delayCacheKey] = r.delayMs
+                }
             }
         }
         persist()

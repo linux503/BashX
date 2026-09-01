@@ -2,9 +2,13 @@ import AppKit
 import SwiftUI
 
 /// Native menu-bar dropdown (ClashX-style).
-/// Labels use a frozen snapshot to avoid submenu flash.
+///
+/// Critical: do **not** `@ObservedObject` AppState here. Any `@Published` churn
+/// (statusText / health / chromeRevision) remounts NSMenu → endless flash.
+/// Labels come from a frozen snapshot refreshed only when the menu is closed
+/// or the user taps a control.
 struct MenuBarView: View {
-    @ObservedObject var state: AppState
+    let state: AppState
     @State private var snap = MenuBarSnapshot.empty
     @State private var menuIsOpen = false
     @State private var pendingSnapRefresh = false
@@ -13,6 +17,7 @@ struct MenuBarView: View {
     var body: some View {
         MenuBarFrozenContent(snap: snap, state: state, onRefresh: { refreshSnap(reason: .userAction) })
             .equatable()
+            .transaction { $0.animation = nil }
             .onAppear {
                 refreshSnap(reason: .appear)
                 if trackingID == nil {
@@ -28,24 +33,6 @@ struct MenuBarView: View {
                     self.trackingID = nil
                 }
             }
-            .onReceive(state.$chromeRevision) { _ in
-                if menuIsOpen {
-                    applyLiveToggleFields()
-                } else {
-                    refreshSnap(reason: .chrome)
-                }
-            }
-            .onReceive(state.$launchAtLoginOn) { on in
-                // Keep menu checkmark in sync when panel/settings toggle login item.
-                guard snap.launchAtLoginEnabled != on else { return }
-                var next = snap
-                next.launchAtLoginEnabled = on
-                snap = next
-            }
-            .onReceive(state.$subscriptionsRevision) { _ in
-                guard !menuIsOpen else { return }
-                refreshSnap(reason: .chrome)
-            }
     }
 
     private enum RefreshReason {
@@ -53,33 +40,33 @@ struct MenuBarView: View {
     }
 
     private func handleMenuPresent() {
+        // Do not touch `snap` here — remounting NSMenu mid-open is the flash.
         menuIsOpen = true
-        refreshSnap(reason: .present)
     }
 
     private func handleMenuDismiss() {
         menuIsOpen = false
-        if pendingSnapRefresh {
-            pendingSnapRefresh = false
-            refreshSnap(reason: .chrome)
-        }
+        pendingSnapRefresh = false
+        refreshSnap(reason: .chrome)
     }
 
     private func refreshSnap(reason: RefreshReason) {
-        state.refreshLaunchAtLogin()
-
-        // While the menu is opening/open: never rebuild the full snap (NSMenu remount = flash).
-        if reason == .present {
-            applyLiveToggleFields()
-            return
-        }
-
+        // While open: never rebuild the menu. Queue a refresh for after dismiss.
+        // Patch toggle rows for the control the user just tapped (checkmark sync).
         if menuIsOpen {
-            applyLiveToggleFields()
-            if reason != .userAction {
+            if reason == .userAction {
+                applyLiveToggleFields()
+            } else {
                 pendingSnapRefresh = true
             }
             return
+        }
+
+        if reason == .appear || reason == .chrome {
+            let on = LaunchAtLogin.isEnabled
+            if state.launchAtLoginOn != on {
+                state.refreshLaunchAtLogin()
+            }
         }
 
         let next = MenuBarSnapshot.capture(from: state)
@@ -88,7 +75,7 @@ struct MenuBarView: View {
         }
     }
 
-    /// While the menu is open, only refresh toggle rows from live state — no full snap rebuild.
+    /// Patch toggle rows only — never replace menuNodes / subscriptions while open.
     private func applyLiveToggleFields() {
         var next = snap
         next.launchAtLoginEnabled = state.launchAtLoginOn
@@ -99,6 +86,20 @@ struct MenuBarView: View {
         next.videoAdBlockEnabled = state.settings.videoAdBlockEnabled
         next.autoSpeedTestEnabled = state.settings.autoSpeedTestEnabled
         next.autoSelectFastest = state.settings.autoSelectFastest
+        next.proxyMode = state.settings.proxyMode
+        next.proxyModeTitle = state.settings.proxyMode.title(lang: next.lang)
+        next.hubMode = state.settings.proxyHubMode
+        next.selectedNodeName = state.settings.selectedNodeName
+        next.runtimeOutboundName = state.runtimeOutboundName
+        next.selectedHint = MenuBarSnapshot.lineHint(
+            hubMode: next.hubMode,
+            selected: next.selectedNodeName,
+            runtime: next.runtimeOutboundName,
+            lang: next.lang
+        )
+        next.isTesting = state.isTesting
+        next.isBusy = state.isBusy
+        next.status = MenuBarSnapshot.menuCoreStatusPublic(state: state, lang: next.lang)
         if next != snap {
             snap = next
         }
@@ -135,16 +136,21 @@ private struct MenuBarFrozenContent: View, Equatable {
         Divider()
 
         Menu(t("mac.menu.proxyMode").replacingOccurrences(of: "%@", with: snap.proxyModeTitle)) {
-            ForEach(ProxyMode.allCases) { mode in
-                Button {
+            Picker("", selection: Binding(
+                get: { snap.proxyMode },
+                set: { mode in
                     Task {
                         await state.setProxyMode(mode)
                         onRefresh()
                     }
-                } label: {
-                    menuCheckRow(mode.title(lang: snap.lang), on: snap.proxyMode == mode)
                 }
+            )) {
+                Text(t("mac.menu.modeRule")).tag(ProxyMode.rule)
+                Text(t("mac.menu.modeGlobal")).tag(ProxyMode.global)
+                Text(t("mac.menu.modeDirect")).tag(ProxyMode.direct)
             }
+            .labelsHidden()
+            .pickerStyle(.inline)
         }
 
         nodePickerSection
@@ -251,25 +257,59 @@ private struct MenuBarFrozenContent: View, Equatable {
             Text(t("mac.menu.noNodes"))
                 .foregroundStyle(.secondary)
         } else {
-            Menu(
-                t("mac.menu.nodes")
-                    .replacingOccurrences(of: "%1", with: snap.selectedHint)
-                    .replacingOccurrences(of: "%2", with: "\(snap.menuNodeLimit)")
-            ) {
-                ForEach(snap.menuNodes) { node in
-                    Button {
-                        Task { await state.selectNode(node.name) }
-                    } label: {
-                        menuCheckRow(
-                            "\(snap.shortName(node.name, 18))  \(node.delayText(lang: snap.lang))",
-                            on: node.name == snap.selectedNodeName
-                        )
+            Menu(t("mac.menu.line").replacingOccurrences(of: "%@", with: snap.selectedHint)) {
+                if let runtime = snap.runtimeOutboundName, !runtime.isEmpty, snap.hubMode != .manual {
+                    Text(t("mac.menu.currentExit").replacingOccurrences(of: "%@", with: snap.shortName(runtime, 22)))
+                        .foregroundStyle(.secondary)
+                    Divider()
+                }
+
+                Text(t("mac.menu.lineAuto"))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { snap.hubMode == .manual ? "" : snap.hubMode.rawValue },
+                    set: { raw in
+                        guard let mode = ProxyHubMode(rawValue: raw), mode != .manual else { return }
+                        Task {
+                            await state.setProxyHubMode(mode)
+                            onRefresh()
+                        }
+                    }
+                )) {
+                    ForEach([ProxyHubMode.smart, .loadBalance, .failover], id: \.self) { mode in
+                        Text("\(mode.title(lang: snap.lang))  \(mode.subtitle(lang: snap.lang))")
+                            .tag(mode.rawValue)
                     }
                 }
+                .labelsHidden()
+                .pickerStyle(.inline)
+
+                Divider()
+
+                Text(t("mac.menu.lineManual"))
+                    .foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { snap.hubMode == .manual ? (snap.selectedNodeName ?? "") : "" },
+                    set: { name in
+                        guard !name.isEmpty else { return }
+                        Task {
+                            await state.selectNode(name)
+                            onRefresh()
+                        }
+                    }
+                )) {
+                    ForEach(snap.menuNodes) { node in
+                        Text("\(snap.shortName(node.name, 22))  \(node.delayText(lang: snap.lang))")
+                            .tag(node.name)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.inline)
+
                 if snap.totalNodeCount > snap.menuNodes.count {
                     Divider()
                     Button(t("mac.menu.allNodes")) {
-                        PanelPresenter.shared.open(state: state)
+                        PanelPresenter.shared.open(state: state, intent: .groups)
                     }
                 }
             }
@@ -376,17 +416,9 @@ private struct MenuBarFrozenContent: View, Equatable {
         }
         Task { await state.addSubscriptionAndFetch(name: "", url: raw) }
     }
-
-    private func menuCheckRow(_ title: String, on: Bool) -> some View {
-        HStack {
-            Text(title)
-            Spacer(minLength: 12)
-            if on {
-                Image(systemName: "checkmark")
-            }
-        }
-    }
 }
+
+// MARK: - Snapshot
 
 private struct MenuBarSnapshot: Equatable {
     var lang: AppLanguage
@@ -396,6 +428,7 @@ private struct MenuBarSnapshot: Equatable {
     var isTesting: Bool
     var proxyMode: ProxyMode
     var proxyModeTitle: String
+    var hubMode: ProxyHubMode
     var systemProxyOn: Bool
     var tunEnabled: Bool
     var videoAdBlockEnabled: Bool
@@ -423,6 +456,7 @@ private struct MenuBarSnapshot: Equatable {
         isTesting: false,
         proxyMode: .rule,
         proxyModeTitle: ProxyMode.rule.title,
+        hubMode: .smart,
         systemProxyOn: false,
         tunEnabled: true,
         videoAdBlockEnabled: false,
@@ -442,6 +476,11 @@ private struct MenuBarSnapshot: Equatable {
         subscriptionMenuTitle: "Subscriptions",
         selectedHint: ""
     )
+
+    @MainActor
+    static func menuCoreStatusPublic(state: AppState, lang: AppLanguage) -> String {
+        menuCoreStatus(state: state, lang: lang)
+    }
 
     @MainActor
     private static func menuCoreStatus(state: AppState, lang: AppLanguage) -> String {
@@ -465,15 +504,14 @@ private struct MenuBarSnapshot: Equatable {
         let subTitle: String = {
             if subs.isEmpty { return L10n.t("mac.menu.subs", lang) }
             if enabledCount == 0 { return L10n.t("mac.menu.subsDisabled", lang) }
-            return L10n.t("mac.menu.subsEnabled", lang).replacingOccurrences(of: "%@", with: "\(enabledCount)")
+            return L10n.t("mac.menu.subsEnabled", lang)
+                .replacingOccurrences(of: "%@", with: "\(enabledCount)")
         }()
-        let hint: String = {
-            if let runtime = state.runtimeOutboundName, !runtime.isEmpty {
-                return " · \(shortName(runtime, 10))"
-            }
-            guard let name = state.settings.selectedNodeName else { return "" }
-            return " · \(shortName(name, 10))"
-        }()
+        let limit = min(500, max(5, state.settings.menuNodeLimit))
+        let menuNodes = Array(state.menuNodes.prefix(limit))
+        let hub = state.settings.proxyHubMode
+        let selected = state.settings.selectedNodeName
+        let runtime = state.runtimeOutboundName
         return MenuBarSnapshot(
             lang: lang,
             status: menuCoreStatus(state: state, lang: lang),
@@ -482,16 +520,17 @@ private struct MenuBarSnapshot: Equatable {
             isTesting: state.isTesting,
             proxyMode: state.settings.proxyMode,
             proxyModeTitle: state.settings.proxyMode.title(lang: lang),
+            hubMode: hub,
             systemProxyOn: state.systemProxyOn,
             tunEnabled: state.settings.tunEnabled,
             videoAdBlockEnabled: state.settings.videoAdBlockEnabled,
             closeConnectionsOnSwitch: state.settings.closeConnectionsOnSwitch,
             subscriptions: subs,
-            menuNodes: state.menuNodes,
-            menuNodeLimit: min(500, max(5, state.settings.menuNodeLimit)),
+            menuNodes: menuNodes,
+            menuNodeLimit: limit,
             totalNodeCount: state.nodes.count,
-            selectedNodeName: state.settings.selectedNodeName,
-            runtimeOutboundName: state.runtimeOutboundName,
+            selectedNodeName: selected,
+            runtimeOutboundName: runtime,
             launchAtLoginEnabled: state.launchAtLoginOn,
             showMenuBarTraffic: state.settings.showMenuBarTraffic,
             autoSpeedTestEnabled: state.settings.autoSpeedTestEnabled,
@@ -499,19 +538,33 @@ private struct MenuBarSnapshot: Equatable {
             logoStyle: state.settings.logoStyle,
             logoStyleTitle: state.settings.logoStyle.title,
             subscriptionMenuTitle: subTitle,
-            selectedHint: hint
+            selectedHint: lineHint(hubMode: hub, selected: selected, runtime: runtime, lang: lang)
         )
     }
 
-    func shortName(_ name: String, _ max: Int) -> String {
-        Self.shortName(name, max)
+    static func lineHint(
+        hubMode: ProxyHubMode,
+        selected: String?,
+        runtime: String?,
+        lang: AppLanguage
+    ) -> String {
+        if let runtime, !runtime.isEmpty {
+            return " · \(shortNameStatic(runtime, 10))"
+        }
+        if hubMode != .manual {
+            return " · \(hubMode.title(lang: lang))"
+        }
+        guard let selected, !selected.isEmpty else { return "" }
+        return " · \(shortNameStatic(selected, 10))"
     }
 
-    private static func shortName(_ name: String, _ max: Int) -> String {
+    func shortName(_ name: String, _ max: Int) -> String {
+        Self.shortNameStatic(name, max)
+    }
+
+    static func shortNameStatic(_ name: String, _ max: Int) -> String {
         guard name.count > max else { return name }
-        return String(name.prefix(max - 1)) + "…"
+        let idx = name.index(name.startIndex, offsetBy: max - 1)
+        return String(name[..<idx]) + "…"
     }
 }
-
-
-// MARK: - Snapshot

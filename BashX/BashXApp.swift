@@ -25,17 +25,21 @@ final class TrafficRoot {
 
     /// Idempotent — safe to call from launch, syncTraffic, and label onAppear.
     func attachIfNeeded(state: AppState) {
+        let isInitialAttach = !didAttach
         if !didAttach {
             didAttach = true
             menuRates.onRatesUpdated = { [weak chrome] in chrome?.refresh(force: false) }
             chrome.bind(rates: menuRates, state: state)
         }
-        chrome.refresh(force: true)
+        // `attachIfNeeded` is also called by the watchdog.  Forcing a bitmap
+        // render on every watchdog pass keeps the main thread busy even when
+        // neither the state nor the traffic label changed.
+        chrome.refresh(force: isInitialAttach)
     }
 
     func startWatchdog(sync: @escaping () -> Void) {
         watchdog?.invalidate()
-        watchdog = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { _ in
+        watchdog = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
             Task { @MainActor in sync() }
         }
     }
@@ -81,7 +85,11 @@ final class MenuBarChrome: ObservableObject {
             .store(in: &cancellables)
         state?.$chromeRevision
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.refresh(force: false) }
+            .sink { [weak self] _ in
+                // Ignore chrome bumps while dropdown is open (prevents icon+menu flash).
+                guard let self, !self.menuOpen else { return }
+                self.refresh(force: false)
+            }
             .store(in: &cancellables)
         state?.$coreRunning
             .receive(on: RunLoop.main)
@@ -101,7 +109,8 @@ final class MenuBarChrome: ObservableObject {
             self?.refresh(force: false)
         }
         trafficRefreshWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+        // Status-item bitmap swaps look like "menu flashing". Keep ≤1 redraw / 2.5s.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
     }
 
     func setMenuOpen(_ open: Bool) {
@@ -315,9 +324,8 @@ private struct MenuBarExtraContent: View, Equatable {
                     )
                 }
                 appDelegate.bind(state, trafficRoot: nil, syncTraffic: syncTraffic)
-                state.refreshLaunchAtLogin()
-                syncTraffic()
-                Task { _ = await state.ensureCoreRunning() }
+                // Do NOT ensureCoreRunning / syncTraffic / refreshLaunchAtLogin here —
+                // those publish AppState and remount this NSMenu (endless flash).
             }
             .onDisappear {
                 if let trackingID {

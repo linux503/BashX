@@ -2,7 +2,7 @@ import Foundation
 
 enum ChinaSmartRules {
     /// Bump when bundled rule set changes so existing installs auto-upgrade.
-    static let version = 34
+    static let version = 52
 
     /// Published rules list (also shipped at Resources/rules/bashx-smart-rules.txt).
     static let rules: [String] = loadBundledRules()
@@ -48,8 +48,7 @@ enum ChinaSmartRules {
         "GEOSITE,gfw,PROXY",
         "GEOSITE,geolocation-!cn,PROXY",
         "GEOIP,CN,DIRECT,no-resolve",
-        "GEOIP,!CN,PROXY,no-resolve",
-        "MATCH,PROXY"
+        "MATCH,PROXY",
     ]
 
     static func looksLikeLegacy(_ rules: [String]) -> Bool {
@@ -95,8 +94,6 @@ enum ChinaSmartRules {
         // v20: Cursor Electron helpers + CDN/VM must stick to CURSOR (not PROXY/AUTO thrash)
         if !rules.contains(where: { $0.contains("Cursor Helper") }) { return true }
         if !rules.contains(where: { $0.contains("cursor-cdn.com") }) { return true }
-        // v22: GEOIP,!CN + centralized geo tail (Shadowrocket/Surge/Clash Verge)
-        if !rules.contains(where: { $0.uppercased().hasPrefix("GEOIP,!CN,") }) { return true }
         // v23: Shadowrocket DEST-PORT → mihomo DST-PORT
         if rules.contains(where: { $0.contains("DEST-PORT,") }) { return true }
         // v24: .tv PROXY + drop broad .tv QUIC REJECT
@@ -127,6 +124,52 @@ enum ChinaSmartRules {
         // v31: Asia-first APNS + APNs IPv6 CIDRs (avoid US PROXY pin / Happy-Eyeballs stall)
         if !rules.contains(where: { $0.contains("2620:149:a44::/48,APNS") || $0.contains("IP-CIDR6,2620:149:a44::/48,APNS") }) { return true }
         if (storedVersion ?? 0) < 31 { return true }
+        // v35: AdsPower / SunBrowser must DIRECT (own proxy stack + CN CDN for app.adspower.net)
+        if !rules.contains(where: { $0.contains("adspower.net,DIRECT") || $0.contains("AdsPower Global,DIRECT") }) { return true }
+        if (storedVersion ?? 0) < 35 { return true }
+        // v36 was MATCH,DIRECT; v46 restored MATCH,PROXY + GEOIP,!CN (Clash Verge).
+        // Do not treat those as stale — they are required on Mac TUN.
+        if (storedVersion ?? 0) < 36 { return true }
+        // v37: Binance sticky PROXY (trading WS)
+        if !rules.contains(where: { $0.contains("binance.com,PROXY") }) { return true }
+        if (storedVersion ?? 0) < 37 { return true }
+        // v38: Huobi / HTX sticky PROXY (trading WS)
+        if !rules.contains(where: { $0.contains("htx.com,PROXY") || $0.contains("huobi.com,PROXY") }) { return true }
+        if (storedVersion ?? 0) < 38 { return true }
+        // v39: Binance CDN / vision / nftstatic sticky PROXY
+        if !rules.contains(where: { $0.contains("binance.vision,PROXY") || $0.contains("nftstatic.com,PROXY") || $0.contains("ficus.cc,PROXY") }) { return true }
+        if (storedVersion ?? 0) < 39 { return true }
+        // v40–v43: historical TikTok domain / group migrations (skip if already past)
+        if (storedVersion ?? 0) < 43 { return true }
+        // v44: 大陆抖音 snssdk.com 必须 DIRECT；国际 TikTok 用 isnssdk / tiktok*
+        if rules.contains(where: { $0.contains("snssdk.com,TIKTOK") || $0.contains("snssdk.com,PROXY") }) { return true }
+        if !rules.contains(where: { $0.contains("snssdk.com,DIRECT") }) { return true }
+        if !rules.contains(where: { $0.contains("isnssdk.com,TIKTOK") || $0.contains("tiktok.com,TIKTOK") }) { return true }
+        if (storedVersion ?? 0) < 44 { return true }
+        // v45 historical; v46 Mac MATCH,PROXY + GEOIP,!CN
+        if (storedVersion ?? 0) < 46 { return true }
+        // v47 historical process-DIRECT for Ads — superseded by v49 domain-only
+        if (storedVersion ?? 0) < 47 { return true }
+        // v48: IPFoxy purchase / gate must PROXY (Aliyun HK IP often GEOIP,CN → region blocked)
+        if !rules.contains(where: { $0.contains("ipfoxy.com,PROXY") }) { return true }
+        if (storedVersion ?? 0) < 48 { return true }
+        // v49: drop AdsPower/SunBrowser process DIRECT (blocks IPFoxy S5 chain)
+        if rules.contains(where: {
+            let u = $0.uppercased()
+            let isProc = u.hasPrefix("PROCESS-NAME,") || u.hasPrefix("PROCESS-PATH,")
+                || u.hasPrefix("PROCESS-NAME-REGEX,") || u.hasPrefix("PROCESS-PATH-REGEX,")
+            return isProc && (u.contains("ADSPOWER") || u.contains("SUNBROWSER"))
+        }) { return true }
+        if !rules.contains(where: { $0.contains("adspower.net,") }) { return true }
+        if (storedVersion ?? 0) < 49 { return true }
+        // v50: AdsPower control-plane must PROXY (ip-scan DIRECT → false「连接测试失败」)
+        if rules.contains(where: { $0.contains("adspower.net,DIRECT") }) { return true }
+        if !rules.contains(where: { $0.contains("adspower.net,PROXY") }) { return true }
+        if (storedVersion ?? 0) < 50 { return true }
+        // v51: drop GEOIP,!CN — ACL4SSR / 小火箭都不写；漏网之鱼用 MATCH
+        if rules.contains(where: { $0.uppercased().contains("GEOIP,!CN") }) { return true }
+        if (storedVersion ?? 0) < 51 { return true }
+        if (storedVersion ?? 0) < 52 { return true }
         return false
     }
 

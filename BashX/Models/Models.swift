@@ -89,6 +89,16 @@ enum ProxyHubMode: String, Codable, CaseIterable, Identifiable {
         case .manual: return "select"
         }
     }
+
+    /// PROXY/GLOBAL selector name written into mihomo.
+    var selectorName: String {
+        switch self {
+        case .smart: return "AUTO"
+        case .loadBalance: return "BALANCE"
+        case .failover: return "FALLBACK"
+        case .manual: return "AUTO"
+        }
+    }
 }
 
 /// Panel node list layout.
@@ -243,7 +253,7 @@ struct Subscription: Identifiable, Codable, Hashable {
 struct AppSettings: Codable {
     var subscriptions: [Subscription] = []
     var selectedNodeName: String?
-    var testURL: String = "https://www.gstatic.com/generate_204"
+    var testURL: String = "http://www.gstatic.com/generate_204"
     var testTimeoutMs: Int = 4000
     var concurrency: Int = 6
     var clashBinaryPath: String = ""
@@ -263,6 +273,7 @@ struct AppSettings: Codable {
     /// iOS: true = TUN 捕获全 App 流量；false = 仅 HTTP 系统代理（微信/Telegram 无效，实验用）。
     var iosTunnelCapture: Bool = true
     var tunStack: String = "mixed"
+
     /// Block video / streaming ad domains via REJECT rules.
     var videoAdBlockEnabled: Bool = true
     /// Enabled Plugin Market ids (hub.kelee.one–style rule packs).
@@ -344,7 +355,7 @@ struct AppSettings: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         subscriptions = try c.decodeIfPresent([Subscription].self, forKey: .subscriptions) ?? []
         selectedNodeName = try c.decodeIfPresent(String.self, forKey: .selectedNodeName)
-        testURL = try c.decodeIfPresent(String.self, forKey: .testURL) ?? "https://www.gstatic.com/generate_204"
+        testURL = try c.decodeIfPresent(String.self, forKey: .testURL) ?? "http://www.gstatic.com/generate_204"
         testTimeoutMs = try c.decodeIfPresent(Int.self, forKey: .testTimeoutMs) ?? 4000
         concurrency = try c.decodeIfPresent(Int.self, forKey: .concurrency) ?? 6
         clashBinaryPath = try c.decodeIfPresent(String.self, forKey: .clashBinaryPath) ?? ""

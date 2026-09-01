@@ -12,20 +12,22 @@ enum RuntimeRules {
         telegramPushEnabled: Bool = true
     ) -> [String] {
         #if os(macOS)
-        let appRules = AppRoutingRules.clashRules(from: appRouting)
+        let extraProcess = AppRoutingRules.clashRules(from: appRouting)
         #else
-        let appRules: [String] = []
+        let extraProcess: [String] = []
         #endif
         let cleanedPrepend = prepend
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty && !$0.hasPrefix("#") }
             .filter { !$0.uppercased().hasPrefix("MATCH,") }
-        let withPrepend = appRules + cleanedPrepend + base
-        let mergedAds = VideoAdBlock.merge(into: withPrepend, enabled: videoAdBlockEnabled)
+        let mergedAds = VideoAdBlock.merge(into: base, enabled: videoAdBlockEnabled)
         let merged = PluginEngine.merge(into: mergedAds, enabledIds: enabledPluginIds)
-        // Shadowrocket-aligned + GEOIP tail: 国内 DIRECT → 漏网之鱼 PROXY
-        // https://github.com/LingJingMaster/Shadowrocket-Rules
-        let built = IosRoutingRules.build(fromBase: adaptForPlatform(merged))
+        // Clash Verge prepend + Shadowrocket lists + GEOIP tail.
+        let built = IosRoutingRules.build(
+            fromBase: adaptForPlatform(merged),
+            prepend: cleanedPrepend,
+            extraProcess: extraProcess
+        )
         return applyTelegramPushRouting(built, enabled: telegramPushEnabled)
     }
 
@@ -65,7 +67,10 @@ enum RuntimeRules {
         rules.compactMap { rule in
             let trimmed = rule.trimmingCharacters(in: .whitespaces)
             let upper = trimmed.uppercased()
-            if upper.hasPrefix("PROCESS-NAME,") || upper.hasPrefix("PROCESS-PATH,") { return nil }
+            if upper.hasPrefix("PROCESS-NAME,") || upper.hasPrefix("PROCESS-PATH,")
+                || upper.hasPrefix("PROCESS-NAME-REGEX,") || upper.hasPrefix("PROCESS-PATH-REGEX,") {
+                return nil
+            }
             if upper.hasPrefix("GEOSITE,") { return nil }
             if upper.hasPrefix("GEOIP,") { return nil }
             return rule

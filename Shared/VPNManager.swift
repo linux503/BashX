@@ -956,6 +956,54 @@ final class VPNManager: ObservableObject {
         return await WebsiteProbe.probeAllViaVPN(targets: targets, timeout: timeout)
     }
 
+    /// Clash Verge-style node latency: URLTest each leaf inside the NE mihomo core.
+    /// Returns name → delayMs (-1 = timeout / unreachable). Nil when VPN is not connected.
+    func testNodeDelays(
+        names: [String],
+        testURL: String,
+        timeoutMs: Int,
+        concurrency: Int
+    ) async -> [String: Int]? {
+        guard status == .connected,
+              !names.isEmpty,
+              let session = manager?.connection as? NETunnelProviderSession else {
+            return nil
+        }
+        let payload: [String: Any] = [
+            "action": "test_delays",
+            "names": names,
+            "url": testURL,
+            "timeout_ms": timeoutMs,
+            "concurrency": concurrency,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+        let response: Data? = await withCheckedContinuation { cont in
+            do {
+                try session.sendProviderMessage(data) { response in
+                    cont.resume(returning: response)
+                }
+            } catch {
+                cont.resume(returning: nil)
+            }
+        }
+        guard let response,
+              let json = try? JSONSerialization.jsonObject(with: response) as? [String: Any],
+              let rows = json["results"] as? [[String: Any]] else {
+            return nil
+        }
+        var out: [String: Int] = [:]
+        for row in rows {
+            guard let name = row["name"] as? String else { continue }
+            let delay: Int = {
+                if let v = row["delay"] as? Int { return v }
+                if let v = row["delay"] as? NSNumber { return v.intValue }
+                return -1
+            }()
+            out[name] = delay
+        }
+        return out
+    }
+
     private func probeWebsitesViaTunnel(
         targets: [WebsiteProbe.Target],
         timeoutMs: Int

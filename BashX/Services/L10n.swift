@@ -112,6 +112,13 @@ enum L10n {
         "proxy.global.sub": ["zh": "全部数据包转发到同一端点", "en": "Forward all packets to one endpoint"],
         "proxy.direct.sub": ["zh": "直接转发到互联网，不经代理", "en": "Forward directly to the internet"],
         "proxy.outbound": ["zh": "出站模式", "en": "Outbound Mode"],
+        "mac.menu.modeRule": ["zh": "规则（按规则分流）", "en": "Rule (split by rules)"],
+        "mac.menu.modeGlobal": ["zh": "全局（全部走代理）", "en": "Global (everything via proxy)"],
+        "mac.menu.modeDirect": ["zh": "直连（不走代理）", "en": "Direct (no proxy)"],
+        "mac.menu.line": ["zh": "线路：%@", "en": "Line: %@"],
+        "mac.menu.lineAuto": ["zh": "自动策略", "en": "Auto policy"],
+        "mac.menu.lineManual": ["zh": "手动选节点", "en": "Pick a node"],
+        "mac.menu.currentExit": ["zh": "当前出口：%@", "en": "Now: %@"],
 
         // Appearance / nodes
         "appearance.light": ["zh": "浅色", "en": "Light"],
@@ -529,7 +536,7 @@ enum L10n {
         "mac.menu.quit": ["zh": "退出 BashX", "en": "Quit BashX"],
         "mac.menu.noNodes": ["zh": "暂无节点", "en": "No nodes"],
         "mac.menu.nodes": ["zh": "节点%1 · 最快 %2", "en": "Nodes%1 · top %2"],
-        "mac.menu.allNodes": ["zh": "全部节点…", "en": "All nodes…"],
+        "mac.menu.allNodes": ["zh": "在面板里看全部节点…", "en": "All nodes in panel…"],
         "mac.menu.subs": ["zh": "订阅", "en": "Subscriptions"],
         "mac.menu.subsNone": ["zh": "暂无订阅", "en": "No subscriptions"],
         "mac.menu.subsDisabled": ["zh": "订阅 · 未启用", "en": "Subs · none enabled"],

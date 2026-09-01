@@ -246,7 +246,6 @@ final class PanelPresenter {
         AnyView(
             BashXThemed(appearance: state.settings.appearance) {
                 MainView(state: state, monitor: monitor, rates: rates)
-                    .environmentObject(state)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         )
@@ -294,7 +293,6 @@ final class PanelPresenter {
         if intent != .none {
             state.panelIntent = intent
         }
-        IconManager.applyBundledAppIcon()
 
         let preferred = state.settings.macMinimalHome ? Self.minimalSize : Self.defaultSize
         let minSize = state.settings.macMinimalHome ? Self.minimalMinimum : Self.minimumSize
@@ -358,9 +356,12 @@ final class PanelPresenter {
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
 
-        // Add-subscription sheet is opened once from MainView.consumePanelIntent().
-
-        Task { _ = await state.ensureCoreRunning() }
+        // After the window is on-screen. Starting YAML/core on the opening frame freezes it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            guard !state.settings.macMinimalHome else { return }
+            if state.coreRunning || state.mixedPortCachedAlive { return }
+            Task { _ = await state.ensureCoreRunning() }
+        }
     }
 
     private func resolvedTraffic() -> TrafficMonitor {

@@ -389,7 +389,8 @@ class AppState(app: Application) : AndroidViewModel(app) {
                 timeoutMs = _ui.value.settings.testTimeoutMs,
                 concurrency = _ui.value.settings.concurrency,
                 controller = controller,
-                testURL = _ui.value.settings.testURL,
+                secret = _ui.value.settings.secret,
+                testURL = _ui.value.settings.testURL.ifBlank { "http://www.gstatic.com/generate_204" },
             ) { name, delay ->
                 _ui.update { st ->
                     val node = st.nodes.firstOrNull { it.name == name }

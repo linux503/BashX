@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate bashx.mark SF Symbol — BashX brand badge (Control Center)."""
+"""Regenerate bashx.mark SF Symbol — bold, large Control Center glyph."""
 import json
 import math
 import os
@@ -24,21 +24,6 @@ def capsule(cx, cy, half_len, thick, angle):
     )
 
 
-def rounded_rect(cx, cy, half, corner):
-    h, c = half, corner
-    return (
-        f"M{cx - h + c:.3f},{cy - h:.3f} "
-        f"H{cx + h - c:.3f} "
-        f"A{c:.3f},{c:.3f} 0 0 1 {cx + h:.3f},{cy - h + c:.3f} "
-        f"V{cy + h - c:.3f} "
-        f"A{c:.3f},{c:.3f} 0 0 1 {cx + h - c:.3f},{cy + h:.3f} "
-        f"H{cx - h + c:.3f} "
-        f"A{c:.3f},{c:.3f} 0 0 1 {cx - h:.3f},{cy + h - c:.3f} "
-        f"V{cy - h + c:.3f} "
-        f"A{c:.3f},{c:.3f} 0 0 1 {cx - h + c:.3f},{cy - h:.3f} Z"
-    )
-
-
 def circle(cx, cy, r):
     return (
         f"M{cx - r:.3f},{cy:.3f} "
@@ -47,29 +32,39 @@ def circle(cx, cy, r):
     )
 
 
-def mark_paths(cx=64.0, cy=64.0, scale=1.0):
+def hexagon(cx, cy, r):
+    pts = []
+    for i in range(6):
+        a = -math.pi / 2 + i * math.pi / 3
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    d = [f"M{pts[0][0]:.3f},{pts[0][1]:.3f}"]
+    for x, y in pts[1:]:
+        d.append(f"L{x:.3f},{y:.3f}")
+    d.append("Z")
+    return " ".join(d)
+
+
+def mark_paths(cx=64.0, cy=62.0, scale=1.0):
     """
-    BashX mark for Control Center — matches app icon structure:
-    rounded badge frame + bold round-cap X + center hub.
+    Two paths:
+      1) hex ring (evenodd) — bold frame, fills Control Center tile
+      2) X + hub (nonzero) — solid bars, no crescent holes
     """
     s = scale
-    half = 45.8 * s
-    corner = 13.6 * s
-    frame = 8.6 * s
-    inner_half = half - frame
-    inner_corner = max(7.2 * s, corner - frame * 0.52)
+    outer = 54.0 * s
+    ring = 8.0 * s
+    inner = outer - ring
 
-    x_len = 25.8 * s
-    x_thick = 13.8 * s
-    hub = 3.6 * s
+    x_len = 29.0 * s
+    x_thick = 17.0 * s
 
-    return " ".join([
-        rounded_rect(cx, cy, half, corner),
-        rounded_rect(cx, cy, inner_half, inner_corner),
+    frame = f"{hexagon(cx, cy, outer)} {hexagon(cx, cy, inner)}"
+    # Solid X only — no center hub (avoids odd cutouts at Control Center size)
+    mark = " ".join([
         capsule(cx, cy, x_len, x_thick, math.pi / 4),
         capsule(cx, cy, x_len, x_thick, -math.pi / 4),
-        circle(cx, cy, hub),
     ])
+    return frame, mark
 
 
 def guides(suffix, baseline, capline, left, right):
@@ -81,13 +76,16 @@ def guides(suffix, baseline, capline, left, right):
 
 
 def main():
-    scales = {"S": 0.98, "M": 1.06, "L": 1.15}
+    # Large scale so Control Center tile glyph reads big.
+    scales = {"S": 1.06, "M": 1.16, "L": 1.30}
     groups = []
     for suffix, sc in scales.items():
-        path = mark_paths(scale=sc)
+        frame, mark = mark_paths(scale=sc)
         groups.append(
             f'    <g id="Regular-{suffix}">'
-            f'<path d="{path}" fill="#000000" fill-rule="evenodd"/></g>'
+            f'<path d="{frame}" fill="#000000" fill-rule="evenodd"/>'
+            f'<path d="{mark}" fill="#000000" fill-rule="nonzero"/>'
+            f"</g>"
         )
 
     svg = f"""<?xml version="1.0" encoding="UTF-8"?>

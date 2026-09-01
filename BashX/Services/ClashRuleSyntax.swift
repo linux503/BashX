@@ -61,8 +61,97 @@ enum ClashRuleSyntax {
             }
         }
         if !hasMatch, !parseLines(text).isEmpty {
-            issues.append("建议末尾保留 MATCH,PROXY 作为兜底")
+            issues.append("建议末尾保留 MATCH,DIRECT 或 MATCH,PROXY 作为兜底")
         }
         return issues
+    }
+
+    /// Build a clash rule from a pasted IP / CIDR / domain. Returns nil if unusable.
+    static func quickRule(from raw: String, policy: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let policy = policy.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let target = policy.isEmpty ? "PROXY" : policy
+
+        // Already a full rule line
+        if let type = trimmed.split(separator: ",", maxSplits: 1).first.map({ String($0).uppercased() }),
+           knownTypes.contains(type),
+           trimmed.contains(",") {
+            return trimmed
+        }
+
+        // IPv6 CIDR or literal
+        if trimmed.contains(":") {
+            if trimmed.contains("/") {
+                return "IP-CIDR6,\(trimmed),\(target),no-resolve"
+            }
+            return "IP-CIDR6,\(trimmed)/128,\(target),no-resolve"
+        }
+
+        // IPv4 / CIDR
+        let ipv4 = #"^(\d{1,3}\.){3}\d{1,3}(/\d{1,2})?$"#
+        if trimmed.range(of: ipv4, options: .regularExpression) != nil {
+            if trimmed.contains("/") {
+                return "IP-CIDR,\(trimmed),\(target),no-resolve"
+            }
+            return "IP-CIDR,\(trimmed)/32,\(target),no-resolve"
+        }
+
+        // Domain
+        let host = trimmed
+            .replacingOccurrences(of: "https://", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "http://", with: "", options: .caseInsensitive)
+            .split(separator: "/").first
+            .map(String.init)?
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            ?? ""
+        guard !host.isEmpty, host.contains(".") else { return nil }
+        if host.hasPrefix("*.") {
+            return "DOMAIN-SUFFIX,\(String(host.dropFirst(2))),\(target)"
+        }
+        let labels = host.split(separator: ".")
+        if labels.count >= 3 {
+            return "DOMAIN-SUFFIX,\(host),\(target)"
+        }
+        return "DOMAIN-SUFFIX,\(host),\(target)"
+    }
+
+    /// First matcher wins (Clash / 小火箭). Same DOMAIN/GEOIP/PROCESS payload keeps the earlier policy.
+    /// MATCH is always last and unique.
+    static func dedupeKeepingFirst(_ rules: [String]) -> [String] {
+        var seen = Set<String>()
+        var match: String?
+        var out: [String] = []
+        out.reserveCapacity(rules.count)
+        for raw in rules {
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty, !t.hasPrefix("#") else { continue }
+            if t.uppercased().hasPrefix("MATCH,") {
+                if match == nil { match = t }
+                continue
+            }
+            let key = matcherKey(t)
+            if seen.insert(key).inserted {
+                out.append(t)
+            }
+        }
+        if let match { out.append(match) }
+        return out
+    }
+
+    /// Type + payload, ignoring policy / no-resolve so duplicates collapse.
+    static func matcherKey(_ rule: String) -> String {
+        let parts = rule.split(separator: ",", omittingEmptySubsequences: false).map {
+            String($0).trimmingCharacters(in: .whitespaces)
+        }
+        guard let type = parts.first?.uppercased(), !type.isEmpty else {
+            return rule.uppercased()
+        }
+        if type == "AND" || type == "OR" || type == "NOT" || type == "SUB-RULE" {
+            return rule.uppercased()
+        }
+        if type == "MATCH" { return "MATCH" }
+        let payload = parts.count >= 2 ? parts[1].uppercased() : ""
+        return "\(type)|\(payload)"
     }
 }

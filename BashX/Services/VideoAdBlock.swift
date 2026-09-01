@@ -31,6 +31,10 @@ enum VideoAdBlock {
             return true
         }
         guard enabled else { return cleaned }
+        if ShadowrocketForeverRules.isReady {
+            // SR-REJECT RULE-SET replaces bundled inline ad list.
+            return geositePriority + cleaned
+        }
         return geositePriority + rules + cleaned
     }
 

@@ -4,7 +4,7 @@ import AppKit
 #endif
 
 struct AppRoutingPane: View {
-    @EnvironmentObject private var state: AppState
+    let state: AppState
     @Environment(\.bashxAppearance) private var appearance
     @State private var showPicker = false
     @State private var runningApps: [AppRoutingRules.RunningApp] = []

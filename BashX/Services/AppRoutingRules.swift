@@ -81,6 +81,8 @@ enum AppRoutingRules {
               processName: "Telegram", bundleId: "ru.keepcoder.Telegram", proxyTarget: "TELEGRAM"),
         .init(category: .im, labelZh: "微信", labelEn: "WeChat",
               processName: "WeChat", bundleId: "com.tencent.xinWeChat", proxyTarget: "DIRECT"),
+        .init(category: .im, labelZh: "企业微信", labelEn: "WeCom",
+              processName: "企业微信", bundleId: "com.tencent.WeWorkMac", proxyTarget: "DIRECT"),
         .init(category: .im, labelZh: "QQ", labelEn: "QQ",
               processName: "QQ", bundleId: "com.tencent.qq", proxyTarget: "DIRECT"),
         .init(category: .im, labelZh: "Discord", labelEn: "Discord",
@@ -88,17 +90,23 @@ enum AppRoutingRules {
         .init(category: .im, labelZh: "Slack", labelEn: "Slack",
               processName: "Slack", bundleId: "com.tinyspeck.slackmacgap", proxyTarget: "PROXY"),
 
-        // Browser — Google 系走 GOOGLE 组；其余走代理
+        // Browser — 不要默认整进程劫持。Chrome/Safari 走域名规则（国内直连 / GFW 代理）。
+        // 「添加全部」会跳过下面几项，避免淘宝/微信网页被整进程送进 GOOGLE 节点。
         .init(category: .browser, labelZh: "Google Chrome", labelEn: "Google Chrome",
-              processName: "Google Chrome", bundleId: "com.google.Chrome", proxyTarget: "GOOGLE"),
+              processName: "Google Chrome", bundleId: "com.google.Chrome", proxyTarget: "PROXY"),
         .init(category: .browser, labelZh: "Safari", labelEn: "Safari",
-              processName: "Safari", bundleId: "com.apple.Safari", proxyTarget: "GOOGLE"),
+              processName: "Safari", bundleId: "com.apple.Safari", proxyTarget: "PROXY"),
         .init(category: .browser, labelZh: "Microsoft Edge", labelEn: "Microsoft Edge",
-              processName: "Microsoft Edge", bundleId: "com.microsoft.edgemac", proxyTarget: "GOOGLE"),
+              processName: "Microsoft Edge", bundleId: "com.microsoft.edgemac", proxyTarget: "PROXY"),
         .init(category: .browser, labelZh: "Firefox", labelEn: "Firefox",
               processName: "firefox", bundleId: "org.mozilla.firefox", proxyTarget: "PROXY"),
         .init(category: .browser, labelZh: "Arc", labelEn: "Arc",
               processName: "Arc", bundleId: "company.thebrowser.Browser", proxyTarget: "PROXY"),
+        // AdsPower：控制面域名直连（smart rules）；勿整进程 DIRECT，否则 IPFoxy 网关出不了境
+        .init(category: .browser, labelZh: "AdsPower", labelEn: "AdsPower",
+              processName: "AdsPower Global", bundleId: "com.adspower.global", proxyTarget: "PROXY"),
+        .init(category: .browser, labelZh: "SunBrowser", labelEn: "SunBrowser",
+              processName: "SunBrowser", bundleId: "com.adspower.SunBrowser", proxyTarget: "PROXY"),
 
         // Domestic — 国内办公/娱乐直连
         .init(category: .domestic, labelZh: "钉钉", labelEn: "DingTalk",
@@ -111,12 +119,26 @@ enum AppRoutingRules {
               processName: "NeteaseMusic", bundleId: "com.netease.163music", proxyTarget: "DIRECT"),
         .init(category: .domestic, labelZh: "腾讯会议", labelEn: "Tencent Meeting",
               processName: "TencentMeeting", bundleId: "com.tencent.meeting", proxyTarget: "DIRECT"),
+        .init(category: .domestic, labelZh: "支付宝", labelEn: "Alipay",
+              processName: "Alipay", bundleId: "com.alipay.mac.Alipay", proxyTarget: "DIRECT"),
+        .init(category: .domestic, labelZh: "QQ音乐", labelEn: "QQ Music",
+              processName: "QQMusic", bundleId: "com.tencent.QQMusicMac", proxyTarget: "DIRECT"),
+        .init(category: .domestic, labelZh: "爱奇艺", labelEn: "iQIYI",
+              processName: "iQIYI", bundleId: "com.iqiyi.player", proxyTarget: "DIRECT"),
+        .init(category: .domestic, labelZh: "百度网盘", labelEn: "Baidu Netdisk",
+              processName: "BaiduNetdisk", bundleId: "com.baidu.netdiskmac", proxyTarget: "DIRECT"),
+        .init(category: .domestic, labelZh: "ToDesk", labelEn: "ToDesk",
+              processName: "ToDesk", bundleId: "com.youqu.todesk.mac", proxyTarget: "DIRECT"),
 
         // Streaming / games — 海外服务走代理
         .init(category: .streaming, labelZh: "Spotify", labelEn: "Spotify",
               processName: "Spotify", bundleId: "com.spotify.client", proxyTarget: "PROXY"),
         .init(category: .streaming, labelZh: "Steam", labelEn: "Steam",
               processName: "steam_osx", bundleId: "com.valvesoftware.steam", proxyTarget: "PROXY"),
+        .init(category: .streaming, labelZh: "WhatsApp", labelEn: "WhatsApp",
+              processName: "WhatsApp", bundleId: "net.whatsapp.WhatsApp", proxyTarget: "PROXY"),
+        .init(category: .streaming, labelZh: "AnyDesk", labelEn: "AnyDesk",
+              processName: "AnyDesk", bundleId: "com.philandro.anydesk", proxyTarget: "DIRECT"),
         .init(category: .streaming, labelZh: "Zoom", labelEn: "Zoom",
               processName: "zoom.us", bundleId: "us.zoom.xos", proxyTarget: "PROXY"),
         .init(category: .streaming, labelZh: "OBS", labelEn: "OBS",
@@ -133,6 +155,26 @@ enum AppRoutingRules {
               processName: "Code", bundleId: "com.microsoft.VSCode", proxyTarget: "PROXY"),
     ]
 
+    /// ClashFX-style process DIRECT — always prepended on Mac TUN.
+    static var macAppBypassRules: [String] { MacAppBypassRules.all }
+
+    /// AdsPower control-plane domains only (no process hijack).
+    static var adsPowerTunBypassRules: [String] { MacAppBypassRules.adsPowerRules }
+
+    /// Presets that should auto-install as DIRECT (domestic). AdsPower excluded — needs PROXY chain.
+    static var autoDirectPresets: [CommonAppPreset] {
+        commonPresets.filter { preset in
+            preset.proxyTarget.uppercased() == "DIRECT"
+                && (preset.category == .im || preset.category == .domestic
+                    || preset.processName.caseInsensitiveCompare("AnyDesk") == .orderedSame)
+        }
+    }
+
+    /// 「添加全部」跳过普通浏览器，避免整进程劫持打掉域名分流。
+    static var bulkAddPresets: [CommonAppPreset] {
+        commonPresets.filter { $0.category != .browser }
+    }
+
     /// Extra PROCESS-NAME lines so Electron helpers share the same policy as the main app.
     static func helperProcessRules(for processName: String, target: String) -> [String] {
         let base = processName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -142,7 +184,18 @@ enum AppRoutingRules {
             // Domain routing covers Cursor cloud; do not PROCESS-NAME the whole Electron tree.
             return []
         }
-        return []
+        if base.localizedCaseInsensitiveContains("AdsPower")
+            || base.caseInsensitiveCompare("SunBrowser") == .orderedSame {
+            // Domain DIRECT for adspower.* only; S5 gates follow PROXY / GEOIP.
+            return []
+        }
+        var extras = MacAppBypassRules.electronHelperRules(for: base, target: t)
+        if base.caseInsensitiveCompare("WhatsApp") == .orderedSame {
+            let policy = t == "PROXY" ? "WHATSAPP" : t
+            extras.append("PROCESS-NAME,WAAppKitBridgeService,\(policy)")
+            extras.append("PROCESS-PATH,*WhatsApp.app/*,\(policy)")
+        }
+        return extras
     }
 
     static func presets(in category: PresetCategory) -> [CommonAppPreset] {
@@ -178,6 +231,12 @@ enum AppRoutingRules {
         for rule in rules where rule.enabled {
             let process = rule.processName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !process.isEmpty else { continue }
+            // AdsPower/SunBrowser: domain DIRECT only — process hijack breaks IPFoxy chain.
+            if process.localizedCaseInsensitiveContains("AdsPower")
+                || process.caseInsensitiveCompare("SunBrowser") == .orderedSame
+                || rule.bundleId.localizedCaseInsensitiveContains("adspower") {
+                continue
+            }
             let target = sanitizedTarget(rule.proxyTarget)
             appendUnique(&out, &seen, "PROCESS-NAME,\(escape(process)),\(target)")
             let label = rule.label.trimmingCharacters(in: .whitespacesAndNewlines)

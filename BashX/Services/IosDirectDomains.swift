@@ -73,28 +73,102 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,elemecdn.com,DIRECT",
     ]
 
-    /// TikTok（国际版）— must beat Douyin DIRECT（byteoversea / bytedance 共用会误伤）.
+    /// TikTok（国际版）— 与大陆抖音完全分开。
+    /// 抖音核心 API 用 snssdk.com → 必须 DIRECT；TikTok 用 isnssdk / sgsnssdk / tiktok* / byteoversea。
+    /// Twitch-style: 少量 QUIC kill（节点黑洞 UDP/443 会卡死 App）。
     static let tiktokPriorityRules: [String] = [
+        "AND,((DOMAIN-SUFFIX,tiktok.com),(NETWORK,UDP),(DST-PORT,443)),REJECT",
+        "AND,((DOMAIN-SUFFIX,tiktokv.com),(NETWORK,UDP),(DST-PORT,443)),REJECT",
+        "AND,((DOMAIN-SUFFIX,tiktokcdn.com),(NETWORK,UDP),(DST-PORT,443)),REJECT",
         "DOMAIN-SUFFIX,tiktok.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktok-row.net,TIKTOK",
         "DOMAIN-SUFFIX,tiktokv.com,TIKTOK",
         "DOMAIN-SUFFIX,tiktokv.us,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokv.eu,TIKTOK",
         "DOMAIN-SUFFIX,tiktokcdn.com,TIKTOK",
         "DOMAIN-SUFFIX,tiktokcdn-us.com,TIKTOK",
         "DOMAIN-SUFFIX,tiktokcdn-eu.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokcdn-in.com,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokd.net,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokd.org,TIKTOK",
+        "DOMAIN-SUFFIX,tiktokmusic.app,TIKTOK",
+        "DOMAIN-SUFFIX,tik-tokapi.com,TIKTOK",
         "DOMAIN-SUFFIX,ttlivecdn.com,TIKTOK",
         "DOMAIN-SUFFIX,ttlstatic.com,TIKTOK",
+        "DOMAIN-SUFFIX,ttcdn-us.com,TIKTOK",
+        "DOMAIN-SUFFIX,ttwebview.com,TIKTOK",
+        "DOMAIN-SUFFIX,ttwstatic.com,TIKTOK",
+        "DOMAIN-SUFFIX,ttoversea.net,TIKTOK",
+        "DOMAIN-SUFFIX,ttoverseaus.net,TIKTOK",
         "DOMAIN-SUFFIX,musical.ly,TIKTOK",
+        "DOMAIN-SUFFIX,muscdn.com,TIKTOK",
         "DOMAIN-SUFFIX,byteoversea.com,TIKTOK",
+        "DOMAIN-SUFFIX,byteoversea.net,TIKTOK",
+        "DOMAIN-SUFFIX,byteintlapi.com,TIKTOK",
+        "DOMAIN-SUFFIX,byteintl.net,TIKTOK",
+        "DOMAIN-SUFFIX,bytevcloudapi.com,TIKTOK",
+        "DOMAIN-SUFFIX,bytegecko.com,TIKTOK",
+        "DOMAIN-SUFFIX,bytegecko-i18n.com,TIKTOK",
+        "DOMAIN-SUFFIX,bytedapm.com,TIKTOK",
+        "DOMAIN-SUFFIX,byteeffecttos-g.com,TIKTOK",
+        "DOMAIN-SUFFIX,bytefcdn-oversea.com,TIKTOK",
+        "DOMAIN-SUFFIX,bytefcdn-ttpeu.com,TIKTOK",
+        "DOMAIN-SUFFIX,bytetcdn.com,TIKTOK",
+        "DOMAIN-SUFFIX,bytedanceapi.com,TIKTOK",
+        "DOMAIN-SUFFIX,worldfcdn.com,TIKTOK",
+        "DOMAIN-SUFFIX,worldfcdn2.com,TIKTOK",
         "DOMAIN-SUFFIX,ibyteimg.com,TIKTOK",
         "DOMAIN-SUFFIX,ibytedtos.com,TIKTOK",
+        "DOMAIN-SUFFIX,ipstatp.com,TIKTOK",
+        "DOMAIN-SUFFIX,sgpstatp.com,TIKTOK",
+        // 国际版 snssdk 变体 — 不含 snssdk.com（那是大陆抖音）
         "DOMAIN-SUFFIX,sgsnssdk.com,TIKTOK",
         "DOMAIN-SUFFIX,isnssdk.com,TIKTOK",
+        "DOMAIN-SUFFIX,vodupload.com,TIKTOK",
+        "DOMAIN-SUFFIX,yhgfb-static.com,TIKTOK",
+        "DOMAIN-SUFFIX,goofy.app,TIKTOK",
+        "DOMAIN-SUFFIX,wsdvs.com,TIKTOK",
         "DOMAIN-SUFFIX,capcut.com,TIKTOK",
         "DOMAIN-SUFFIX,capcutapi.com,TIKTOK",
+        "DOMAIN-SUFFIX,capcutapi.us,TIKTOK",
+        "DOMAIN-SUFFIX,capcutcdn-us.com,TIKTOK",
+        "DOMAIN-SUFFIX,capcutstatic.com,TIKTOK",
+        "DOMAIN,p16-tiktokcdn-com.akamaized.net,TIKTOK",
+        "DOMAIN,v16-tiktokcdn-com.akamaized.net,TIKTOK",
+        "DOMAIN,lf16-effectcdn.byteeffecttos-g.com,TIKTOK",
+        "DOMAIN,lf16-pkgcdn.pitaya-clientai.com,TIKTOK",
+        "DOMAIN-KEYWORD,ttcdn,TIKTOK",
+        "DOMAIN-KEYWORD,tt.byteimg,TIKTOK",
         "DOMAIN-KEYWORD,tiktok,TIKTOK",
+        "DOMAIN-KEYWORD,tiktokcdn,TIKTOK",
         "DOMAIN-KEYWORD,musical.ly,TIKTOK",
         "DOMAIN-KEYWORD,byteoversea,TIKTOK",
         "DOMAIN-KEYWORD,ttlivecdn,TIKTOK",
+        "DOMAIN-KEYWORD,isnssdk,TIKTOK",
+        "DOMAIN-KEYWORD,sgsnssdk,TIKTOK",
+        "DOMAIN-KEYWORD,bytefcdn,TIKTOK",
+        "DOMAIN-KEYWORD,worldfcdn,TIKTOK",
+    ]
+
+    /// iOS: keep TIKTOK policy (Asia group). Mac/shared callers may still remap.
+    static func tiktokRulesForPlatform(forIOS: Bool) -> [String] {
+        // Always keep TIKTOK group — collapsing to PROXY broke TikTok when user
+        // picked a US/ME leaf (TikTok geo-blocks many DC exits).
+        _ = forIOS
+        return tiktokPriorityRules
+    }
+
+    /// AnyDesk — must beat DOMAIN-SUFFIX,cn,DIRECT (*.anydesk.com.cn was swallowed).
+    /// Default DIRECT: many airport exits black-hole AnyDesk →「not connected to the server」.
+    /// User can switch to PROXY in 应用分流 if DIRECT is blocked by GFW.
+    static let anydeskPriorityRules: [String] = [
+        "PROCESS-NAME,AnyDesk,DIRECT",
+        "PROCESS-PATH,*AnyDesk.app/Contents/MacOS/*,DIRECT",
+        "DOMAIN-SUFFIX,anydesk.com,DIRECT",
+        "DOMAIN-SUFFIX,anydesk.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,net.anydesk.com,DIRECT",
+        "DOMAIN-SUFFIX,net.anydesk.com.cn,DIRECT",
+        "DOMAIN-KEYWORD,anydesk,DIRECT",
     ]
 
     /// 小红书 App — 国内直连，勿进 MATCH,PROXY.
@@ -164,10 +238,10 @@ enum IosDirectDomains {
 
     /// 抖音 / 头条 / 西瓜 — must beat MATCH,PROXY（缺 zijieapi 等会进节点→国内接口拒海外 IP）.
     /// TikTok 国际域名见 tiktokPriorityRules（须排在本列表之前）.
+    /// 大陆抖音 — 一律 DIRECT，绝不进代理（与国际 TikTok 无关）。
     static let douyinPriorityRules: [String] = [
         "DOMAIN-SUFFIX,zijieapi.com,DIRECT",
         "DOMAIN-SUFFIX,ecombdapi.com,DIRECT",
-        "DOMAIN-SUFFIX,snssdk.com,DIRECT",
         "DOMAIN-SUFFIX,amemv.com,DIRECT",
         "DOMAIN-SUFFIX,douyin.com,DIRECT",
         "DOMAIN-SUFFIX,douyincdn.com,DIRECT",
@@ -179,8 +253,9 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,byteimg.com,DIRECT",
         "DOMAIN-SUFFIX,bytescm.com,DIRECT",
         "DOMAIN-SUFFIX,byteacctimg.com,DIRECT",
-        // byteoversea / isnssdk → TikTok，勿放 DIRECT
         "DOMAIN-SUFFIX,pstatp.com,DIRECT",
+        // 大陆抖音主 API — 勿进 TIKTOK/PROXY
+        "DOMAIN-SUFFIX,snssdk.com,DIRECT",
         "DOMAIN-SUFFIX,ixigua.com,DIRECT",
         "DOMAIN-SUFFIX,toutiao.com,DIRECT",
         "DOMAIN-SUFFIX,toutiaovod.com,DIRECT",
@@ -192,10 +267,9 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,ulikecam.com,DIRECT",
         "DOMAIN-SUFFIX,faceu.mobi,DIRECT",
         "DOMAIN-KEYWORD,douyin,DIRECT",
-        "DOMAIN-KEYWORD,snssdk,DIRECT",
         "DOMAIN-KEYWORD,amemv,DIRECT",
         "DOMAIN-KEYWORD,zijieapi,DIRECT",
-        // 不用 DOMAIN-KEYWORD,bytedance — 会误伤 TikTok CDN
+        // 不用 DOMAIN-KEYWORD,snssdk — 会误伤 isnssdk / sgsnssdk（TikTok）
     ]
 
     /// Highest priority on iOS — WeChat image/voice upload uses CDN domains + bare IPs.

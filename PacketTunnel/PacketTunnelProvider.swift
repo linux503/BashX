@@ -24,6 +24,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// Require consecutive dead-core ticks before cancel — single false read caused flap loops.
     private var coreDeadStreak = 0
     private var healInFlight = false
+    /// Avoid flipping PROXY leaf every few seconds (Binance WS dies → looks like VPN reconnect).
+    private var lastHealSwitchAt: Date = .distantPast
+    private var lastHealOkAt: Date = .distantPast
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         // Keep prior session tail for diagnosing abrupt jetsam kills.
@@ -311,6 +314,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 let results = await Self.probeWebsites(rows: rows, timeoutMs: max(timeoutMs, 1000))
                 completionHandler?(try? JSONSerialization.data(withJSONObject: ["results": results]))
             }
+        case "test_delays":
+            // Clash Verge / Stash style: URLTest each leaf via mihomo /proxies/{name}/delay.
+            let timeoutMs = (message["timeout_ms"] as? NSNumber)?.intValue
+                ?? (message["timeout_ms"] as? Int)
+                ?? 5000
+            let concurrency = (message["concurrency"] as? NSNumber)?.intValue
+                ?? (message["concurrency"] as? Int)
+                ?? 4
+            let rawURL = (message["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let testURL = rawURL.isEmpty ? "http://www.gstatic.com/generate_204" : rawURL
+            let names = message["names"] as? [String] ?? []
+            Task {
+                let results = await Self.testProxyDelays(
+                    names: names,
+                    testURL: testURL,
+                    timeoutMs: max(timeoutMs, 2000),
+                    concurrency: max(1, min(concurrency, 8))
+                )
+                completionHandler?(try? JSONSerialization.data(withJSONObject: ["results": results]))
+            }
         default:
             completionHandler?(nil)
         }
@@ -387,7 +410,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func makeNetworkSettings(tunnelCapture: Bool) -> NEPacketTunnelNetworkSettings {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "254.1.1.1")
-        settings.mtu = 1400
+        settings.mtu = NSNumber(value: AppConstants.defaultMTU)
 
         if tunnelCapture {
             let ipv4 = NEIPv4Settings(addresses: [AppConstants.tunAddress], subnetMasks: [AppConstants.tunSubnetMask])
@@ -438,7 +461,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             settings.proxySettings = proxy
         }
 
-        settings.mtu = NSNumber(value: AppConstants.defaultMTU)
         return settings
     }
 
@@ -467,6 +489,53 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         return nil
     }
 
+    /// Batch URLTest through each leaf proxy (Clash Verge /delay semantics).
+    private static func testProxyDelays(
+        names: [String],
+        testURL: String,
+        timeoutMs: Int,
+        concurrency: Int
+    ) async -> [[String: Any]] {
+        guard !names.isEmpty else { return [] }
+        var out: [[String: Any]] = []
+        out.reserveCapacity(names.count)
+        let urls = [
+            testURL,
+            "http://www.gstatic.com/generate_204",
+            "http://cp.cloudflare.com/generate_204",
+        ]
+        var uniqueURLs: [String] = []
+        for u in urls where !u.isEmpty && !uniqueURLs.contains(u) {
+            uniqueURLs.append(u)
+        }
+
+        var index = 0
+        let batch = max(1, concurrency)
+        while index < names.count {
+            let slice = Array(names[index..<min(index + batch, names.count)])
+            await withTaskGroup(of: [String: Any].self) { group in
+                for name in slice {
+                    group.addTask {
+                        var delay = -1
+                        for url in uniqueURLs {
+                            let (ok, ms, _) = await mihomoDelay(proxy: name, testURL: url, timeoutMs: timeoutMs)
+                            if ok, ms > 0 {
+                                delay = ms
+                                break
+                            }
+                        }
+                        return ["name": name, "delay": delay]
+                    }
+                }
+                for await item in group {
+                    out.append(item)
+                }
+            }
+            index += batch
+        }
+        return out
+    }
+
     /// mihomo `/proxies/{group}/delay` — runs inside NE (same path as user traffic).
     private static func probeWebsites(rows: [[String: Any]], timeoutMs: Int) async -> [[String: Any]] {
         var out: [[String: Any]] = []
@@ -480,7 +549,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                         let id = row["id"] as? String ?? ""
                         let url = row["url"] as? String ?? ""
                         let fallback = row["fallback"] as? String
-                        let proxy = row["proxy"] as? String ?? "PROXY"
+                        // Always DIRECT — website chips must not consume PROXY bandwidth / path.
+                        let proxy = "DIRECT"
                         var (ok, ms, err) = await mihomoDelay(proxy: proxy, testURL: url, timeoutMs: timeoutMs)
                         if !ok, let fallback, !fallback.isEmpty {
                             (ok, ms, err) = await mihomoDelay(proxy: proxy, testURL: fallback, timeoutMs: timeoutMs)
@@ -542,22 +612,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func startNetworkMonitor() {
+        // Seed so the first path callback does not look like an interface flip.
+        lastOutboundIF = TunnelInterface.preferredOutboundInterface() ?? ""
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
             let bindIF = TunnelInterface.preferredOutboundInterface() ?? ""
             BridgeSetOutboundInterface(bindIF)
             guard let self else { return }
-            let changed = bindIF != self.lastOutboundIF
-            self.lastOutboundIF = bindIF
-            self.writeLog("path update bindIF=\(bindIF.isEmpty ? "(none)" : bindIF) changed=\(changed)")
-            // Only drop sockets when the outbound interface actually changes — Wi‑Fi
-            // flapping otherwise kills every connection and looks like a VPN drop.
-            guard changed, self.proxyStarted else { return }
-            let now = Date()
-            guard now.timeIntervalSince(self.lastPathCloseAt) > 3 else { return }
-            self.lastPathCloseAt = now
-            self.closeAllConnectionsBestEffort()
+            let previous = self.lastOutboundIF
+            let changed = !bindIF.isEmpty && !previous.isEmpty && bindIF != previous
+            if !bindIF.isEmpty { self.lastOutboundIF = bindIF }
+            self.writeLog("path update bindIF=\(bindIF.isEmpty ? "(none)" : bindIF) changed=\(changed) (no closeAll)")
+            // Intentionally do NOT DELETE /connections — that is Binance「网络线路中断」.
         }
         monitor.start(queue: pathQueue)
         pathMonitor = monitor
@@ -583,17 +650,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             self.gcTickCount += 1
             let footprint = Self.residentMemoryBytes()
             #if canImport(MihomoCore)
-            if footprint > 14 * 1024 * 1024 {
+            // Jetsam ~50MB. Baseline NE RSS is often 30–45MB with trading apps.
+            // NEVER DELETE /connections under memory pressure — that is exactly the
+            // Binance「网络线路中断」storm. Prefer GC; if jetsam kills us, On-Demand restarts.
+            if footprint > 18 * 1024 * 1024 {
                 BridgeForceGC()
             }
-            // Only tear connections near jetsam — and throttle hard.
-            let nearJetsam = footprint > 42 * 1024 * 1024
-            let cooled = Date().timeIntervalSince(self.lastConnCloseAt) > 45
-            if nearJetsam, cooled {
-                self.lastConnCloseAt = Date()
-                self.closeAllConnectionsBestEffort()
+            if footprint > 40 * 1024 * 1024, self.gcTickCount.isMultiple(of: 2) {
                 BridgeForceGC()
-                self.writeLog("mem pressure rss=\(footprint / 1024)KB — closed conns + GC")
+                self.writeLog("mem high rss=\(footprint / 1024)KB — GC only (keep WS)")
             }
             #endif
             if self.gcTickCount.isMultiple(of: 5) {
@@ -709,11 +774,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         selectGroupProxy(group: "GLOBAL", name: name)
         selectGroupProxy(group: "GOOGLE", name: name)
         selectGroupProxy(group: "TELEGRAM", name: name)
+        // Prefer Asia leaf for TIKTOK when the user picked one; else leave group default (JP/PROXY).
+        let asiaHints = ["日本", "JP", "Japan", "新加坡", "SG", "香港", "HK", "台湾", "台灣", "TW"]
+        if asiaHints.contains(where: { name.localizedCaseInsensitiveContains($0) }) {
+            selectGroupProxy(group: "TIKTOK", name: name)
+        } else {
+            selectGroupProxy(group: "TIKTOK", name: "PROXY")
+        }
     }
 
     /// If the pinned leaf cannot dial (vmess timeout / 502), try other PROXY members.
+    /// Conservative enough not to thrash trading WS, but dead leaves must not stick for minutes.
     private func healDeadSelectedNode() {
         if healInFlight { return }
+        // After a real switch, cool down — false flips kill Binance / HTX WebSockets.
+        if Date().timeIntervalSince(lastHealSwitchAt) < 120 { return }
+        // Under memory pressure delay probes often false-fail — skip heal entirely.
+        if Self.residentMemoryBytes() > 42 * 1024 * 1024 {
+            writeLog("heal skipped (rss high)")
+            return
+        }
         healInFlight = true
         Task { [weak self] in
             defer { self?.healInFlight = false }
@@ -722,19 +802,29 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 .string(forKey: "selectedNode") ?? ""
             let testURL = "https://www.gstatic.com/generate_204"
             if !preferred.isEmpty {
-                let (ok, ms, err) = await Self.mihomoDelay(proxy: preferred, testURL: testURL, timeoutMs: 5000)
-                if ok {
-                    self.writeLog("heal node OK \(preferred) \(ms)ms")
-                    return
+                // Require three failed probes before switching.
+                var lastErr: String?
+                for attempt in 1...3 {
+                    let (ok, ms, err) = await Self.mihomoDelay(proxy: preferred, testURL: testURL, timeoutMs: 6000)
+                    if ok {
+                        self.lastHealOkAt = Date()
+                        self.writeLog("heal node OK \(preferred) \(ms)ms (try \(attempt))")
+                        return
+                    }
+                    lastErr = err
+                    if attempt < 3 {
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    }
                 }
-                self.writeLog("heal node FAIL \(preferred): \(err ?? "?") — trying alternates")
+                self.writeLog("heal node FAIL \(preferred): \(lastErr ?? "?") — trying alternates")
             }
             let candidates = await self.fetchProxyGroupMembers(group: "PROXY")
             let ordered = Self.prioritizeAsiaNodes(candidates, excluding: preferred)
-            for name in ordered.prefix(8) {
-                let (ok, ms, _) = await Self.mihomoDelay(proxy: name, testURL: testURL, timeoutMs: 4500)
+            for name in ordered.prefix(4) {
+                let (ok, ms, _) = await Self.mihomoDelay(proxy: name, testURL: testURL, timeoutMs: 5000)
                 guard ok else { continue }
                 self.writeLog("heal switched → \(name) \(ms)ms")
+                self.lastHealSwitchAt = Date()
                 self.selectSavedNode(name)
                 UserDefaults(suiteName: AppConstants.appGroupIdentifier)?
                     .set(name, forKey: "selectedNode")

@@ -124,7 +124,7 @@ enum class UiLanguage {
 data class AppSettings(
     val subscriptions: List<Subscription> = emptyList(),
     val selectedNodeName: String? = null,
-    val testURL: String = "https://www.gstatic.com/generate_204",
+    val testURL: String = "http://www.gstatic.com/generate_204",
     val testTimeoutMs: Int = 4000,
     val concurrency: Int = 6,
     val mixedPort: Int = 17890,

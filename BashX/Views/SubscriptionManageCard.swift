@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct SubscriptionManageCard: View {
-    @EnvironmentObject private var state: AppState
+    let state: AppState
     @Environment(\.bashxAppearance) private var appearance
     let subscriptionId: UUID
     var index: Int

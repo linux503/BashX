@@ -113,10 +113,8 @@ struct TrafficChartView: View {
                 )
             chartPath(values: downs, maxV: maxV, size: size, closed: false)
                 .stroke(downTint, style: StrokeStyle(lineWidth: downLineWidth, lineCap: .round, lineJoin: .round))
-                .shadow(color: downTint.opacity(0.30), radius: style == .monitor ? 4 : 2, y: 1)
             chartPath(values: ups, maxV: maxV, size: size, closed: false)
                 .stroke(upTint, style: StrokeStyle(lineWidth: upLineWidth, lineCap: .round, lineJoin: .round))
-                .shadow(color: upTint.opacity(0.22), radius: 2, y: 1)
         }
     }
 

@@ -31,16 +31,16 @@ private func trafficInt64(_ any: Any?) -> Int64 {
 @MainActor
 final class PanelRateStore: ObservableObject {
     /// Adaptive compact rate (e.g. `1.7K`, `12M`) — not mega-only (that stuck at `0.0` for normal browsing).
-    @Published private(set) var downMbps = "0.0K"
-    @Published private(set) var upMbps = "0.0K"
-    @Published private(set) var downTotal: Int64 = 0
-    @Published private(set) var upTotal: Int64 = 0
+    private(set) var downMbps = "0.0K"
+    private(set) var upMbps = "0.0K"
+    private(set) var downTotal: Int64 = 0
+    private(set) var upTotal: Int64 = 0
     /// Session cumulative since last double-click reset (baseline = kernel totals at reset).
-    @Published private(set) var sessionDownTotal: Int64 = 0
-    @Published private(set) var sessionUpTotal: Int64 = 0
-    @Published private(set) var sessionResetTick = 0
-    @Published private(set) var isLive = false
-    @Published private(set) var samples: [TrafficSample] = []
+    private(set) var sessionDownTotal: Int64 = 0
+    private(set) var sessionUpTotal: Int64 = 0
+    private(set) var sessionResetTick = 0
+    private(set) var isLive = false
+    private(set) var samples: [TrafficSample] = []
     /// Skip chart sample array when panel is closed — saves memory + SwiftUI churn.
     var chartSamplesEnabled = false
 
@@ -48,20 +48,22 @@ final class PanelRateStore: ObservableObject {
     private var baselineUp: Int64 = 0
 
     func clear() {
-        if downMbps != "0.0K" { downMbps = "0.0K" }
-        if upMbps != "0.0K" { upMbps = "0.0K" }
-        if downTotal != 0 { downTotal = 0 }
-        if upTotal != 0 { upTotal = 0 }
-        if sessionDownTotal != 0 { sessionDownTotal = 0 }
-        if sessionUpTotal != 0 { sessionUpTotal = 0 }
+        objectWillChange.send()
+        downMbps = "0.0K"
+        upMbps = "0.0K"
+        downTotal = 0
+        upTotal = 0
+        sessionDownTotal = 0
+        sessionUpTotal = 0
         baselineDown = 0
         baselineUp = 0
-        if isLive { isLive = false }
+        isLive = false
         if !samples.isEmpty { samples = [] }
     }
 
     /// Double-click cumulative row to zero session counters (kernel totals unchanged).
     func resetSessionTotals() {
+        objectWillChange.send()
         baselineDown = downTotal
         baselineUp = upTotal
         sessionDownTotal = 0
@@ -72,22 +74,29 @@ final class PanelRateStore: ObservableObject {
     func update(down: Int64, up: Int64, downTotal: Int64, upTotal: Int64, live: Bool) {
         let pd = ByteFormat.menuBarCompact(down)
         let pu = ByteFormat.menuBarCompact(up)
-        if downMbps != pd { downMbps = pd }
-        if upMbps != pu { upMbps = pu }
-        if self.downTotal != downTotal { self.downTotal = downTotal }
-        if self.upTotal != upTotal { self.upTotal = upTotal }
         let sessionDown = max(0, downTotal - baselineDown)
         let sessionUp = max(0, upTotal - baselineUp)
-        if sessionDownTotal != sessionDown { sessionDownTotal = sessionDown }
-        if sessionUpTotal != sessionUp { sessionUpTotal = sessionUp }
-        if isLive != live { isLive = live }
-
+        var samplesChanged = false
+        var nextSamples = samples
         if live, chartSamplesEnabled {
-            var next = samples
-            next.append(TrafficSample(up: up, down: down, at: Date()))
-            if next.count > 48 { next.removeFirst(next.count - 48) }
-            samples = next
+            nextSamples.append(TrafficSample(up: up, down: down, at: Date()))
+            if nextSamples.count > 24 { nextSamples.removeFirst(nextSamples.count - 24) }
+            samplesChanged = nextSamples != samples
         }
+        let changed = downMbps != pd || upMbps != pu
+            || self.downTotal != downTotal || self.upTotal != upTotal
+            || sessionDownTotal != sessionDown || sessionUpTotal != sessionUp
+            || isLive != live || samplesChanged
+        guard changed else { return }
+        objectWillChange.send()
+        downMbps = pd
+        upMbps = pu
+        self.downTotal = downTotal
+        self.upTotal = upTotal
+        sessionDownTotal = sessionDown
+        sessionUpTotal = sessionUp
+        isLive = live
+        if samplesChanged { samples = nextSamples }
     }
 }
 
@@ -136,7 +145,9 @@ final class MenuBarRateStore: ObservableObject {
         if changed { onRatesUpdated?() }
     }
 
-    /// Panel ~1Hz via `panel`; menu bar ~0.6s for live ↓/↑.
+    /// Panel and menu bar update at most once per second.  A traffic stream may
+    /// emit much faster, but redrawing the status item for every burst causes
+    /// visible UI stalls when a proxy is failing or traffic is high.
     func update(down: Int64, up: Int64, downTotal: Int64 = 0, upTotal: Int64 = 0, live: Bool = true, trackPanelChart: Bool = false) {
         let now = Date()
         let hasTraffic = down > 0 || up > 0
@@ -153,12 +164,8 @@ final class MenuBarRateStore: ObservableObject {
             )
         }
 
-        if !hasTraffic && now.timeIntervalSince(lastMenuPublish) < 0.6 { return }
-        if hasTraffic || now.timeIntervalSince(lastMenuPublish) >= 0.6 {
-            lastMenuPublish = now
-        } else {
-            return
-        }
+        if now.timeIntervalSince(lastMenuPublish) < 2.5 { return }
+        lastMenuPublish = now
 
         let nd = ByteFormat.menuBarFixed(down)
         let nu = ByteFormat.menuBarFixed(up)
@@ -170,7 +177,6 @@ final class MenuBarRateStore: ObservableObject {
         onRatesUpdated?()
     }
 }
-
 @MainActor
 final class TrafficMonitor: ObservableObject {
     @Published var upRate: Int64 = 0
@@ -215,7 +221,6 @@ final class TrafficMonitor: ObservableObject {
     }()
     /// Throttle UI publishes so menu-bar item doesn't flicker/resize every packet.
     private var lastRateUIPublish = Date.distantPast
-    private var lastSampleUIPublish = Date.distantPast
     private var pendingUp: Int64 = 0
     private var pendingDown: Int64 = 0
     private var pendingUpTotal: Int64 = 0
@@ -318,7 +323,7 @@ final class TrafficMonitor: ObservableObject {
         connectionsTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshConnectionsOnce()
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                try? await Task.sleep(nanoseconds: 8_000_000_000)
             }
         }
     }
@@ -399,8 +404,9 @@ final class TrafficMonitor: ObservableObject {
 
     private func publishTrafficUIIfNeeded(force: Bool = false) {
         let now = Date()
-        // ~2Hz for menu bar; MenuBarRateStore throttles menu digits separately.
-        guard force || now.timeIntervalSince(lastRateUIPublish) >= 0.5 else { return }
+        // Publish at most once per second; MenuBarRateStore coalesces again
+        // before it asks AppKit to render a new status-item image.
+        guard force || now.timeIntervalSince(lastRateUIPublish) >= 1.0 else { return }
         lastRateUIPublish = now
 
         menuBarRates?.update(
@@ -411,23 +417,8 @@ final class TrafficMonitor: ObservableObject {
             live: true,
             trackPanelChart: panelChartEnabled
         )
-
-        let publishMonitor = chartSamplesEnabled || connectionsTask != nil || logsTask != nil
-        guard publishMonitor else { return }
-
-        if upRate != pendingUp { upRate = pendingUp }
-        if downRate != pendingDown { downRate = pendingDown }
-        if pendingUpTotal > 0, upTotal != pendingUpTotal { upTotal = pendingUpTotal }
-        if pendingDownTotal > 0, downTotal != pendingDownTotal { downTotal = pendingDownTotal }
-        if !isLive { isLive = true }
-
-        if now.timeIntervalSince(lastSampleUIPublish) >= 1.0 {
-            lastSampleUIPublish = now
-            var next = samples
-            next.append(TrafficSample(up: pendingUp, down: pendingDown, at: now))
-            if next.count > 48 { next.removeFirst(next.count - 48) }
-            samples = next
-        }
+        // Rates live on PanelRateStore. Do not republish this object every tick —
+        // that rebuilt the whole connections/logs list.
     }
 
     private func runLogStream() async {
@@ -450,7 +441,10 @@ final class TrafficMonitor: ObservableObject {
                     text = type.isEmpty ? payload : "[\(type)] \(payload)"
                 }
                 pendingLogLines.append(text)
-                publishLogsIfNeeded(force: pendingLogLines.count >= 40)
+                // A failing node can produce hundreds of warnings per second.
+                // Keep the UI responsive by batching these instead of forcing
+                // a List update for every short burst.
+                publishLogsIfNeeded(force: pendingLogLines.count >= 100)
             }
         } catch {
             // reconnect loop handles
@@ -460,13 +454,13 @@ final class TrafficMonitor: ObservableObject {
     private func publishLogsIfNeeded(force: Bool = false) {
         guard !pendingLogLines.isEmpty else { return }
         let now = Date()
-        guard force || now.timeIntervalSince(lastLogUIPublish) >= 0.5 else { return }
+        guard force || now.timeIntervalSince(lastLogUIPublish) >= 1.5 else { return }
         lastLogUIPublish = now
         var lines = logLines
         lines.append(contentsOf: pendingLogLines)
         pendingLogLines.removeAll(keepingCapacity: true)
-        if lines.count > 100 { lines.removeFirst(lines.count - 100) }
-        logLines = lines
+        if lines.count > 50 { lines.removeFirst(lines.count - 50) }
+        if logLines != lines { logLines = lines }
     }
 
     private func refreshConnectionsOnce() async {
@@ -476,13 +470,11 @@ final class TrafficMonitor: ObservableObject {
         do {
             let (data, _) = try await apiSession.data(for: req)
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-            if let upT = json["uploadTotal"] as? NSNumber { upTotal = upT.int64Value }
-            if let downT = json["downloadTotal"] as? NSNumber { downTotal = downT.int64Value }
             let raw = json["connections"] as? [[String: Any]] ?? []
-            connectionCount = raw.count
+            if connectionCount != raw.count { connectionCount = raw.count }
             let isoFrac = Self.iso8601Fractional
             let isoBasic = Self.iso8601Basic
-            let rows: [ConnectionRow] = raw.prefix(80).compactMap { item in
+            let rows: [ConnectionRow] = raw.prefix(40).compactMap { item in
                 guard let id = item["id"] as? String else { return nil }
                 let meta = item["metadata"] as? [String: Any] ?? [:]
                 let host = (meta["host"] as? String).flatMap { $0.isEmpty ? nil : $0 }
@@ -517,7 +509,9 @@ final class TrafficMonitor: ObservableObject {
                 )
             }
             .sorted { ($0.download + $0.upload) > ($1.download + $1.upload) }
-            connections = rows
+            // The monitor refreshes in the background.  Do not invalidate the
+            // entire connection list when the displayed rows are unchanged.
+            if connections != rows { connections = rows }
         } catch {
             // ignore transient errors
         }

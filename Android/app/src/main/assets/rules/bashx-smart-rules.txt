@@ -1,6 +1,20 @@
-# BashX Smart Rules v32
-# 参考 LingJingMaster/Shadowrocket-Rules 分流优先级 + ACL4SSR / Clash Verge
-# https://github.com/LingJingMaster/Shadowrocket-Rules
+# BashX Smart Rules v52
+# 参考 ACL4SSR + 小火箭；重复 GEOSITE/GEOIP/MATCH 由运行时注入，文件里不重复
+# v52: 去掉与运行时重复的 gfw/GEOIP/MATCH；自定义前置优先（Clash Verge）
+# v51: 去掉 GEOIP,!CN；国内 GEOIP,CN 直连；Mac MATCH,PROXY / iOS MATCH,DIRECT
+# v50: AdsPower 控制面改 PROXY（ip-scan/api DIRECT 超时会导致「连接测试失败」）
+# v49: AdsPower 仅控制面域名 DIRECT；去掉进程直连，IPFoxy/S5 可经 TUN 链式出境
+# v48: IPFoxy 购买/网关强制 PROXY（阿里云 HK IP 易被 GEOIP,CN 误判直连→地区不可用）
+# v44: 抖音 snssdk.com DIRECT；TikTok 仅 isnssdk/tiktok*/byteoversea（两 App 分开）
+# v41: TikTok ttcn/bytefcdn
+# v40: （已废）曾把 snssdk 绑 TIKTOK，会逼抖音走代理
+# v39: 币安域名补全（vision/cdn/nftstatic/ficus 等）→ 高优 PROXY，防 MATCH,DIRECT 漏网
+# v38: 火币 Huobi/HTX 域名 → PROXY + 真实 IP DNS（行情 WS 防 fake-ip 卡顿）
+# v37: 币安 Binance 域名 → PROXY + 真实 IP DNS（防 fake-ip 导致行情卡顿/VPN 闪断）
+# v47: （已废）AdsPower 整进程 DIRECT — 会阻断 IPFoxy 网关
+# v46: Mac 裸 IP / 未命中 → MATCH,PROXY（TUN 走代理，国内 GEOIP,CN 仍直连）
+# v36: 曾改为 MATCH,DIRECT；Mac TUN 下纯 IP 会漏出，已改回 Clash Verge 兜底
+# v35: AdsPower 控制面直连（app.adspower.net 国内 CDN）；S5 网关走 PROXY
 # v32: 淘宝/闲鱼(goofish)/国内电商直连；阿里 HTTPDNS 改 DIRECT（勿 REJECT→裸 IP 进代理）
 # v29: Cursor 仅域名→CURSOR（去掉整进程劫持，修复本地 IDE 卡「工作很忙」）；Telegram/Cursor 真实 IP DNS
 # v28: ACL4SSR 兜底 MATCH,PROXY；假 IP 下勿用 MATCH,DIRECT
@@ -147,6 +161,20 @@ DOMAIN-SUFFIX,yeepay.com,DIRECT
 DOMAIN-SUFFIX,unionpay.com,DIRECT
 DOMAIN-SUFFIX,95516.com,DIRECT
 
+# ========== IPFoxy（须在 AdsPower 域名 DIRECT 之前） ==========
+# 购买页 + gate-*.ipfoxy.io；链式：AdsPower → BashX 节点 → 住宅网关
+DOMAIN-SUFFIX,ipfoxy.com,PROXY
+DOMAIN-SUFFIX,ipfoxy.io,PROXY
+DOMAIN-KEYWORD,ipfoxy,PROXY
+
+# ========== AdsPower（控制面也走 PROXY；DIRECT 会导致 ip-scan 超时→测连失败） ==========
+DOMAIN-SUFFIX,adspower.net,PROXY
+DOMAIN-SUFFIX,adspower.com,PROXY
+DOMAIN-SUFFIX,adspowerapp.com,PROXY
+DOMAIN-KEYWORD,adspower,PROXY
+DOMAIN-SUFFIX,wswebpic.com,PROXY
+DOMAIN-SUFFIX,data4.net,PROXY
+
 # ========== Telegram → TELEGRAM ==========
 PROCESS-NAME,Telegram,TELEGRAM
 PROCESS-NAME,org.telegram.desktop,TELEGRAM
@@ -224,6 +252,60 @@ DOMAIN,marketplace.cursorapi.com,CURSOR
 DOMAIN-KEYWORD,cursor.sh,CURSOR
 DOMAIN-KEYWORD,gcpp.cursor,CURSOR
 DOMAIN-KEYWORD,anysphere,CURSOR
+
+# ========== Binance / 币安（行情 WS 需真实 IP + 稳定 PROXY） ==========
+DOMAIN-SUFFIX,binance.com,PROXY
+DOMAIN-SUFFIX,binance.me,PROXY
+DOMAIN-SUFFIX,binance.us,PROXY
+DOMAIN-SUFFIX,binance.cc,PROXY
+DOMAIN-SUFFIX,binance.co,PROXY
+DOMAIN-SUFFIX,binance.net,PROXY
+DOMAIN-SUFFIX,binance.org,PROXY
+DOMAIN-SUFFIX,binance.info,PROXY
+DOMAIN-SUFFIX,binance.vision,PROXY
+DOMAIN-SUFFIX,binance.cloud,PROXY
+DOMAIN-SUFFIX,binance.charity,PROXY
+DOMAIN-SUFFIX,binancezh.com,PROXY
+DOMAIN-SUFFIX,binancezh.pro,PROXY
+DOMAIN-SUFFIX,binancezh.net,PROXY
+DOMAIN-SUFFIX,binanceapi.com,PROXY
+DOMAIN-SUFFIX,binancefuture.com,PROXY
+DOMAIN-SUFFIX,binancecnt.com,PROXY
+DOMAIN-SUFFIX,binancecorp.com,PROXY
+DOMAIN-SUFFIX,binancecnl.com,PROXY
+DOMAIN-SUFFIX,binance-cdn.com,PROXY
+DOMAIN-SUFFIX,binanceavg.com,PROXY
+DOMAIN-SUFFIX,bnbstatic.com,PROXY
+DOMAIN-SUFFIX,nftstatic.com,PROXY
+DOMAIN-SUFFIX,bnappzh.com,PROXY
+DOMAIN-SUFFIX,bnappzh.co,PROXY
+DOMAIN-SUFFIX,bntrace.com,PROXY
+DOMAIN-SUFFIX,appsbinance.com,PROXY
+DOMAIN-SUFFIX,saasexch.com,PROXY
+DOMAIN-SUFFIX,saasexch.cc,PROXY
+DOMAIN-SUFFIX,ficus.cc,PROXY
+DOMAIN-KEYWORD,binance,PROXY
+DOMAIN-KEYWORD,bnbstatic,PROXY
+DOMAIN-KEYWORD,saasexch,PROXY
+DOMAIN-KEYWORD,nftstatic,PROXY
+
+# ========== Huobi / HTX / 火币（行情 WS 需真实 IP + 稳定 PROXY） ==========
+DOMAIN-SUFFIX,htx.com,PROXY
+DOMAIN-SUFFIX,huobi.com,PROXY
+DOMAIN-SUFFIX,huobi.pro,PROXY
+DOMAIN-SUFFIX,huobi.co,PROXY
+DOMAIN-SUFFIX,huobi.me,PROXY
+DOMAIN-SUFFIX,huobi.sc,PROXY
+DOMAIN-SUFFIX,huobipro.com,PROXY
+DOMAIN-SUFFIX,huobigroup.com,PROXY
+DOMAIN-SUFFIX,huobiapi.com,PROXY
+DOMAIN-SUFFIX,huobiasia.vip,PROXY
+DOMAIN-SUFFIX,hbfile.net,PROXY
+DOMAIN-SUFFIX,hbg.com,PROXY
+DOMAIN-SUFFIX,huobicdn.com,PROXY
+DOMAIN-KEYWORD,huobi,PROXY
+DOMAIN-KEYWORD,hbfile,PROXY
+
 # OpenAI / ChatGPT
 DOMAIN-SUFFIX,chat.com,OPENAI
 DOMAIN-SUFFIX,chatgpt.com,OPENAI
@@ -361,6 +443,22 @@ GEOSITE,instagram,PROXY
 GEOSITE,whatsapp,WHATSAPP
 GEOSITE,discord,PROXY
 GEOSITE,reddit,PROXY
+# TikTok 显式域名（iOS 无 GEOSITE 时兜底；须在抖音 DIRECT 语义之上由运行时优先注入）
+DOMAIN-SUFFIX,tiktok.com,TIKTOK
+DOMAIN-SUFFIX,tiktokv.com,TIKTOK
+DOMAIN-SUFFIX,tiktokcdn.com,TIKTOK
+DOMAIN-SUFFIX,tiktokcdn-us.com,TIKTOK
+DOMAIN-SUFFIX,byteoversea.com,TIKTOK
+DOMAIN-SUFFIX,musical.ly,TIKTOK
+DOMAIN-SUFFIX,isnssdk.com,TIKTOK
+DOMAIN-SUFFIX,sgsnssdk.com,TIKTOK
+DOMAIN-SUFFIX,ibyteimg.com,TIKTOK
+DOMAIN-SUFFIX,muscdn.com,TIKTOK
+DOMAIN-SUFFIX,bytefcdn-oversea.com,TIKTOK
+DOMAIN-SUFFIX,worldfcdn.com,TIKTOK
+DOMAIN-KEYWORD,ttcdn,TIKTOK
+DOMAIN-KEYWORD,tiktok,TIKTOK
+DOMAIN-KEYWORD,byteoversea,TIKTOK
 GEOSITE,tiktok,TIKTOK
 GEOSITE,twitch,PROXY
 GEOSITE,netflix,NETFLIX
@@ -372,27 +470,11 @@ DOMAIN-SUFFIX,ttvnw.net,PROXY
 DOMAIN-SUFFIX,jtvnw.net,PROXY
 DOMAIN-SUFFIX,twitchcdn.net,PROXY
 AND,((DOMAIN-SUFFIX,ttvnw.net),(NETWORK,UDP),(DST-PORT,443)),REJECT
-GEOSITE,category-social-media-!cn,PROXY
-GEOSITE,category-media,PROXY
-GEOSITE,category-dev,PROXY
-GEOSITE,cloudflare,PROXY
-GEOSITE,gfw,PROXY
-GEOSITE,greatfire,PROXY
-GEOSITE,geolocation-!cn,PROXY
-GEOSITE,tld-!cn,PROXY
 
 DOMAIN-SUFFIX,steamcontent.com,DIRECT
 DOMAIN-SUFFIX,steampowered.com,STEAM
 DOMAIN-SUFFIX,steamcommunity.com,STEAM
 
-# ========== GeoIP 兜底（Surge / Shadowrocket / Clash Verge） ==========
-GEOIP,CN,DIRECT,no-resolve
-GEOIP,PRIVATE,DIRECT,no-resolve
-GEOIP,!CN,PROXY,no-resolve
-
-# ========== 漏网之鱼 ==========
-# Mac（有 GeoIP）：上面 GEOIP,!CN 已覆盖；此处兜底代理
-# v29: Cursor 仅域名→CURSOR；Telegram 媒体 CIDR 95.161
-# v28: ACL4SSR 兜底 MATCH,PROXY；B站/抖音直连；去掉泛 .com PROXY；Cursor 域名完善
-# iOS / Mac 漏网之鱼一律 MATCH,PROXY（假 IP 下勿用 MATCH,DIRECT）
-MATCH,PROXY
+# 兜底 GEOSITE/GEOIP/MATCH 由运行时注入（ACL4SSR + 小火箭），此处不重复写
+# Mac: GEOSITE,gfw/geolocation-!cn + GEOIP,CN + MATCH,PROXY
+# iOS: MATCH,DIRECT

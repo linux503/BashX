@@ -9,24 +9,27 @@ actor SpeedTester {
 
     /// Live proxy names from mihomo `/proxies` — used when UI name differs slightly from runtime.
     private var proxyCatalog: [String: String] = [:]
-    private var catalogDelays: [String: Int] = [:]
     private var catalogController = ""
 
+    /// Like Clash Verge / Stash: measure via mihomo `GET /proxies/{name}/delay` (URLTest through that node).
+    /// API calls always bypass system proxy (`connectionProxyDictionary = [:]`).
+    /// TCP handshake is only a last-resort fallback when the core API is unavailable.
     func testAll(
         nodes: [ProxyNode],
         timeoutMs: Int,
         concurrency: Int,
         controller: String? = nil,
         secret: String = "",
-        testURL: String = "https://www.gstatic.com/generate_204",
+        testURL: String = "http://www.gstatic.com/generate_204",
         onProgress: @MainActor @escaping (String, Int) -> Void
     ) async -> [Result] {
         let testables = nodes.filter { ClashConfigParser.isSpeedTestable($0) }
         guard !testables.isEmpty else { return [] }
 
         let limit = max(1, min(concurrency, 16))
-        let apiTimeout = max(timeoutMs, 5000)
-        let useAPI = controller != nil
+        // Keep per-node budget tight — sequential URL fallbacks used to inflate failures.
+        let apiTimeout = max(min(timeoutMs, 8000), 2000)
+        let useAPI = !(controller?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         if useAPI, let controller {
             await refreshProxyCatalog(controller: controller, secret: secret)
         }
@@ -74,7 +77,6 @@ actor SpeedTester {
         if catalogController == controller, !proxyCatalog.isEmpty { return }
         catalogController = controller
         proxyCatalog.removeAll(keepingCapacity: true)
-        catalogDelays.removeAll(keepingCapacity: true)
 
         guard let url = URL(string: "http://\(controller)/proxies") else { return }
         var request = URLRequest(url: url, timeoutInterval: 4)
@@ -93,14 +95,6 @@ actor SpeedTester {
                 continue
             }
             proxyCatalog[name] = name
-            if let history = dict["history"] as? [[String: Any]] {
-                for entry in history.reversed() {
-                    if let ms = intValue(entry["delay"]), ms > 0 {
-                        catalogDelays[name] = ms
-                        break
-                    }
-                }
-            }
             if let server = dict["server"] as? String, let port = intValue(dict["port"]) {
                 let key = "\(server.lowercased()):\(port)"
                 proxyCatalog[key] = name
@@ -135,12 +129,7 @@ actor SpeedTester {
                 return ms
             }
         }
-        if let cached = catalogDelays[proxyName], cached > 0 { return cached }
-        if let cached = catalogDelays[node.name], cached > 0 { return cached }
-        let key = "\(node.server.lowercased()):\(node.port)"
-        if let resolved = proxyCatalog[key], let cached = catalogDelays[resolved], cached > 0 {
-            return cached
-        }
+        // Do not invent numbers from history — failed probe stays failed.
         return -1
     }
 
@@ -151,10 +140,11 @@ actor SpeedTester {
             guard !t.isEmpty, !list.contains(t) else { return }
             list.append(t)
         }
+        // Prefer HTTP generate_204 (Clash / Stash / Shadowrocket style) — no TLS handshake noise.
         add(primary)
-        add("https://www.gstatic.com/generate_204")
+        add("http://www.gstatic.com/generate_204")
+        add("http://cp.cloudflare.com/generate_204")
         add("http://www.msftconnecttest.com/connecttest.txt")
-        add("https://cp.cloudflare.com/")
         return list
     }
 
@@ -168,17 +158,19 @@ actor SpeedTester {
         let encoded = Self.encodePath(proxyName)
         var components = URLComponents(string: "http://\(controller)/proxies/\(encoded)/delay")
         components?.queryItems = [
-            URLQueryItem(name: "timeout", value: String(max(timeoutMs, 3000))),
+            URLQueryItem(name: "timeout", value: String(max(timeoutMs, 2000))),
             URLQueryItem(name: "url", value: testURL),
         ]
         guard let url = components?.url else { return nil }
 
-        var request = URLRequest(url: url, timeoutInterval: TimeInterval(timeoutMs) / 1000.0 + 4.0)
+        var request = URLRequest(url: url, timeoutInterval: TimeInterval(timeoutMs) / 1000.0 + 3.0)
         request.httpMethod = "GET"
         applyAuth(&request, secret: secret)
 
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = TimeInterval(timeoutMs) / 1000.0 + 4
+        config.timeoutIntervalForRequest = TimeInterval(timeoutMs) / 1000.0 + 3
+        config.waitsForConnectivity = false
+        // Critical: API request itself must NOT go through system / mixed-port proxy.
         config.connectionProxyDictionary = [:]
 
         do {
@@ -207,51 +199,90 @@ actor SpeedTester {
         return raw
     }
 
+    /// Fallback only: TCP connect RTT to node host:port (not through proxy tunnel).
+    /// Resolves IPv4 first to avoid Happy Eyeballs ~1s IPv6→IPv4 stall that made every node look identical.
     private func tcpDelay(host: String, port: Int, timeoutMs: Int) async -> Int {
         guard !host.isEmpty, port > 0, port <= 65535 else { return -1 }
 
-        let start = Date()
-        let connected = await connect(host: host, port: UInt16(port), timeoutMs: timeoutMs)
+        let start = CFAbsoluteTimeGetCurrent()
+        let endpointHost = await resolveIPv4Host(host) ?? host
+        let connected = await connect(host: endpointHost, port: UInt16(port), timeoutMs: timeoutMs)
         guard connected else { return -1 }
-        let ms = Int(Date().timeIntervalSince(start) * 1000)
+        let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
         return max(ms, 1)
+    }
+
+    private func resolveIPv4Host(_ host: String) async -> String? {
+        if IPv4Address(host) != nil { return host }
+        if IPv6Address(host) != nil { return nil }
+        return await Task.detached(priority: .utility) {
+            var hints = addrinfo(
+                ai_flags: AI_ADDRCONFIG,
+                ai_family: AF_INET,
+                ai_socktype: SOCK_STREAM,
+                ai_protocol: IPPROTO_TCP,
+                ai_addrlen: 0,
+                ai_canonname: nil,
+                ai_addr: nil,
+                ai_next: nil
+            )
+            var result: UnsafeMutablePointer<addrinfo>?
+            defer { if result != nil { freeaddrinfo(result) } }
+            guard getaddrinfo(host, nil, &hints, &result) == 0, let first = result else { return nil }
+            var addr = first.pointee.ai_addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+            var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard inet_ntop(AF_INET, &addr.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN)) != nil else { return nil }
+            return String(cString: buf)
+        }.value
     }
 
     private func connect(host: String, port: UInt16, timeoutMs: Int) async -> Bool {
         await withCheckedContinuation { continuation in
             let queue = DispatchQueue(label: "bashx.speedtest")
+            var tcp = NWProtocolTCP.Options()
+            tcp.enableFastOpen = false
+            let params = NWParameters(tls: nil, tcp: tcp)
+            params.preferNoProxies = true
             let connection = NWConnection(
                 host: NWEndpoint.Host(host),
                 port: NWEndpoint.Port(rawValue: port)!,
-                using: .tcp
+                using: params
             )
+            Self.startTCP(connection, queue: queue, timeoutMs: timeoutMs, continuation: continuation)
+        }
+    }
 
-            let lock = NSLock()
-            var resumed = false
-            func finish(_ ok: Bool) {
-                lock.lock()
-                defer { lock.unlock() }
-                guard !resumed else { return }
-                resumed = true
-                connection.cancel()
-                continuation.resume(returning: ok)
-            }
+    private static func startTCP(
+        _ connection: NWConnection,
+        queue: DispatchQueue,
+        timeoutMs: Int,
+        continuation: CheckedContinuation<Bool, Never>
+    ) {
+        let lock = NSLock()
+        var resumed = false
+        let finish: @Sendable (Bool) -> Void = { ok in
+            lock.lock()
+            defer { lock.unlock() }
+            guard !resumed else { return }
+            resumed = true
+            connection.cancel()
+            continuation.resume(returning: ok)
+        }
 
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    finish(true)
-                case .failed, .cancelled:
-                    finish(false)
-                default:
-                    break
-                }
-            }
-            connection.start(queue: queue)
-
-            queue.asyncAfter(deadline: .now() + .milliseconds(timeoutMs)) {
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                finish(true)
+            case .failed, .cancelled:
                 finish(false)
+            default:
+                break
             }
+        }
+        connection.start(queue: queue)
+
+        queue.asyncAfter(deadline: .now() + .milliseconds(max(timeoutMs, 500))) {
+            finish(false)
         }
     }
 
