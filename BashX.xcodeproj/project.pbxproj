@@ -167,6 +167,7 @@
 		F1262BE82147B89B039FEE69 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6103A7D7AB2ADDA190BC680 /* main.swift */; };
 		F2E7E49B6B4B5E6B1871110E /* AppConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD2347CC70114C39454B4BD4 /* AppConstants.swift */; };
 		F402D0DE571ECFCF0D8FAEE5 /* TunnelInterface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13F6324374600FEBDBBE2DF4 /* TunnelInterface.swift */; };
+		F517F876D4F6863FF3F49E1B /* HomeUpdateBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20A087195BA0AD30EF0D72F /* HomeUpdateBanner.swift */; };
 		F56BB7D82151CF0197A0FE09 /* SubscriptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80475A498A40A8F171AAD06 /* SubscriptionsView.swift */; };
 		F5B58BA450BCE1B62289A034 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 30D3D0A5A2C998AD7D98C821 /* CoreFoundation.framework */; };
 		F853CADF694E00CBDCDF2CEE /* GameProgression.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA574FE87EE70A6ED07EF348 /* GameProgression.swift */; };
@@ -327,6 +328,7 @@
 		D7DA4155C9391915CEA2B3DD /* NodeCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeCategory.swift; sourceTree = "<group>"; };
 		D87ABBA1076778D97AC9396E /* MonitorPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorPane.swift; sourceTree = "<group>"; };
 		DA574FE87EE70A6ED07EF348 /* GameProgression.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameProgression.swift; sourceTree = "<group>"; };
+		E20A087195BA0AD30EF0D72F /* HomeUpdateBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeUpdateBanner.swift; sourceTree = "<group>"; };
 		E2435EAF217B3B51E1ECE80B /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		E34D4D24BB6409501BC9AC4A /* plugin-packs */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "plugin-packs"; path = "Resources/rules/plugin-packs"; sourceTree = SOURCE_ROOT; };
 		E36E925E51BC8591B18F4AAC /* SettingsViewIOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewIOS.swift; sourceTree = "<group>"; };
@@ -543,6 +545,7 @@
 			children = (
 				9D79AA8915BD0C3DA239DD7A /* AppRoutingPane.swift */,
 				8B79C9E7C245CE6E4FFA57E2 /* ExternalProxyPane.swift */,
+				E20A087195BA0AD30EF0D72F /* HomeUpdateBanner.swift */,
 				F0A5EC9A07B7439ED96272AA /* MacConnectControl.swift */,
 				E5EDE9AEACF08387C464A865 /* MainView.swift */,
 				C8E0D4FFCB9BCF0E74286244 /* MenuBarView.swift */,
@@ -889,6 +892,7 @@
 				E9CD20C4FD43FFFE55433DDD /* GfwListRules.swift in Sources */,
 				269570CD870E6C191837E618 /* GlobalHotkeys.swift in Sources */,
 				6763F378C92ADE47FB1BDFAC /* GoogleReliability.swift in Sources */,
+				F517F876D4F6863FF3F49E1B /* HomeUpdateBanner.swift in Sources */,
 				DD1110233046B2FCE3F3194F /* IosDirectDomains.swift in Sources */,
 				4DD7CB6344668FEF7D2060C5 /* IosProxyDomains.swift in Sources */,
 				15C14205F551A220CA0F997A /* IosRoutingRules.swift in Sources */,
@@ -1067,14 +1071,14 @@
 				ARCHS = "$(ARCHS_STANDARD)";
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				ENABLE_HARDENED_RUNTIME = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -1090,7 +1094,7 @@
 				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1099,7 +1103,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -1114,13 +1118,13 @@
 				CODE_SIGN_ENTITLEMENTS = BashXControls/BashXControls.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1194,7 +1198,7 @@
 				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1203,7 +1207,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacketTunnel/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.PacketTunnel;
 				PRODUCT_NAME = PacketTunnel;
 				SDKROOT = iphoneos;
@@ -1220,7 +1224,7 @@
 				CODE_SIGN_ENTITLEMENTS = BashXiOS/BashXiOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXiOS/Info.plist;
@@ -1231,7 +1235,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;
@@ -1246,14 +1250,14 @@
 				ARCHS = "$(ARCHS_STANDARD)";
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				ENABLE_HARDENED_RUNTIME = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.tunhelper;
 				PRODUCT_NAME = BashXTunHelper;
@@ -1269,12 +1273,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = BashX/BashX.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1289,12 +1293,12 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = BashX/BashX.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashX/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				ONLY_ACTIVE_ARCH = NO;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app;
 				PRODUCT_NAME = BashX;
@@ -1308,13 +1312,13 @@
 				CODE_SIGN_ENTITLEMENTS = BashXControls/BashXControls.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXControls/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios.Controls;
 				PRODUCT_NAME = BashXControls;
 				SDKROOT = iphoneos;
@@ -1395,7 +1399,7 @@
 				CODE_SIGN_ENTITLEMENTS = BashXiOS/BashXiOS.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 70;
 				DEVELOPMENT_TEAM = NFYZYS2VLL;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BashXiOS/Info.plist;
@@ -1406,7 +1410,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.64;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.bashx.app.ios;
 				PRODUCT_NAME = BashX;
 				SDKROOT = iphoneos;

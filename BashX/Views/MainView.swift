@@ -13,7 +13,6 @@ struct MainView: View {
     @State private var monitorSegment: MonitorPane.MonitorSegment = .connections
     @State private var renameTarget: Subscription?
     @State private var renameDraft = ""
-    @State private var switchingNodeName: String?
     /// Instant chip highlight before chromeRevision lands.
     @State private var pendingProxyMode: ProxyMode?
     @State private var minimalToggling = false
@@ -86,9 +85,6 @@ struct MainView: View {
         .onReceive(state.$coreRunning.receive(on: RunLoop.main)) { _ in
             syncMonitorExtras()
         }
-        .onReceive(state.$searchText.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
-        .onReceive(state.$sortByDelay.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
-        .onReceive(state.$selectedCategoryKey.dropFirst().receive(on: RunLoop.main)) { _ in state.bumpNodeListRevision() }
         .onReceive(state.$panelIntent.receive(on: RunLoop.main)) { intent in
             guard intent != .none else { return }
             consumePanelIntent()
@@ -99,7 +95,7 @@ struct MainView: View {
     }
 
     private var panelContent: some View {
-        ZStack {
+        ZStack(alignment: .bottomLeading) {
             if state.settings.macMinimalHome {
                 MinimalHomeBackdrop()
             } else {
@@ -127,6 +123,12 @@ struct MainView: View {
                     }
                 }
             }
+
+            HomeUpdateBanner(lang: lang)
+                .padding(12)
+        }
+        .onAppear {
+            Task { await AppUpdateController.shared.checkForHomeBannerIfNeeded() }
         }
     }
 
@@ -797,7 +799,7 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text("BashX")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .font(PanelMetrics.heroTitle)
                     Text("v\(AppVersion.short)")
                         .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
@@ -808,11 +810,12 @@ struct MainView: View {
                         .fill(state.isCoreVisiblyAlive ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance).opacity(0.55))
                         .frame(width: 4.5, height: 4.5)
                     Text(state.isCoreVisiblyAlive
-                          ? "代理已连接"
+                          ? "已连接"
                           : (state.coreConnecting
-                             ? "内核连接中…"
-                             : (state.coreRunning ? "内核已就绪" : "内核未启动")))
+                             ? "连接中"
+                             : (state.coreRunning ? "已就绪" : "未启动")))
                         .font(PanelMetrics.micro)
+                        .tracking(PanelMetrics.captionTracking)
                         .foregroundStyle(state.isCoreVisiblyAlive ? BashXTheme.good(for: appearance) : BashXTheme.secondaryLabel(for: appearance))
                         .lineLimit(1)
                 }
@@ -846,7 +849,7 @@ struct MainView: View {
     // MARK: - Sidebar
 
     private var sidebar: some View {
-        ScrollView {
+        ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: PanelMetrics.sidebarStack) {
                 PanelSidebarTraffic(
                     panel: rates.panel,
@@ -855,7 +858,9 @@ struct MainView: View {
                     detailTab = .monitor
                 }
 
-                selectedNodeCard
+                PanelSelectionHost(state: state) {
+                    selectedNodeCard
+                }
                 proxyModeSection
                 sidebarSubsSummary
                 sidebarSettingsCard
@@ -877,43 +882,33 @@ struct MainView: View {
                     tint: BashXTheme.accent(for: appearance),
                     title: "系统代理",
                     subtitle: state.settings.tunEnabled
-                        ? "浏览器/HTTP · 可与 TUN 同开"
+                        ? "HTTP · \(state.settings.mixedPort)"
                         : "127.0.0.1:\(state.settings.mixedPort)",
                     isOn: Binding(
                         get: { state.systemProxyOn },
                         set: { v in Task { await state.setSystemProxy(v) } }
                     )
                 )
+                .help("浏览器 HTTP/HTTPS 代理")
                 sidebarToggleTile(
                     icon: "point.3.connected.trianglepath.dotted",
                     tint: Color(red: 0.36, green: 0.72, blue: 0.88),
                     title: "TUN",
-                    subtitle: TunPrivilege.isReady
-                        ? "全局接管 · TG/UDP/不走代理的 App"
-                        : "首次需管理员密码",
+                    subtitle: TunPrivilege.isReady ? "全局模式" : "需授权",
                     isOn: Binding(
                         get: { state.settings.tunEnabled },
                         set: { v in Task { await state.setTUN(v) } }
                     )
                 )
+                .help("全局接管系统流量")
                 sidebarToggleTile(
                     icon: "power.circle.fill",
                     tint: Color(red: 0.52, green: 0.78, blue: 0.42),
                     title: L10n.t("mac.launchAtLogin", lang),
-                    subtitle: L10n.t("mac.launchAtLogin.sub", lang),
+                    subtitle: " ",
                     isOn: Binding(
                         get: { state.launchAtLoginOn },
                         set: { state.setLaunchAtLogin($0) }
-                    )
-                )
-                sidebarToggleTile(
-                    icon: "play.slash.fill",
-                    tint: Color(red: 0.92, green: 0.42, blue: 0.48),
-                    title: L10n.t("mac.nodes.adblock", lang),
-                    subtitle: L10n.t("mac.nodes.adblock.sub", lang),
-                    isOn: Binding(
-                        get: { state.settings.videoAdBlockEnabled },
-                        set: { v in Task { await state.setVideoAdBlock(v) } }
                     )
                 )
             }
@@ -921,53 +916,50 @@ struct MainView: View {
                 state.refreshLaunchAtLogin()
             }
 
-            // Keep the button mounted while auto-retry toggles `coreConnecting`
-            // — inserting/removing the view is what made it look like it was flashing.
-            if !(state.isCoreVisiblyAlive || state.coreRunning) {
-                let starting = state.coreConnecting
-                Button {
-                    guard !starting else { return }
-                    Task { await state.ensureCoreRunning() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if starting {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                        } else {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        Text(starting ? "正在启动…" : "启动内核")
-                            .font(PanelMetrics.caption)
-                            .fontWeight(.semibold)
-                        Spacer(minLength: 0)
-                        Text(starting ? "请稍候" : "开始代理")
-                            .font(PanelMetrics.micro)
-                            .opacity(0.85)
+            let coreAlive = state.isCoreVisiblyAlive || state.coreRunning
+            let starting = state.coreConnecting
+            Button {
+                guard !starting, !coreAlive else { return }
+                Task { await state.ensureCoreRunning() }
+            } label: {
+                HStack(spacing: 6) {
+                    if starting {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 10, weight: .bold))
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background {
-                        RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        BashXTheme.accent(for: appearance),
-                                        BashXTheme.accent(for: appearance).opacity(starting ? 0.65 : 0.82),
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    }
+                    Text(starting ? "启动中…" : "启动内核")
+                        .font(PanelMetrics.caption)
+                        .fontWeight(.semibold)
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                .disabled(starting)
-                .transaction { $0.animation = nil }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .frame(height: PanelMetrics.sidebarStartButtonHeight)
+                .background {
+                    RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    BashXTheme.accent(for: appearance),
+                                    BashXTheme.accent(for: appearance).opacity(starting ? 0.65 : 0.82),
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
             }
+            .buttonStyle(.plain)
+            .disabled(starting || coreAlive)
+            .opacity(coreAlive ? 0 : 1)
+            .allowsHitTesting(!coreAlive && !starting)
+            .transaction { $0.animation = nil }
         }
+        .frame(height: PanelMetrics.sidebarSettingsCardHeight, alignment: .top)
         .padding(PanelMetrics.cardPad)
         .transaction { $0.animation = nil }
         .background {
@@ -1002,12 +994,13 @@ struct MainView: View {
                 Text(title)
                     .font(PanelMetrics.body)
                     .foregroundStyle(disabled ? BashXTheme.tertiaryLabel(for: appearance) : BashXTheme.primaryLabel(for: appearance))
-                Text(subtitle)
+                    .lineLimit(1)
+                Text(subtitle.trimmingCharacters(in: .whitespaces).isEmpty ? " " : subtitle)
                     .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                     .lineLimit(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .leading)
 
             Toggle("", isOn: isOn)
                 .labelsHidden()
@@ -1016,7 +1009,8 @@ struct MainView: View {
                 .disabled(disabled)
         }
         .padding(.horizontal, 7)
-        .padding(.vertical, 5)
+        .padding(.vertical, 3)
+        .frame(height: PanelMetrics.sidebarToggleRowHeight)
         .background {
             RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
                 .fill(isOn.wrappedValue
@@ -1075,12 +1069,9 @@ struct MainView: View {
                     proxyModeChip(mode)
                 }
             }
-
-            Text((pendingProxyMode ?? state.settings.proxyMode).subtitle(lang: lang))
-                .font(PanelMetrics.micro)
-                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(height: 28)
         }
+        .frame(height: PanelMetrics.sidebarProxyCardHeight, alignment: .top)
         .padding(PanelMetrics.cardPad)
         .background {
             RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
@@ -1114,7 +1105,8 @@ struct MainView: View {
             }
             .foregroundStyle(selected ? Color.white : BashXTheme.secondaryLabel(for: appearance))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
+            .frame(height: 28)
+            .padding(.vertical, 0)
             .background {
                 RoundedRectangle(cornerRadius: PanelMetrics.chipRadius, style: .continuous)
                     .fill(selected ? color : BashXTheme.secondaryFill(for: appearance).opacity(0.55))
@@ -1124,15 +1116,6 @@ struct MainView: View {
         .buttonStyle(PanelPressButtonStyle())
         .help(mode.subtitle)
         .transaction { $0.animation = nil }
-    }
-
-    private func selectNodeFromPanel(_ name: String) {
-        guard switchingNodeName != name else { return }
-        switchingNodeName = name
-        Task {
-            await state.selectNode(name)
-            if switchingNodeName == name { switchingNodeName = nil }
-        }
     }
 
     private var currentNodePillTitle: String? {
@@ -1149,47 +1132,53 @@ struct MainView: View {
     }
 
     private var selectedNodeCard: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let runtime = state.runtimeOutboundName ?? ""
+        let selected = state.settings.selectedNodeName ?? L10n.t("mac.currentNode.auto", lang)
+        let primary = runtime.isEmpty ? selected : runtime
+        let ipText = state.outboundIPLoading ? "IP 查询中…" : "IP \(state.outboundIP)"
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Label(L10n.t("mac.currentNode.title", lang), systemImage: "point.topleft.down.curvedto.point.bottomright.up")
                     .font(PanelMetrics.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .lineLimit(1)
                 Spacer(minLength: 0)
-                if let name = effectiveNodeDelayName,
-                   let node = state.nodes.first(where: { $0.name == name }),
-                   let ms = node.delayMs {
-                    Text(ms < 0 ? L10n.t("probe.timeout", lang) : "\(ms) ms")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(BashXTheme.delayColor(ms, appearance: appearance))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(BashXTheme.delayColor(ms, appearance: appearance).opacity(0.12))
-                        )
+                Group {
+                    if let name = effectiveNodeDelayName,
+                       let node = state.nodes.first(where: { $0.name == name }),
+                       let ms = node.delayMs {
+                        Text(ms < 0 ? L10n.t("probe.timeout", lang) : "\(ms) ms")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(BashXTheme.delayColor(ms, appearance: appearance))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(BashXTheme.delayColor(ms, appearance: appearance).opacity(0.12))
+                            )
+                    } else {
+                        Text(" ")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    }
                 }
+                .frame(width: 46, alignment: .trailing)
             }
+            .frame(height: 14)
 
-            if let runtime = state.runtimeOutboundName, !runtime.isEmpty {
-                Text(runtime)
-                    .font(PanelMetrics.body)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-                let selected = state.settings.selectedNodeName ?? "AUTO"
-                if selected != runtime {
-                    Text(L10n.t("mac.currentNode.selected", lang)
-                        .replacingOccurrences(of: "%@", with: selected))
-                        .font(PanelMetrics.micro)
-                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                        .lineLimit(1)
-                }
-            } else {
-                Text(state.settings.selectedNodeName ?? L10n.t("mac.currentNode.auto", lang))
-                    .font(PanelMetrics.body)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-            }
+            Text(primary)
+                .font(PanelMetrics.body)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(height: 14, alignment: .leading)
+
+            Text(ipText)
+                .font(PanelMetrics.micro)
+                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(height: 12, alignment: .leading)
         }
+        .frame(height: PanelMetrics.sidebarNodeCardHeight, alignment: .top)
         .padding(PanelMetrics.cardPad)
         .background {
             RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
@@ -1249,38 +1238,53 @@ struct MainView: View {
         let subs = state.settings.subscriptions
         let enabledCount = subs.filter(\.enabled).count
         let totalCount = subs.count
+        let summaryText: String = {
+            if totalCount == 0 { return "还没有订阅源" }
+            if enabledCount == 0 { return "已有 \(totalCount) 个订阅，当前都未启用" }
+            return "已启用 \(enabledCount) 个订阅，合计 \(state.nodes.count) 个节点"
+        }()
 
-        return VStack(alignment: .leading, spacing: 6) {
-            SidebarSectionHeader(title: "订阅", systemImage: "tray.full")
-
-            if totalCount == 0 {
-                Text("还没有订阅")
-                    .font(PanelMetrics.micro)
-                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-            } else {
-                HStack(spacing: 6) {
-                    subSummaryMetric(
-                        value: "\(enabledCount)/\(totalCount)",
-                        label: enabledCount == totalCount ? "已全部启用" : "已启用"
-                    )
-                    subSummaryMetric(
-                        value: "\(state.nodes.count)",
-                        label: "合并节点",
-                        accent: true
-                    )
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(BashXTheme.accentSoft(for: appearance))
+                    Image(systemName: "tray.full.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(BashXTheme.accent(for: appearance))
                 }
-                if enabledCount < totalCount {
-                    Text("还有 \(totalCount - enabledCount) 个未启用")
+                .frame(width: 24, height: 24)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("订阅")
+                        .font(PanelMetrics.body)
+                        .fontWeight(.semibold)
+                    Text(summaryText)
                         .font(PanelMetrics.micro)
-                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .lineLimit(1)
                 }
+                Spacer(minLength: 0)
             }
 
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
+                subSummaryMetric(
+                    value: totalCount == 0 ? "—" : "\(enabledCount)/\(totalCount)",
+                    label: "启用"
+                )
+                subSummaryMetric(
+                    value: totalCount == 0 ? "—" : "\(state.nodes.count)",
+                    label: "节点",
+                    accent: totalCount > 0
+                )
+            }
+            .frame(height: 36)
+
+            HStack(spacing: 6) {
                 Button {
                     detailTab = .subscriptions
                 } label: {
-                    Text("管理")
+                    Label("管理", systemImage: "slider.horizontal.3")
                         .font(PanelMetrics.caption)
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
@@ -1303,8 +1307,9 @@ struct MainView: View {
                 Button {
                     Task { await state.updateAllSubscriptions() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .semibold))
+                    Label("更新", systemImage: "arrow.clockwise")
+                        .font(PanelMetrics.caption)
+                        .fontWeight(.semibold)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -1316,19 +1321,19 @@ struct MainView: View {
                 Button {
                     Task { await state.enableAllSubscriptions() }
                 } label: {
-                    Text("启用全部并合并")
+                    Label("全部启用", systemImage: "checkmark.seal")
                         .font(PanelMetrics.micro)
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(BashXTheme.accent(for: appearance))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(BashXTheme.accent(for: appearance))
                 .disabled(state.isBusy)
-            } else if subs.isEmpty {
-                Text("添加订阅后点 ↻ 拉取节点")
-                    .font(PanelMetrics.micro)
-                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+            } else {
+                Color.clear.frame(height: 22)
             }
         }
+        .frame(height: PanelMetrics.sidebarSubsCardHeight, alignment: .top)
         .padding(PanelMetrics.cardPad)
         .background {
             RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
@@ -1343,7 +1348,7 @@ struct MainView: View {
     private func subSummaryMetric(value: String, label: String, accent: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .font(.system(size: 14, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(accent ? BashXTheme.accent(for: appearance) : BashXTheme.primaryLabel(for: appearance))
             Text(label)
@@ -1423,50 +1428,6 @@ struct MainView: View {
                 detailTabBar
                 Spacer(minLength: 0)
             }
-
-            if detailTab == .nodes {
-                PanelNodesHost(state: state) {
-                    HStack(spacing: 7) {
-                        SoftField {
-                            HStack(spacing: 5) {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                                    .font(.system(size: 10, weight: .semibold))
-                                TextField("搜索节点", text: searchTextBinding)
-                                    .textFieldStyle(.plain)
-                                    .font(.system(size: 12, design: .rounded))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        Picker("节点展示", selection: Binding(
-                            get: { state.settings.nodeDisplayMode },
-                            set: { state.setNodeDisplayMode($0) }
-                        )) {
-                            ForEach(NodeDisplayMode.allCases) { mode in
-                                Label(mode.title, systemImage: mode.icon).tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(width: 90)
-                        .help("卡片 / 列表")
-
-                        Text("\(state.searchText.isEmpty ? state.nodes.count : state.filteredNodes.count)/\(state.nodes.count)")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .monospacedDigit()
-                            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 4)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(BashXTheme.accentSoft(for: appearance))
-                            )
-
-                        nodesOptionsMenu
-                    }
-                }
-            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -1502,7 +1463,7 @@ struct MainView: View {
                 Image(systemName: tab.systemImage)
                     .font(.system(size: 10, weight: .semibold))
                 Text(tab.title(lang: lang))
-                    .font(.system(size: 11.5, weight: selected ? .bold : .medium, design: .rounded))
+                    .font(PanelMetrics.caption.weight(selected ? .semibold : .regular))
             }
             .foregroundStyle(selected ? Color.white : BashXTheme.secondaryLabel(for: appearance))
             .padding(.horizontal, 11)
@@ -1529,8 +1490,56 @@ struct MainView: View {
 
     private var nodesPane: some View {
         PanelNodesHost(state: state) {
-            nodesPaneContent
+            VStack(spacing: 0) {
+                nodesSearchHeader
+                nodesPaneContent
+            }
         }
+    }
+
+    private var nodesSearchHeader: some View {
+        HStack(spacing: 7) {
+            SoftField {
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .font(.system(size: 10, weight: .semibold))
+                    TextField("搜索节点", text: searchTextBinding)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, design: .rounded))
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Picker("节点展示", selection: Binding(
+                get: { state.settings.nodeDisplayMode },
+                set: { state.setNodeDisplayMode($0) }
+            )) {
+                ForEach(NodeDisplayMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.icon).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 90)
+            .help("卡片 / 列表")
+
+            Text("\(state.searchText.isEmpty ? state.nodes.count : state.filteredNodes.count)/\(state.nodes.count)")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(BashXTheme.accentSoft(for: appearance))
+                )
+
+            nodesOptionsMenu
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(BashXTheme.canvas(for: appearance))
     }
 
     private var nodesPaneContent: some View {
@@ -1547,9 +1556,7 @@ struct MainView: View {
                     state: state,
                     appearance: appearance,
                     displayMode: state.settings.nodeDisplayMode,
-                    selectedNodeName: state.settings.selectedNodeName,
-                    switchingNodeName: switchingNodeName,
-                    onSelect: selectNodeFromPanel
+                    selectedNodeName: state.settings.selectedNodeName
                 )
             }
         }
@@ -1575,7 +1582,7 @@ struct MainView: View {
     }
 
     private var categoryBar: some View {
-        let categories = NodeCategory.fixedChipSummaries(among: state.nodes).filter { $0.count > 0 }
+        let categories = state.categorySummary.filter { $0.count > 0 }
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 5) {
                 categoryChip(key: nil, title: "全部", flag: "🌐", count: state.nodes.count)
@@ -1593,6 +1600,7 @@ struct MainView: View {
         let selected = state.selectedCategoryKey == key
         return Button {
             state.selectedCategoryKey = key
+            state.bumpNodeListRevision()
         } label: {
             HStack(spacing: 3) {
                 Text(flag).font(.system(size: 11))
@@ -1637,19 +1645,28 @@ struct MainView: View {
                     if state.settings.subscriptions.isEmpty {
                         subscriptionsEmptyState
                     } else {
-                        LazyVStack(spacing: 8) {
-                            ForEach(state.settings.subscriptions) { sub in
+                        LazyVStack(spacing: 2) {
+                            ForEach(Array(state.settings.subscriptions.enumerated()), id: \.element.id) { idx, sub in
                                 SubscriptionManageCard(
                                     state: state,
                                     subscriptionId: sub.id,
-                                    index: state.settings.subscriptions.firstIndex(where: { $0.id == sub.id }) ?? 0
+                                    index: idx
                                 )
                             }
                         }
+                        .padding(4)
+                        .background {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(BashXTheme.card(for: appearance))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                                )
+                        }
                     }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
             .transaction { $0.animation = nil }
         }
@@ -1659,8 +1676,8 @@ struct MainView: View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("订阅")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                Text("\(state.settings.subscriptions.filter(\.enabled).count)/\(state.settings.subscriptions.count) 启用 · 勾选左侧可多选合并")
+                    .font(PanelMetrics.heroTitle)
+                Text("\(state.settings.subscriptions.filter(\.enabled).count)/\(state.settings.subscriptions.count) 启用")
                     .font(PanelMetrics.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
@@ -1691,66 +1708,30 @@ struct MainView: View {
     }
 
     private var subscriptionsEmptyState: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(BashXTheme.accentSoft(for: appearance))
-                    .frame(width: 64, height: 64)
-                Image(systemName: "link.badge.plus")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-            }
+        VStack(spacing: 14) {
+            Image(systemName: "link.badge.plus")
+                .font(.system(size: 32, weight: .light))
+                .foregroundStyle(BashXTheme.accent(for: appearance))
 
-            VStack(spacing: 6) {
-                Text("还没有订阅")
-                    .font(.subheadline.weight(.semibold))
-                Text("粘贴机场链接，自动拉取节点与流量信息")
-                    .font(.caption)
+            VStack(spacing: 4) {
+                Text("暂无订阅")
+                    .font(PanelMetrics.heroTitle)
+                Text("粘贴机场链接即可导入节点")
+                    .font(PanelMetrics.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                    .multilineTextAlignment(.center)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                emptyStepRow("1", "复制机场订阅链接")
-                emptyStepRow("2", "点击添加，自动识别节点")
-                emptyStepRow("3", "勾选启用，合并到节点列表")
-            }
-            .padding(14)
-            .frame(maxWidth: 320)
-            .background {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(BashXTheme.card(for: appearance))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
-                    )
             }
 
             Button {
                 openAddSubscription()
             } label: {
-                Label("添加第一个订阅", systemImage: "plus.circle.fill")
+                Label("添加订阅", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
             .tint(BashXTheme.accent(for: appearance))
             .controlSize(.regular)
-            .contentShape(Rectangle())
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 36)
-    }
-
-    private func emptyStepRow(_ number: String, _ text: String) -> some View {
-        HStack(spacing: 10) {
-            Text(number)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(BashXTheme.accent(for: appearance))
-                .frame(width: 18, height: 18)
-                .background(Circle().strokeBorder(BashXTheme.accent(for: appearance).opacity(0.35), lineWidth: 1))
-            Text(text)
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-        }
+        .padding(.vertical, 48)
     }
 
     private var rulesPane: some View {
@@ -1762,7 +1743,7 @@ struct MainView: View {
             get: { state.searchText },
             set: {
                 state.searchText = $0
-                state.bumpNodeListRevision()
+                state.scheduleNodeListFilterRefresh()
             }
         )
     }
@@ -1853,21 +1834,34 @@ private struct RulesEditorPane: View {
 
     private var externalRulesCaption: String? {
         if let sr = ShadowrocketForeverRules.statusLine {
-            return "云端规则已生效（config 内 RULE-SET）：\(sr)。本页「基础规则」仅显示智能规则 v\(ChinaSmartRules.version)（约 \(state.settings.rules.count) 条）。"
+            return "云端 \(sr) · 基础规则 v\(ChinaSmartRules.version)"
         }
-        if let gfw = GfwListRules.statusLine {
-            return "GFWList 已加载（\(gfw)），Shadowrocket 规则仍在后台下载…"
+        if GfwListRules.statusLine != nil {
+            return "GFWList 已加载 · Shadowrocket 下载中"
         }
-        return "GFWList / Shadowrocket 规则启动后在后台下载，完成后自动写入 config.yaml。"
+        return nil
+    }
+
+    private var rulesHintLine: String? {
+        if state.settings.proxyMode != .rule {
+            return "当前 \(state.settings.proxyMode.title) 模式，规则不生效"
+        }
+        if layer == .prepend {
+            return "前置规则在智能规则之上，更新订阅不会覆盖"
+        }
+        if state.settings.videoAdBlockEnabled {
+            return "YouTube 去广告已开，额外 \(VideoAdBlock.ruleCount) 条 REJECT"
+        }
+        return externalRulesCaption
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("分流规则").font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("分流规则").font(PanelMetrics.heroTitle)
                     Text(statusLine.isEmpty ? "准备中…" : statusLine)
-                        .font(.caption)
+                        .font(PanelMetrics.caption)
                         .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
                 }
                 Spacer(minLength: 8)
@@ -1906,25 +1900,11 @@ private struct RulesEditorPane: View {
                 reloadActiveDraft()
             }
 
-            if state.settings.proxyMode != .rule {
-                Text("当前是\(state.settings.proxyMode.title)模式，分流规则不会生效。请在侧栏切回「规则」。")
-                    .font(.caption2)
-                    .foregroundStyle(BashXTheme.warn(for: appearance))
-            } else if layer == .prepend {
-                Text("Clash Verge Merge：自定义规则写在智能规则之上；更新订阅 /「应用智能规则」不会覆盖本页。勿写 MATCH。")
-                    .font(.caption2)
+            if let hint = rulesHintLine {
+                Text(hint)
+                    .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-            } else if state.settings.videoAdBlockEnabled {
-                Text("已开启去广告：运行时会自动前置约 \(VideoAdBlock.ruleCount) 条 REJECT（含视频站与电商跳转，编辑区不显示）。")
-                    .font(.caption2)
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-            }
-
-            if let cloud = externalRulesCaption {
-                Text(cloud)
-                    .font(.caption2)
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
             }
 
             if layer == .prepend {
@@ -1989,13 +1969,15 @@ private struct RulesEditorPane: View {
                             reloadFromState()
                         }
                     }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("仅覆盖「基础规则」；自定义前置规则保留")
+                    .help("仅覆盖基础规则")
                 } else {
                     Button("清空前置") {
                         prependDraft = ""
                         scheduleValidate()
                     }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(prependDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -2005,9 +1987,11 @@ private struct RulesEditorPane: View {
                 Button("保存并生效") {
                     Task { await saveActive() }
                 }
+                .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+                .tint(BashXTheme.accent(for: appearance))
                 .keyboardShortcut(.defaultAction)
-                .disabled(!dirty && issues.isEmpty)
+                .disabled(!dirty)
             }
         }
         .padding(16)
@@ -2266,19 +2250,7 @@ private struct RulesEditorPane: View {
             : state.settings.rules.count
         let extra = state.settings.videoAdBlockEnabled ? VideoAdBlock.ruleCount : 0
         let runtime = shownPrepend + baseCount + extra
-        var parts: [String] = []
-        if state.settings.rulesVersion > 0 {
-            parts.append("智能规则 v\(state.settings.rulesVersion)")
-        }
-        parts.append("前置 \(shownPrepend)")
-        parts.append("基础 \(baseCount)")
-        if let sr = ShadowrocketForeverRules.statusLine {
-            parts.append(sr)
-        } else if let gfw = GfwListRules.statusLine {
-            parts.append(gfw)
-        }
-        parts.append("运行时 \(runtime) 条")
-        statusLine = parts.joined(separator: " · ")
+        statusLine = "前置 \(shownPrepend) · 基础 \(baseCount) · 共 \(runtime) 条"
     }
 }
 
@@ -2334,7 +2306,7 @@ private struct PanelSidebarTraffic: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("实时流量")
                         .font(PanelMetrics.body)
-                    Text(live ? "点击查看监控" : "等待内核连接")
+                    Text(live ? "监控" : "离线")
                         .font(PanelMetrics.micro)
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
                 }
@@ -2370,12 +2342,12 @@ private struct PanelSidebarTraffic: View {
                 live: live,
                 style: .compact
             )
-            .frame(height: 72)
+            .frame(height: 58)
             .padding(.horizontal, 8)
             .contentShape(Rectangle())
             .onTapGesture(perform: onOpenMonitor)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     ratePill(symbol: "arrow.down", value: panel.downMbps, tint: downTint)
                     ratePill(symbol: "arrow.up", value: panel.upMbps, tint: upTint)
@@ -2391,8 +2363,9 @@ private struct PanelSidebarTraffic: View {
             }
             .padding(.horizontal, 9)
             .padding(.top, 2)
-            .padding(.bottom, 8)
+            .padding(.bottom, 7)
         }
+        .frame(height: PanelMetrics.sidebarTrafficHeight, alignment: .top)
         .background {
             RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
                 .fill(BashXTheme.card(for: appearance))
@@ -2461,6 +2434,29 @@ private struct PanelSidebarHost<Content: View>: View {
     }
 }
 
+private struct PanelSelectionHost<Content: View>: View {
+    let state: AppState
+    @ViewBuilder var content: () -> Content
+    @State private var revision = 0
+
+    var body: some View {
+        let _ = revision
+        return content()
+            .onReceive(state.$selectionRevision.receive(on: RunLoop.main)) { _ in
+                revision &+= 1
+            }
+            .onReceive(state.$nodeListRevision.receive(on: RunLoop.main)) { _ in
+                revision &+= 1
+            }
+            .onReceive(state.$outboundIP.receive(on: RunLoop.main)) { _ in
+                revision &+= 1
+            }
+            .onReceive(state.$outboundIPLoading.receive(on: RunLoop.main)) { _ in
+                revision &+= 1
+            }
+    }
+}
+
 private struct PanelNodesHost<Content: View>: View {
     let state: AppState
     @ViewBuilder var content: () -> Content
@@ -2475,9 +2471,49 @@ private struct PanelNodesHost<Content: View>: View {
             .onReceive(state.$hubModeRevision.receive(on: RunLoop.main)) { _ in
                 revision &+= 1
             }
-            .onReceive(state.$isTesting.receive(on: RunLoop.main)) { _ in
-                revision &+= 1
+    }
+}
+
+/// Category speed-test button — isolated so `isTesting` ticks don't rebuild the whole node tree.
+private struct CategorySpeedTestButton: View {
+    let state: AppState
+    let group: NodeCategory.Group
+    let appearance: AppAppearance
+    @State private var tick = 0
+
+    var body: some View {
+        let _ = tick
+        let testing = state.isTesting && state.speedTestScopeKey == group.key
+        return Button {
+            Task {
+                await state.runSpeedTest(nodes: group.nodes, label: group.title, groupKey: group.key)
+                await state.selectFastestNodeIfAvailable()
             }
+        } label: {
+            HStack(spacing: 4) {
+                if testing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "gauge.with.dots.needle.67percent")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                Text(testing ? "测速中" : "测速")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background {
+                Capsule(style: .continuous)
+                    .fill(BashXTheme.accent(for: appearance))
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(state.isTesting || group.nodes.isEmpty)
+        .onReceive(state.$isTesting.receive(on: RunLoop.main)) { _ in
+            tick &+= 1
+        }
     }
 }
 
@@ -2487,19 +2523,14 @@ private struct NodesCategoriesView: View {
     let appearance: AppAppearance
     let displayMode: NodeDisplayMode
     let selectedNodeName: String?
-    let switchingNodeName: String?
-    let onSelect: (String) -> Void
 
     @State private var collapsed: Set<String> = []
     @State private var groups: [NodeCategory.Group] = []
-    @State private var testingTick = 0
     @State private var cardsReady = false
-    @State private var expandedVisibleLimit: [String: Int] = [:]
-    private static let initialVisiblePerGroup = 18
+    @State private var switchingNodeName: String?
     private static let cardsPerRow = 3
 
     var body: some View {
-        let _ = testingTick
         Group {
             if !cardsReady {
                 Color.clear
@@ -2522,8 +2553,14 @@ private struct NodesCategoriesView: View {
         .onReceive(state.$nodeListRevision.receive(on: RunLoop.main)) { _ in
             reload()
         }
-        .onReceive(state.$isTesting.receive(on: RunLoop.main)) { _ in
-            testingTick &+= 1
+    }
+
+    private func pickNode(_ name: String) {
+        guard switchingNodeName != name else { return }
+        switchingNodeName = name
+        Task {
+            await state.selectNode(name)
+            if switchingNodeName == name { switchingNodeName = nil }
         }
     }
 
@@ -2533,16 +2570,9 @@ private struct NodesCategoriesView: View {
         collapsed = collapsed.intersection(keys).union(state.collapsedCategories.intersection(keys))
     }
 
-    /// ClashX-style: only the selected region is expanded so first paint isn't hundreds of cards.
     private func seedCollapseIfNeeded() {
-        guard groups.count > 1, collapsed.isEmpty, state.collapsedCategories.isEmpty else { return }
-        var next = Set(groups.map(\.key))
-        let keep = groups.first(where: { group in
-            group.nodes.contains(where: { $0.name == selectedNodeName })
-        })?.key ?? groups.first?.key
-        if let keep { next.remove(keep) }
-        collapsed = next
-        state.collapsedCategories = next
+        guard collapsed.isEmpty, state.collapsedCategories.isEmpty else { return }
+        state.collapsedCategories = []
     }
 
     private func toggle(_ key: String) {
@@ -2554,43 +2584,20 @@ private struct NodesCategoriesView: View {
         }
         collapsed = next
         state.collapsedCategories = next
-        if !next.contains(key) {
-            expandedVisibleLimit[key] = Self.initialVisiblePerGroup
-        }
     }
 
     private func visibleNodes(in group: NodeCategory.Group) -> [ProxyNode] {
-        let limit = expandedVisibleLimit[group.key] ?? Self.initialVisiblePerGroup
-        if group.nodes.count <= limit { return group.nodes }
-        return Array(group.nodes.prefix(limit))
+        group.nodes
     }
 
-    @ViewBuilder
-    private func moreNodesButton(_ group: NodeCategory.Group) -> some View {
-        let limit = expandedVisibleLimit[group.key] ?? Self.initialVisiblePerGroup
-        let hidden = group.nodes.count - min(limit, group.nodes.count)
-        if hidden > 0 {
-            Button {
-                expandedVisibleLimit[group.key] = group.nodes.count
-            } label: {
-                Text("显示其余 \(hidden) 个节点")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private static let listTypeWidth: CGFloat = 52
+    private static let listTypeWidth: CGFloat = 64
     private static let listDelayWidth: CGFloat = 56
 
     private var listPane: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Color.clear.frame(width: 16)
-                Text("节点")
+                Text("节点 / 地区")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("类型")
                     .frame(width: Self.listTypeWidth, alignment: .center)
@@ -2610,19 +2617,17 @@ private struct NodesCategoriesView: View {
                             if !collapsed.contains(group.key) {
                                 let visible = visibleNodes(in: group)
                                 ForEach(Array(visible.enumerated()), id: \.element.id) { idx, node in
-                                    nodeRow(node, index: idx + 1)
+                                    nodeRow(node, group: group, index: idx + 1)
                                         .padding(.horizontal, 10)
                                         .background(idx.isMultiple(of: 2) ? Color.primary.opacity(0.018) : Color.clear)
                                         .contentShape(Rectangle())
-                                        .onTapGesture { onSelect(node.name) }
+                                        .onTapGesture { pickNode(node.name) }
                                     if idx < visible.count - 1 {
                                         Divider()
                                             .padding(.leading, 38)
                                             .padding(.trailing, 10)
                                     }
                                 }
-                                moreNodesButton(group)
-                                    .padding(.horizontal, 10)
                             }
                         } header: {
                             categoryHeader(group)
@@ -2663,9 +2668,6 @@ private struct NodesCategoriesView: View {
                                 }
                             }
                             .padding(.horizontal, 10)
-                            moreNodesButton(group)
-                                .padding(.horizontal, 10)
-                                .padding(.bottom, 2)
                         }
                     } header: {
                         categoryHeader(group)
@@ -2710,33 +2712,7 @@ private struct NodesCategoriesView: View {
             .buttonStyle(PanelPressButtonStyle())
 
             if !isCollapsed {
-                Button {
-                    Task {
-                        await state.runSpeedTest(nodes: group.nodes, label: group.title, groupKey: group.key)
-                        await state.selectFastestNodeIfAvailable()
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        if state.isTesting && state.speedTestScopeKey == group.key {
-                            ProgressView()
-                                .controlSize(.small)
-                        } else {
-                            Image(systemName: "gauge.with.dots.needle.67percent")
-                                .font(.system(size: 10, weight: .bold))
-                        }
-                        Text(state.isTesting && state.speedTestScopeKey == group.key ? "测速中" : "测速")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background {
-                        Capsule(style: .continuous)
-                            .fill(BashXTheme.accent(for: appearance))
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(state.isTesting || group.nodes.isEmpty)
+                CategorySpeedTestButton(state: state, group: group, appearance: appearance)
             }
         }
         .padding(.vertical, 3)
@@ -2748,7 +2724,7 @@ private struct NodesCategoriesView: View {
         let highlighted = selected || switching
         let delay = node.delayMs
         return Button {
-            onSelect(node.name)
+            pickNode(node.name)
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 6) {
@@ -2825,7 +2801,7 @@ private struct NodesCategoriesView: View {
         return "\(ms) ms"
     }
 
-    private func nodeRow(_ node: ProxyNode, index: Int) -> some View {
+    private func nodeRow(_ node: ProxyNode, group: NodeCategory.Group, index: Int) -> some View {
         let selected = node.name == selectedNodeName
         let switching = switchingNodeName == node.name
         let highlighted = selected || switching
@@ -2846,22 +2822,36 @@ private struct NodesCategoriesView: View {
             }
             .frame(width: 16)
 
-            Text(node.name)
-                .font(.system(size: 12, weight: highlighted ? .semibold : .regular, design: .rounded))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(node.name)
+                    .font(.system(size: 12, weight: highlighted ? .semibold : .regular, design: .rounded))
+                    .lineLimit(1)
+                Text("\(group.flag) \(group.title)")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(shortType(node.type))
                 .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                .foregroundStyle(highlighted ? BashXTheme.accent(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
                 .frame(width: Self.listTypeWidth, alignment: .center)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(highlighted
+                              ? BashXTheme.accentSoft(for: appearance)
+                              : BashXTheme.secondaryFill(for: appearance).opacity(0.75))
+                )
 
             delayBadge(node)
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 7)
         .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(selected ? BashXTheme.accentSoft(for: appearance).opacity(0.5) : Color.clear)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(highlighted ? BashXTheme.accentSoft(for: appearance).opacity(0.55) : Color.clear)
         }
         .contentShape(Rectangle())
     }

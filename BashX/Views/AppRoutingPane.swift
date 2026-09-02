@@ -9,9 +9,16 @@ struct AppRoutingPane: View {
     @State private var showPicker = false
     @State private var runningApps: [AppRoutingRules.RunningApp] = []
     @State private var refreshTick = 0
+    @State private var showAddGroup = false
+    @State private var newGroupName = ""
 
     private var lang: AppLanguage { state.settings.uiLanguage }
     private var rules: [AppRoutingRule] { state.settings.appRoutingRules }
+    private var customGroups: [String] {
+        state.settings.appRoutingCustomGroups
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
 
     var body: some View {
         let _ = refreshTick
@@ -22,42 +29,9 @@ struct AppRoutingPane: View {
                 .frame(height: 1)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
                     websiteProbeSection
-                    presetSection
-
-                    if !rules.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(L10n.t("mac.apps.custom", lang))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                                .padding(.horizontal, 2)
-
-                            LazyVStack(spacing: 8) {
-                                ForEach(rules) { rule in
-                                    AppRoutingRow(
-                                        rule: rule,
-                                        lang: lang,
-                                        appearance: appearance,
-                                        routeOptions: routeOptions,
-                                        onToggle: { enabled in
-                                            Task { await state.setAppRoutingRuleEnabled(id: rule.id, enabled: enabled) }
-                                        },
-                                        onTargetChange: { target in
-                                            var next = rule
-                                            next.proxyTarget = target
-                                            Task { await state.upsertAppRoutingRule(next) }
-                                        },
-                                        onDelete: {
-                                            Task { await state.removeAppRoutingRule(id: rule.id) }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        emptyHint
-                    }
+                    routingManagerSection
                 }
                 .padding(14)
             }
@@ -66,6 +40,16 @@ struct AppRoutingPane: View {
         .background(BashXTheme.canvas(for: appearance))
         .onReceive(state.$appRoutingRevision.receive(on: RunLoop.main)) { _ in
             refreshTick &+= 1
+        }
+        .alert("添加分组", isPresented: $showAddGroup) {
+            TextField("例如：工作 / 海外 / 直播", text: $newGroupName)
+            Button("取消", role: .cancel) { newGroupName = "" }
+            Button("添加") {
+                state.addAppRoutingCustomGroup(newGroupName)
+                newGroupName = ""
+            }
+        } message: {
+            Text("给自定义应用建一个分组，后面可以把应用移进去。")
         }
         .sheet(isPresented: $showPicker) {
             RunningAppPicker(
@@ -90,9 +74,9 @@ struct AppRoutingPane: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(L10n.t("mac.apps.title", lang))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(PanelMetrics.heroTitle)
                 Text(L10n.t("mac.apps.subtitle", lang))
-                    .font(.caption2)
+                    .font(PanelMetrics.caption)
                     .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
             }
             Spacer(minLength: 8)
@@ -100,6 +84,14 @@ struct AppRoutingPane: View {
                 Task { await state.addAllCommonAppRoutingPresets() }
             } label: {
                 Label(L10n.t("mac.apps.addAll", lang), systemImage: "square.stack.3d.up.fill")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Button {
+                showAddGroup = true
+            } label: {
+                Label("添加分组", systemImage: "folder.badge.plus")
                     .font(.caption.weight(.semibold))
             }
             .buttonStyle(.bordered)
@@ -118,6 +110,30 @@ struct AppRoutingPane: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(BashXTheme.card(for: appearance).opacity(0.55))
+    }
+
+    private var configuredCountText: String {
+        "\(rules.filter(\.enabled).count)/\(rules.count)"
+    }
+
+    private func presetRule(for preset: AppRoutingRules.CommonAppPreset) -> AppRoutingRule? {
+        rules.first { AppRoutingRules.ruleMatches(preset: preset, rule: $0) }
+    }
+
+    private var customRules: [AppRoutingRule] {
+        rules.filter { rule in
+            !AppRoutingRules.commonPresets.contains { preset in
+                AppRoutingRules.ruleMatches(preset: preset, rule: rule)
+            }
+        }
+    }
+
+    private func customRules(in group: String) -> [AppRoutingRule] {
+        customRules.filter { $0.groupName.caseInsensitiveCompare(group) == .orderedSame }
+    }
+
+    private var ungroupedCustomRules: [AppRoutingRule] {
+        customRules.filter { $0.groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     private var websiteProbeSection: some View {
@@ -166,112 +182,280 @@ struct AppRoutingPane: View {
         }
     }
 
-    private var presetSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                Text(L10n.t("mac.apps.presets", lang))
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
+    private var routingManagerSection: some View {
+        sectionCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 8) {
+                    Label("应用管理", systemImage: "square.grid.2x2")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+
+                    Spacer(minLength: 0)
+
+                    Text("\(L10n.t("mac.apps.custom", lang)) \(configuredCountText)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(BashXTheme.secondaryFill(for: appearance))
+                        )
+                }
+
                 Text(L10n.t("mac.apps.presetsHint", lang))
                     .font(.caption2)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-            }
 
-            ForEach(AppRoutingRules.PresetCategory.allCases) { category in
-                presetCategoryBlock(category)
+                routingTableHeader
+
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(AppRoutingRules.PresetCategory.allCases) { category in
+                        presetCategoryBlock(category)
+                    }
+                }
+
+                if !customGroups.isEmpty || !customRules.isEmpty {
+                    Rectangle()
+                        .fill(BashXTheme.hairline(for: appearance))
+                        .frame(height: 1)
+                        .padding(.vertical, 2)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        sectionMiniHeader(
+                            "自定义分组",
+                            systemImage: "folder"
+                        )
+
+                        if !customGroups.isEmpty {
+                            customGroupStrip
+                        }
+
+                        ForEach(customGroups, id: \.self) { group in
+                            let grouped = customRules(in: group)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Text(group)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                                    Text("\(grouped.count)")
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            Capsule(style: .continuous)
+                                                .fill(BashXTheme.secondaryFill(for: appearance))
+                                        )
+                                    Spacer(minLength: 0)
+                                    Button(role: .destructive) {
+                                        Task { await state.removeAppRoutingCustomGroup(group) }
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 10, weight: .bold))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                                }
+
+                                if grouped.isEmpty {
+                                    Text("这个分组里还没有应用")
+                                        .font(.caption2)
+                                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .fill(BashXTheme.secondaryFill(for: appearance).opacity(0.6))
+                                        )
+                                } else {
+                                    LazyVStack(spacing: 8) {
+                                        ForEach(grouped) { rule in
+                                            customRuleRow(rule)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if !ungroupedCustomRules.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("未分组")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                                LazyVStack(spacing: 8) {
+                                    ForEach(ungroupedCustomRules) { rule in
+                                        customRuleRow(rule)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if rules.isEmpty {
+                    compactEmptyHint
+                }
             }
         }
-        .padding(12)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(BashXTheme.card(for: appearance))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
-                )
+    }
+
+    private var routingTableHeader: some View {
+        HStack(spacing: 10) {
+            Text("状态")
+                .frame(width: 28, alignment: .leading)
+            Text("应用")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("当前线路")
+                .frame(width: 78, alignment: .center)
+            Text("切换到")
+                .frame(width: 118, alignment: .center)
+            Text("操作")
+                .frame(width: 52, alignment: .center)
         }
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+        .padding(.horizontal, 12)
     }
 
     private func presetCategoryBlock(_ category: AppRoutingRules.PresetCategory) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(category.title(lang: lang))
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-
-            FlowLayout(spacing: 6) {
-                ForEach(AppRoutingRules.presets(in: category)) { preset in
-                    presetChip(preset)
-                }
-            }
-        }
-    }
-
-    private func presetChip(_ preset: AppRoutingRules.CommonAppPreset) -> some View {
-        let installed = AppRoutingRules.presetInstalled(preset, in: rules)
-        let routeLabel = AppRoutingRules.presetTitle(preset.proxyTarget, lang: lang)
-
-        return Button {
-            guard !installed else { return }
-            Task { await state.addAppRoutingPreset(preset) }
-        } label: {
-            HStack(spacing: 4) {
-                if installed {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                Text(preset.label(lang: lang))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .lineLimit(1)
-                Text("→")
-                    .font(.system(size: 9))
+        let presets = AppRoutingRules.presets(in: category)
+        let configured = presets.filter { presetRule(for: $0) != nil }.count
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(category.title(lang: lang))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                Text(routeLabel)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background {
-                Capsule(style: .continuous)
-                    .fill(installed
-                          ? BashXTheme.good(for: appearance).opacity(0.12)
-                          : BashXTheme.secondaryFill(for: appearance))
-            }
-            .overlay {
-                Capsule(style: .continuous)
-                    .strokeBorder(
-                        installed
-                            ? BashXTheme.good(for: appearance).opacity(0.35)
-                            : BashXTheme.separator(for: appearance),
-                        lineWidth: 0.5
+                Spacer(minLength: 0)
+                Text("\(configured)/\(presets.count)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(BashXTheme.secondaryFill(for: appearance))
                     )
             }
+
+            LazyVStack(spacing: 6) {
+                ForEach(presets) { preset in
+                    PresetRoutingRow(
+                        preset: preset,
+                        rule: presetRule(for: preset),
+                        lang: lang,
+                        appearance: appearance,
+                        routeOptions: routeOptions,
+                        onAdd: {
+                            Task { await state.addAppRoutingPreset(preset) }
+                        },
+                        onToggle: { enabled in
+                            guard let rule = presetRule(for: preset) else { return }
+                            Task { await state.setAppRoutingRuleEnabled(id: rule.id, enabled: enabled) }
+                        },
+                        onTargetChange: { target in
+                            guard var rule = presetRule(for: preset) else { return }
+                            rule.proxyTarget = target
+                            Task { await state.upsertAppRoutingRule(rule) }
+                        },
+                        onDelete: {
+                            guard let rule = presetRule(for: preset) else { return }
+                            Task { await state.removeAppRoutingRule(id: rule.id) }
+                        }
+                    )
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(installed)
-        .help(installed
-              ? L10n.t("mac.apps.added", lang)
-              : L10n.t("mac.apps.addPreset", lang).replacingOccurrences(of: "%@", with: preset.label(lang: lang)))
     }
 
-    private var emptyHint: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "app.badge.checkmark")
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(BashXTheme.accent(for: appearance))
-            Text(L10n.t("mac.apps.empty", lang))
-                .font(.subheadline.weight(.medium))
-            Text(L10n.t("mac.apps.emptyHint", lang))
-                .font(.caption)
-                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
+    private var customGroupStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(customGroups, id: \.self) { group in
+                    Text(group)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(BashXTheme.secondaryFill(for: appearance))
+                        )
+                }
+            }
+            .padding(.vertical, 1)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
+    }
+
+    private func customRuleRow(_ rule: AppRoutingRule) -> some View {
+        AppRoutingRow(
+            rule: rule,
+            lang: lang,
+            appearance: appearance,
+            routeOptions: routeOptions,
+            groupOptions: customGroups,
+            onToggle: { enabled in
+                Task { await state.setAppRoutingRuleEnabled(id: rule.id, enabled: enabled) }
+            },
+            onTargetChange: { target in
+                var next = rule
+                next.proxyTarget = target
+                Task { await state.upsertAppRoutingRule(next) }
+            },
+            onGroupChange: { group in
+                Task { await state.setAppRoutingRuleGroup(id: rule.id, groupName: group) }
+            },
+            onDelete: {
+                Task { await state.removeAppRoutingRule(id: rule.id) }
+            }
+        )
+    }
+
+    private func sectionCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(12)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(BashXTheme.card(for: appearance))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                    )
+            }
+    }
+
+    private func sectionMiniHeader(_ title: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BashXTheme.accent(for: appearance))
+            Text(title)
+                .font(.caption.weight(.semibold))
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var compactEmptyHint: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "app.badge.checkmark")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(BashXTheme.accent(for: appearance))
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.t("mac.apps.empty", lang))
+                    .font(.system(size: 12, weight: .semibold))
+                Text(L10n.t("mac.apps.emptyHint", lang))
+                    .font(.caption)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(BashXTheme.secondaryFill(for: appearance).opacity(0.7))
+        )
     }
 
     private var routeOptions: [String] {
@@ -282,6 +466,119 @@ struct AppRoutingPane: View {
             }
         }
         return options
+    }
+}
+
+private struct PresetRoutingRow: View {
+    private static let stateWidth: CGFloat = 28
+    private static let routeWidth: CGFloat = 78
+    private static let pickerWidth: CGFloat = 118
+    private static let actionWidth: CGFloat = 52
+
+    let preset: AppRoutingRules.CommonAppPreset
+    let rule: AppRoutingRule?
+    let lang: AppLanguage
+    let appearance: AppAppearance
+    let routeOptions: [String]
+    var onAdd: () -> Void
+    var onToggle: (Bool) -> Void
+    var onTargetChange: (String) -> Void
+    var onDelete: () -> Void
+
+    private var installed: Bool { rule != nil }
+    private var routeValue: String { rule?.proxyTarget ?? preset.proxyTarget }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if let rule {
+                    Toggle(isOn: Binding(get: { rule.enabled }, set: onToggle)) {
+                        EmptyView()
+                    }
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                } else {
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(BashXTheme.accent(for: appearance))
+                        .frame(width: 14, alignment: .center)
+                }
+            }
+            .frame(width: Self.stateWidth, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(preset.label(lang: lang))
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Text(installed ? preset.processName : "点击添加到已配置")
+                    .font(.caption2)
+                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(AppRoutingRules.presetTitle(routeValue, lang: lang))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(BashXTheme.accent(for: appearance))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(BashXTheme.accentSoft(for: appearance))
+                )
+                .frame(width: Self.routeWidth)
+
+            if let rule {
+                Picker("", selection: Binding(
+                    get: { rule.proxyTarget },
+                    set: onTargetChange
+                )) {
+                    ForEach(routeOptions, id: \.self) { option in
+                        Text(routeLabel(option)).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: Self.pickerWidth)
+
+                Button(role: .destructive, action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                .frame(width: Self.actionWidth)
+            } else {
+                Color.clear
+                    .frame(width: Self.pickerWidth)
+                Button("添加", action: onAdd)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(BashXTheme.accent(for: appearance))
+                    .frame(width: Self.actionWidth)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(minHeight: 46)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(installed
+                      ? BashXTheme.secondaryFill(for: appearance).opacity(0.72)
+                      : BashXTheme.card(for: appearance))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
+                )
+        }
+        .opacity(rule?.enabled == false ? 0.55 : 1)
+    }
+
+    private func routeLabel(_ option: String) -> String {
+        if AppRoutingRules.routePresets.contains(where: { $0.id == option }) {
+            return AppRoutingRules.presetTitle(option, lang: lang)
+        }
+        return option.count > 14 ? String(option.prefix(13)) + "…" : option
     }
 }
 
@@ -326,12 +623,20 @@ private struct FlowLayout: Layout {
 }
 
 private struct AppRoutingRow: View {
+    private static let stateWidth: CGFloat = 28
+    private static let groupWidth: CGFloat = 92
+    private static let routeWidth: CGFloat = 78
+    private static let pickerWidth: CGFloat = 118
+    private static let actionWidth: CGFloat = 52
+
     let rule: AppRoutingRule
     let lang: AppLanguage
     let appearance: AppAppearance
     let routeOptions: [String]
+    let groupOptions: [String]
     var onToggle: (Bool) -> Void
     var onTargetChange: (String) -> Void
+    var onGroupChange: (String) -> Void
     var onDelete: () -> Void
 
     var body: some View {
@@ -342,10 +647,11 @@ private struct AppRoutingRow: View {
             .labelsHidden()
             .toggleStyle(.switch)
             .controlSize(.mini)
+            .frame(width: Self.stateWidth, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(rule.label.isEmpty ? rule.processName : rule.label)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                 Text(rule.processName)
                     .font(.caption2.monospaced())
@@ -353,6 +659,29 @@ private struct AppRoutingRow: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            Picker("", selection: Binding(
+                get: { rule.groupName },
+                set: onGroupChange
+            )) {
+                Text("未分组").tag("")
+                ForEach(groupOptions, id: \.self) { option in
+                    Text(option).tag(option)
+                }
+            }
+            .labelsHidden()
+            .frame(width: Self.groupWidth)
+
+            Text(AppRoutingRules.presetTitle(rule.proxyTarget, lang: lang))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(BashXTheme.accent(for: appearance))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(BashXTheme.accentSoft(for: appearance))
+                )
+                .frame(width: Self.routeWidth)
 
             Picker("", selection: Binding(
                 get: { rule.proxyTarget },
@@ -363,7 +692,7 @@ private struct AppRoutingRow: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 150)
+            .frame(width: Self.pickerWidth)
 
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
@@ -371,12 +700,14 @@ private struct AppRoutingRow: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+            .frame(width: Self.actionWidth)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
+        .frame(minHeight: 46)
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(BashXTheme.card(for: appearance))
+                .fill(BashXTheme.secondaryFill(for: appearance).opacity(0.7))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)

@@ -18,9 +18,13 @@ DOMAIN-SUFFIX,stats.g.doubleclick.net,REJECT
 DOMAIN-SUFFIX,partnerad.l.doubleclick.net,REJECT
 DOMAIN-SUFFIX,g.doubleclick.net,REJECT
 DOMAIN-SUFFIX,2mdn.net,REJECT
+# —— YouTube / Google Video (IMA & pre/mid-roll ad SDK) ——
+DOMAIN-SUFFIX,imasdk.googleapis.com,REJECT
+DOMAIN-SUFFIX,pubads.g.doubleclick.net,REJECT
+DOMAIN-SUFFIX,securepubads.g.doubleclick.net,REJECT
+DOMAIN-SUFFIX,tpc.googlesyndication.com,REJECT
 DOMAIN-SUFFIX,ad.youtube.com,REJECT
 DOMAIN-SUFFIX,ads.youtube.com,REJECT
-DOMAIN-SUFFIX,s.youtube.com,REJECT
 DOMAIN-SUFFIX,video-ads.googlevideo.com,REJECT
 DOMAIN,www.googleadservices.com,REJECT
 DOMAIN,adservice.google.com,REJECT

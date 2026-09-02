@@ -26,40 +26,67 @@ struct SubscriptionManageCard: View {
 
     private var accent: Color { BashXTheme.accent(for: appearance) }
 
+    private var rowFill: Color {
+        if !sub.enabled {
+            return Color.clear
+        }
+        if onlyThisEnabled {
+            return accent.opacity(appearance == .dark ? 0.12 : 0.08)
+        }
+        return index.isMultiple(of: 2)
+            ? Color.primary.opacity(appearance == .dark ? 0.03 : 0.018)
+            : Color.clear
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                Button {
+                    Task { await state.setSubscriptionEnabled(subscriptionId, enabled: !sub.enabled) }
+                } label: {
+                    SubscriptionEnableControl(
+                        enabled: sub.enabled,
+                        size: 20,
+                        emphasized: onlyThisEnabled
+                    )
+                }
+                .buttonStyle(PanelPressButtonStyle())
+                .help(sub.enabled ? "点击停用" : "点击启用并合并")
+
+                VStack(alignment: .leading, spacing: 2) {
+                    nameRow
+                    metaLine
+                }
+
+                Spacer(minLength: 8)
+
+                if showActions, !isEditingName {
+                    actionCluster
+                }
+            }
 
             if let info = sub.userInfo {
-                Divider().opacity(0.45)
-                SubscriptionTrafficBlock(info: info)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-            } else if sub.updatedAt != nil {
-                Text("未识别流量 · 点更新")
-                    .font(PanelMetrics.micro)
-                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-            }
-
-            if showActions {
-                Divider().opacity(0.45)
-                footer
+                compactTraffic(info)
+                    .padding(.leading, 30)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
         .background {
-            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
-                .fill(BashXTheme.card(for: appearance))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(rowFill)
                 .overlay(
-                    RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .strokeBorder(
-                            sub.enabled ? accent.opacity(onlyThisEnabled ? 0.32 : 0.18) : BashXTheme.separator(for: appearance),
-                            lineWidth: sub.enabled ? 1 : 0.5
+                            onlyThisEnabled
+                                ? accent.opacity(0.28)
+                                : Color.clear,
+                            lineWidth: 1
                         )
                 )
         }
-        .opacity(sub.enabled ? 1 : 0.72)
+        .opacity(sub.enabled ? 1 : 0.58)
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .transaction { $0.animation = nil }
         .contextMenu { contextActions }
         .sheet(isPresented: $showQRShare) {
@@ -70,81 +97,63 @@ struct SubscriptionManageCard: View {
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Button {
-                Task { await state.setSubscriptionEnabled(subscriptionId, enabled: !sub.enabled) }
-            } label: {
-                SubscriptionEnableControl(
-                    enabled: sub.enabled,
-                    size: 28,
-                    emphasized: onlyThisEnabled
-                )
-            }
-            .buttonStyle(PanelPressButtonStyle())
-            .help(sub.enabled ? "点击停用" : "点击启用并合并")
-
-            VStack(alignment: .leading, spacing: 3) {
-                nameRow
-                Text(displayHost)
-                    .font(.system(size: 10, design: .rounded))
-                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(sub.url)
-            }
-
-            Spacer(minLength: 4)
-
-            if !isEditingName {
-                statusCaption
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-
     @ViewBuilder
     private var nameRow: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             if isEditingName {
                 TextField("名称", text: $draftName)
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold))
                     .focused($nameFocused)
                     .onSubmit { commitRename() }
+                    .frame(maxWidth: 220)
                 Button("保存") { commitRename() }
                     .buttonStyle(.borderedProminent)
                     .tint(accent)
-                    .controlSize(.large)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .controlSize(.mini)
                 Button("取消") { cancelRename() }
                     .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .controlSize(.mini)
             } else {
                 Text(sub.name)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
                     .lineLimit(1)
                     .onTapGesture(count: 2) { beginRename() }
-                if sub.enabled {
-                    Text(onlyThisEnabled ? "当前" : "已启用")
-                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                if onlyThisEnabled {
+                    Text("当前")
+                        .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(accent)
-                        .padding(.horizontal, 5)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(accent.opacity(0.12)))
+                        .background(Capsule().fill(accent.opacity(0.14)))
+                } else if sub.enabled {
+                    Text("启用")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(BashXTheme.secondaryFill(for: appearance))
+                        )
                 }
             }
         }
     }
 
-    private var statusCaption: some View {
-        Text(statusText)
-            .font(.system(size: 9, weight: .medium, design: .rounded))
-            .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-            .multilineTextAlignment(.trailing)
-            .lineLimit(2)
+    private var metaLine: some View {
+        HStack(spacing: 6) {
+            Text(displayHost)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(sub.url)
+            Text("·")
+                .foregroundStyle(.quaternary)
+            Text(statusText)
+                .lineLimit(1)
+        }
+        .font(.system(size: 10, weight: .medium))
+        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
     }
 
     private var statusText: String {
@@ -162,55 +171,98 @@ struct SubscriptionManageCard: View {
         return sub.url
     }
 
-    private var footer: some View {
-        HStack(spacing: 6) {
-            Button {
+    private var actionCluster: some View {
+        HStack(spacing: 4) {
+            iconAction(
+                systemImage: onlyThisEnabled ? "checkmark.circle.fill" : "checkmark.circle",
+                help: onlyThisEnabled ? "已选用" : "仅用此订阅",
+                tint: onlyThisEnabled ? accent : BashXTheme.secondaryLabel(for: appearance),
+                disabled: onlyThisEnabled || state.isBusy
+            ) {
                 Task { await state.switchToSubscription(subscriptionId) }
-            } label: {
-                Text(onlyThisEnabled ? "已选用" : "仅用此订阅")
-                    .font(.caption.weight(.medium))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(onlyThisEnabled ? accent : BashXTheme.secondaryLabel(for: appearance))
-            .disabled(onlyThisEnabled || state.isBusy)
 
-            Text("·").foregroundStyle(.quaternary)
-
-            Button {
+            iconAction(
+                systemImage: "arrow.clockwise",
+                help: "更新",
+                tint: BashXTheme.secondaryLabel(for: appearance),
+                disabled: state.isBusy
+            ) {
                 Task { await state.updateSubscription(subscriptionId) }
-            } label: {
-                Label("更新", systemImage: "arrow.clockwise")
-                    .font(.caption.weight(.medium))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(accent)
-            .disabled(state.isBusy)
-
-            Text("·").foregroundStyle(.quaternary)
-
-            Button {
-                showQRShare = true
-            } label: {
-                Label(L10n.t("subs.qrShare", lang), systemImage: "qrcode")
-                    .font(.caption.weight(.medium))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-
-            Spacer(minLength: 0)
 
             Menu {
                 contextActions
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                    .frame(width: 24, height: 24)
+                    .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
+            .help("更多")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
+    }
+
+    private func iconAction(
+        systemImage: String,
+        help: String,
+        tint: Color,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PanelPressButtonStyle())
+        .disabled(disabled)
+        .help(help)
+    }
+
+    private func compactTraffic(_ info: SubscriptionUserInfo) -> some View {
+        let ratio = info.usedRatio ?? 0
+        let bar = trafficColor(ratio: info.usedRatio)
+        return HStack(spacing: 8) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(BashXTheme.secondaryFill(for: appearance))
+                    Capsule()
+                        .fill(bar)
+                        .frame(width: max(2, geo.size.width * CGFloat(max(0, min(1, ratio)))))
+                }
+            }
+            .frame(height: 3)
+            .frame(maxWidth: 120)
+
+            Text("\(info.usedText) / \(info.totalText)")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+
+            Text(info.expireDetailText)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(
+                    info.isExpired
+                        ? BashXTheme.bad(for: appearance)
+                        : BashXTheme.tertiaryLabel(for: appearance)
+                )
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func trafficColor(ratio: Double?) -> Color {
+        guard let r = ratio else { return accent }
+        if r >= 0.9 { return BashXTheme.bad(for: appearance) }
+        if r >= 0.7 { return BashXTheme.warn(for: appearance) }
+        return accent
     }
 
     @ViewBuilder

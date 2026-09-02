@@ -136,7 +136,7 @@ private struct MonitorTrafficHeader: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(t("mac.monitor.traffic"))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .font(PanelMetrics.heroTitle)
                     HStack(spacing: 5) {
                         Circle()
                             .fill(trafficLive ? BashXTheme.good(for: appearance) : BashXTheme.tertiaryLabel(for: appearance))
@@ -149,21 +149,10 @@ private struct MonitorTrafficHeader: View {
 
                 Spacer(minLength: 8)
 
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("↓ \(panel.downMbps)/s")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(downTint)
-                        .monospacedDigit()
-                    Text("↑ \(panel.upMbps)/s")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundStyle(upTint)
-                        .monospacedDigit()
+                HStack(spacing: 12) {
+                    ratePill(label: "↓", value: panel.downMbps, tint: downTint)
+                    ratePill(label: "↑", value: panel.upMbps, tint: upTint)
                 }
-            }
-
-            HStack(spacing: 8) {
-                monitorRateCard(title: t("mac.monitor.down"), symbol: "arrow.down.circle.fill", value: panel.downMbps, tint: downTint)
-                monitorRateCard(title: t("mac.monitor.up"), symbol: "arrow.up.circle.fill", value: panel.upMbps, tint: upTint)
             }
 
             TrafficSessionTotalsView(
@@ -198,33 +187,18 @@ private struct MonitorTrafficHeader: View {
         .transaction { $0.animation = nil }
     }
 
-    private func monitorRateCard(title: String, symbol: String, value: String, tint: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
+    private func ratePill(label: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(PanelMetrics.caption.weight(.semibold))
                 .foregroundStyle(tint)
-                .symbolRenderingMode(.hierarchical)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(PanelMetrics.micro)
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(value)
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .monospacedDigit()
-                    Text("/s")
-                        .font(PanelMetrics.caption)
-                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: PanelMetrics.cardRadius, style: .continuous)
-                .fill(BashXTheme.card(for: appearance))
+            Text(value)
+                .font(PanelMetrics.monoLarge)
+                .monospacedDigit()
+                .foregroundStyle(BashXTheme.primaryLabel(for: appearance))
+            Text("/s")
+                .font(PanelMetrics.micro)
+                .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
         }
     }
 }

@@ -2,73 +2,102 @@ import Foundation
 
 /// Domestic CDN CIDRs bypassed at the NE layer (`excludedRoutes`) and in mihomo (`route-exclude-address`).
 /// Video/image traffic never enters packetFlow → avoids jetsam on 抖音 / 淘宝 / WeChat.
+///
+/// Keep the list ≤ ~48 routes — iOS NE silently truncates larger tables
+/// (log: 69 routes → 112.x CDN still hit packetFlow → 抖音「无网络」).
 enum DomesticBypassRoutes {
-    /// Broad mainland ISP aggregates (/10) — Douyin CDN IPs often land outside /16 lists.
-    /// Avoid 103.x / 45.x / 47.x (common HK/SG proxy node ranges).
-    private static let mainlandAggregateCIDRs: [String] = [
-        "106.0.0.0/10", "110.0.0.0/10", "111.0.0.0/10", "112.0.0.0/10",
-        "113.0.0.0/10", "114.0.0.0/10", "115.0.0.0/10", "116.0.0.0/10",
-        "117.0.0.0/10", "118.0.0.0/10", "119.0.0.0/10", "120.0.0.0/10",
-        "121.0.0.0/10", "122.0.0.0/10", "123.0.0.0/10", "124.0.0.0/10",
-        "125.0.0.0/10",
-        "27.16.0.0/12", "36.0.0.0/11", "39.0.0.0/11", "42.0.0.0/11",
-        "49.0.0.0/11", "58.0.0.0/11", "59.0.0.0/11", "60.0.0.0/11",
-        "61.0.0.0/11", "101.0.0.0/11",
-        "171.16.0.0/12", "175.0.0.0/11",
-        "180.0.0.0/11", "182.0.0.0/11", "183.0.0.0/11",
-        "202.0.0.0/11", "203.0.0.0/11", "210.0.0.0/11",
-        "218.0.0.0/11", "219.0.0.0/11", "220.0.0.0/11",
-        "221.0.0.0/11", "222.0.0.0/11", "223.0.0.0/11",
-    ]
-
+    /// Broad mainland ISP aggregates. Avoid 103.x (HK/SG), 45.x/47.x (intl cloud POPs).
     static let ipv4CIDRs: [String] = {
         var seen = Set<String>()
-        return (granularCIDRs + mainlandAggregateCIDRs).filter { seen.insert($0).inserted }
+        return rawCIDRs.filter { seen.insert($0).inserted }
     }()
 
-    private static let granularCIDRs: [String] = [
-        // Tencent / WeChat
+    /// 48 routes — fits iOS NE excludedRoutes budget after dedupe.
+    private static let rawCIDRs: [String] = [
+        // Tencent / WeChat (non-/8 blocks)
         "1.12.0.0/14",
-        "14.17.0.0/16", "14.18.0.0/16", "14.19.0.0/16", "14.116.0.0/16",
-        "43.154.0.0/16",
-        "58.247.0.0/16", "58.251.0.0/16", "59.37.0.0/16",
-        "101.32.0.0/16", "101.226.0.0/16", "101.227.0.0/16",
-        "109.244.0.0/16", "111.30.0.0/16",
-        "113.96.0.0/12",
-        "119.147.0.0/16", "121.51.0.0/16", "129.226.0.0/16",
-        "140.207.0.0/16", "157.255.0.0/16",
-        "180.101.0.0/16", "180.163.0.0/16", "182.254.0.0/16",
-        "183.3.0.0/16", "183.36.0.0/16", "183.47.0.0/16",
-        "183.57.0.0/16", "183.60.0.0/16",
-        "183.192.0.0/16", "183.232.0.0/16",
-        "203.205.128.0/19", "211.95.0.0/16",
-        // Alibaba / 淘宝 / 天猫
-        "42.120.0.0/16", "42.156.0.0/16",
-        "47.92.0.0/14", "47.96.0.0/13", "47.104.0.0/13",
-        "59.82.0.0/15",
-        "101.37.0.0/16", "106.11.0.0/16", "110.75.0.0/16",
-        "114.55.0.0/16", "115.124.0.0/16",
-        "118.31.0.0/16", "118.178.0.0/16",
-        "120.26.0.0/15", "120.55.0.0/16", "121.40.0.0/13",
-        "139.196.0.0/16", "139.224.0.0/16", "140.205.0.0/16",
-        "182.92.0.0/16", "203.119.128.0/17", "205.204.96.0/19",
-        "223.4.0.0/15", "223.6.0.0/16",
-        // 抖音 / 头条 / 火山引擎 mainland CDN (no byteoversea — TikTok intl stays in-tunnel)
-        "49.51.0.0/16", "58.33.0.0/16", "59.80.0.0/15",
-        "101.89.0.0/16", "106.38.0.0/16", "106.39.0.0/16", "106.75.0.0/16",
-        "111.202.0.0/15", "111.206.0.0/16", "116.63.0.0/16",
-        "117.50.0.0/16", "117.136.0.0/16", "118.195.0.0/16",
-        "120.78.0.0/16", "121.199.0.0/16", "122.14.0.0/16",
-        "123.57.0.0/16", "123.125.0.0/16",
-        "124.70.0.0/16", "125.122.0.0/16",
-        "139.9.0.0/16", "139.155.0.0/16",
-        "150.109.0.0/16", "157.148.0.0/16",
-        "180.97.0.0/16", "180.101.180.0/24", "180.149.0.0/16",
-        "182.61.0.0/16",
-        "203.107.0.0/16", "210.22.0.0/16", "218.75.0.0/16",
-        "220.181.0.0/16", "220.243.0.0/16",
-        "221.181.0.0/16", "221.194.0.0/16",
-        "223.109.0.0/16", "223.111.0.0/16",
+        "14.16.0.0/12",
+        "43.152.0.0/13",
+        "58.240.0.0/12",
+        // ByteDance / 火山 / 华东
+        "27.16.0.0/12",
+        // Mainland /8 aggregates (抖音 CDN 112/113/36/39/42/58-61 等)
+        "36.0.0.0/8",
+        "39.0.0.0/8",
+        "42.0.0.0/8",
+        "49.0.0.0/8",
+        "58.0.0.0/7",
+        "60.0.0.0/7",
+        "101.0.0.0/8",
+        "106.0.0.0/8",
+        "109.0.0.0/8",
+        "111.0.0.0/8",
+        "112.0.0.0/8",
+        "113.0.0.0/8",
+        "114.0.0.0/8",
+        "115.0.0.0/8",
+        "116.0.0.0/8",
+        "117.0.0.0/8",
+        "118.0.0.0/8",
+        "119.0.0.0/8",
+        "120.0.0.0/8",
+        "121.0.0.0/8",
+        "122.0.0.0/8",
+        "123.0.0.0/8",
+        "124.0.0.0/8",
+        "125.0.0.0/8",
+        "129.0.0.0/8",
+        "139.0.0.0/8",
+        "140.0.0.0/8",
+        "157.0.0.0/8",
+        "171.16.0.0/12",
+        "175.0.0.0/11",
+        "180.0.0.0/8",
+        "182.0.0.0/8",
+        "183.0.0.0/8",
+        "202.0.0.0/8",
+        "203.0.0.0/8",
+        "210.0.0.0/8",
+        "218.0.0.0/8",
+        "219.0.0.0/8",
+        "220.0.0.0/8",
+        "221.0.0.0/8",
+        "222.0.0.0/8",
+        "223.0.0.0/8",
+    ]
+
+    /// Domains that use **system DNS** (not tunnel). 抖音/淘宝/微信等国内 App 完全不进 VPN。
+    /// Only `tunnelDNSMatchDomains` below use 198.18.0.2 (mihomo).
+    static let domesticSystemDNSDomains: [String] = douyinDomainSuffixes + [
+        "weixin.qq.com", "weixin.com", "wechat.com", "qq.com", "qpic.cn", "gtimg.cn",
+        "taobao.com", "tmall.com", "alipay.com", "alicdn.com", "aliyun.com",
+        "jd.com", "bilibili.com", "baidu.com", "bdstatic.com",
+    ]
+
+    /// Only foreign/proxy domains use tunnel DNS. Everything else (含抖音) → 系统 DNS → 国内 IP 走 excludedRoutes 绕过 TUN。
+    static let tunnelDNSMatchDomains: [String] = [
+        "google.com", "google.com.hk", "googleapis.com", "gstatic.com", "googleusercontent.com",
+        "youtube.com", "youtu.be", "ytimg.com", "gmail.com", "gvt1.com", "gvt2.com",
+        "twitter.com", "x.com", "twimg.com", "t.co",
+        "facebook.com", "fbcdn.net", "instagram.com", "cdninstagram.com",
+        "whatsapp.com", "whatsapp.net",
+        "telegram.org", "telegram-cdn.org", "cdn-telegram.org", "telesco.pe", "t.me",
+        "graph.org", "tdesktop.com",
+        "discord.com", "discordapp.com",
+        "github.com", "githubusercontent.com", "githubassets.com",
+        "cursor.sh", "cursor.com", "cursorapi.com", "anysphere.co", "anysphere.com",
+        "openai.com", "chatgpt.com", "anthropic.com", "claude.ai",
+        "copilot.microsoft.com", "bing.com", "live.com", "microsoft.com", "office.com",
+        "office365.com", "outlook.com", "azure.com",
+        "netflix.com", "nflxvideo.net", "nflximg.net",
+        "tiktok.com", "tiktokv.com", "tiktokcdn.com", "byteoversea.com", "byteoversea.net",
+        "isnssdk.com", "sgsnssdk.com", "ibyteimg.com", "ibytedtos.com",
+        "binance.com", "binance.me", "bnbstatic.com", "binanceapi.com",
+        "htx.com", "huobi.com", "huobi.pro",
+        "reddit.com", "redd.it", "spotify.com", "twitch.tv",
+        "steamcommunity.com", "steampowered.com",
+        "cloudfront.net", "amazonaws.com",
+        "wikipedia.org", "dropbox.com",
     ]
 
     /// Douyin / ByteDance domain suffixes — real-IP DNS + DIRECT (not fake-ip).
@@ -84,47 +113,31 @@ enum DomesticBypassRoutes {
         "ulikecam.com", "faceu.mobi", "bytedanceapi.com",
     ]
 
-    /// NE split-DNS: only foreign/proxy domains use tunnel DNS. Domestic (抖音/淘宝/微信) → system DNS.
-    static let tunnelDNSMatchDomains: [String] = [
-        "google.com", "google.com.hk", "google.cn", "googleapis.com", "googleapis.cn",
-        "gstatic.com", "gstatic.cn", "googleusercontent.com", "googlesyndication.com",
-        "googlevideo.com", "youtube.com", "youtu.be", "ytimg.com", "ggpht.com",
-        "gmail.com", "android.com", "gvt1.com", "gvt2.com", "googleadservices.com",
-        "twitter.com", "x.com", "twimg.com", "t.co",
-        "facebook.com", "fbcdn.net", "instagram.com", "cdninstagram.com",
-        "whatsapp.com", "whatsapp.net", "whatsapp.biz",
-        "telegram.org", "telegram-cdn.org", "cdn-telegram.org", "telesco.pe", "t.me",
-        "graph.org", "tdesktop.com",
-        "discord.com", "discordapp.com",
-        "github.com", "githubusercontent.com", "githubassets.com",
-        "cursor.sh", "cursor.com", "cursorapi.com", "cursor-cdn.com", "cursorvm.com",
-        "anysphere.co", "anysphere.com", "anysphere.tech",
-        "openai.com", "chatgpt.com", "anthropic.com", "claude.ai", "copilot.microsoft.com",
-        "bing.com", "live.com", "microsoft.com", "microsoftonline.com", "office.com",
-        "office365.com", "outlook.com", "sharepoint.com", "azure.com", "windows.net",
-        "cloudflare.com", "cloudflare-dns.com",
-        "netflix.com", "nflxvideo.net", "nflximg.net", "nflxso.net",
-        "tiktok.com", "tiktok-row.net", "tiktokv.com", "tiktokv.us", "tiktokv.eu",
-        "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "byteoversea.com",
-        "byteoversea.net", "isnssdk.com", "sgsnssdk.com", "ibyteimg.com", "ibytedtos.com",
-        "binance.com", "binance.me", "binancezh.com", "bnbstatic.com", "binanceapi.com",
-        "htx.com", "huobi.com", "huobi.pro", "hbfile.net", "huobicdn.com",
-        "reddit.com", "redd.it", "redditmedia.com",
-        "spotify.com", "scdn.co",
-        "twitch.tv", "ttvnw.net", "jtvnw.net",
-        "steamcommunity.com", "steampowered.com", "steamstatic.com",
-        "cloudfront.net", "amazonaws.com", "awsstatic.com",
-        "wikipedia.org", "wikimedia.org",
-        "dropbox.com", "dropboxusercontent.com",
-        "medium.com", "substack.com",
-        "nytimes.com", "wsj.com", "bbc.com", "bbc.co.uk",
-        "cloudflareclient.com", "1dot1dot1dot1.cloudflare-dns.com",
+    /// mihomo IP-CIDR rules — Mac only; iOS relies on NE excludedRoutes (rule bloat costs NE RAM).
+    static var ipDirectRules: [String] {
+        #if os(iOS)
+        return []
+        #else
+        return ipv4CIDRs.map { "IP-CIDR,\($0),DIRECT,no-resolve" }
+        #endif
+    }
+
+    /// Mainland CDN IPv6 — Douyin Happy-Eyeballs prefers these; must stay off TUN
+    /// (gVisor DIRECT to 2409:: times out → jetsam). Keep APNs 2403:300 out of this list.
+    static let ipv6CIDRs: [(address: String, prefix: Int)] = [
+        ("2408::", 13),
+        ("2409::", 16),
+        ("240a::", 16),
+        ("240e::", 16),
+        ("2400:3200::", 32),
+        ("2400:da00::", 32),
     ]
 
-    /// mihomo IP-CIDR rules for bare-IP dials (video CDN often skips SNI).
-    static var ipDirectRules: [String] {
-        ipv4CIDRs.map { "IP-CIDR,\($0),DIRECT,no-resolve" }
-    }
+    /// Host substrings for mihomo connection cleanup under memory pressure.
+    static let domesticVideoHostMarkers: [String] = [
+        "douyin", "amemv", "snssdk", "bytedance", "byteimg", "bytescm",
+        "zjcdn", "bytecdn", "ixigua", "toutiao", "huoshan", "volces", "pstatp",
+    ]
 
     /// Convert CIDR → NEIPv4Route network + mask (for PacketTunnel excludedRoutes).
     static func neIPv4Routes() -> [(address: String, mask: String)] {

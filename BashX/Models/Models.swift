@@ -184,6 +184,8 @@ struct AppRoutingRule: Identifiable, Codable, Hashable {
     var processName: String
     /// Optional bundle id (e.g. `com.google.Chrome`).
     var bundleId: String
+    /// Optional user-defined visual group in the Mac app-routing UI.
+    var groupName: String
     /// Proxy group or leaf node: PROXY, AUTO, DIRECT, GOOGLE, TELEGRAM, or a node name.
     var proxyTarget: String
 
@@ -193,6 +195,7 @@ struct AppRoutingRule: Identifiable, Codable, Hashable {
         label: String = "",
         processName: String = "",
         bundleId: String = "",
+        groupName: String = "",
         proxyTarget: String = "PROXY"
     ) {
         self.id = id
@@ -200,7 +203,23 @@ struct AppRoutingRule: Identifiable, Codable, Hashable {
         self.label = label
         self.processName = processName
         self.bundleId = bundleId
+        self.groupName = groupName
         self.proxyTarget = proxyTarget
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, enabled, label, processName, bundleId, groupName, proxyTarget
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? ""
+        processName = try c.decodeIfPresent(String.self, forKey: .processName) ?? ""
+        bundleId = try c.decodeIfPresent(String.self, forKey: .bundleId) ?? ""
+        groupName = try c.decodeIfPresent(String.self, forKey: .groupName) ?? ""
+        proxyTarget = try c.decodeIfPresent(String.self, forKey: .proxyTarget) ?? "PROXY"
     }
 }
 
@@ -334,6 +353,8 @@ struct AppSettings: Codable {
     var uiLanguage: AppLanguage = .system
     /// Mac: route specific apps through different proxy lines.
     var appRoutingRules: [AppRoutingRule] = []
+    /// Mac: user-defined app routing groups shown in the app-routing pane.
+    var appRoutingCustomGroups: [String] = []
     /// Mac panel: show「网站连通」(default hidden).
     var panelShowWebsiteProbe: Bool = false
     /// Mac panel: show「线路策略」(default hidden).
@@ -350,7 +371,7 @@ struct AppSettings: Codable {
         case rules, rulesPrepend, rulesVersion, closeConnectionsOnSwitch, proxyMode, proxyHubMode
         case logoStyle, nodeDisplayMode, appearance, nodeDelayCache, stableAINodeName, isolatedNodeKeys
         case iosDisguiseEnabled, iosOnDemandEnabled, iosTelegramPushEnabled, uiLanguage
-        case appRoutingRules, panelShowWebsiteProbe, panelShowProxyHub
+        case appRoutingRules, appRoutingCustomGroups, panelShowWebsiteProbe, panelShowProxyHub
     }
 
     init() {}
@@ -405,6 +426,7 @@ struct AppSettings: Codable {
         iosTelegramPushEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosTelegramPushEnabled) ?? true
         uiLanguage = try c.decodeIfPresent(AppLanguage.self, forKey: .uiLanguage) ?? .system
         appRoutingRules = try c.decodeIfPresent([AppRoutingRule].self, forKey: .appRoutingRules) ?? []
+        appRoutingCustomGroups = try c.decodeIfPresent([String].self, forKey: .appRoutingCustomGroups) ?? []
         panelShowWebsiteProbe = try c.decodeIfPresent(Bool.self, forKey: .panelShowWebsiteProbe) ?? false
         panelShowProxyHub = try c.decodeIfPresent(Bool.self, forKey: .panelShowProxyHub) ?? false
         L10n.apply(uiLanguage)

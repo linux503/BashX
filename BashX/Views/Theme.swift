@@ -3,18 +3,33 @@ import SwiftUI
 
 /// Shared density tokens for the Mac full panel — keep spacing/radii/fonts aligned.
 enum PanelMetrics {
-    /// Tuned for default full-panel window (~1100×740).
-    static let sidebarWidth: CGFloat = 228
-    static let sidebarInset: CGFloat = 10
-    static let sidebarStack: CGFloat = 9
-    static let cardPad: CGFloat = 10
-    static let cardRadius: CGFloat = 11
-    static let chipRadius: CGFloat = 8
-    static let topBarHeight: CGFloat = 48
-    static let sectionTitle = Font.system(size: 11, weight: .semibold, design: .rounded)
-    static let body = Font.system(size: 12.5, weight: .semibold, design: .rounded)
-    static let caption = Font.system(size: 10.5, weight: .medium, design: .rounded)
-    static let micro = Font.system(size: 9.5, weight: .medium, design: .rounded)
+    /// Tuned for default full-panel window (~1000×680).
+    static let sidebarWidth: CGFloat = 198
+    static let sidebarInset: CGFloat = 7
+    static let sidebarStack: CGFloat = 7
+    static let cardPad: CGFloat = 7
+    static let cardRadius: CGFloat = 10
+    static let chipRadius: CGFloat = 7
+    static let topBarHeight: CGFloat = 44
+    /// Fixed sidebar card heights — blocks must not grow/shrink with content.
+    static let sidebarTrafficHeight: CGFloat = 144
+    static let sidebarNodeCardHeight: CGFloat = 56
+    static let sidebarProxyCardHeight: CGFloat = 64
+    static let sidebarSubsCardHeight: CGFloat = 112
+    static let sidebarSettingsCardHeight: CGFloat = 178
+    static let sidebarToggleRowHeight: CGFloat = 32
+    static let sidebarStartButtonHeight: CGFloat = 28
+    /// SF Pro — default design reads cleaner on macOS than rounded everywhere.
+    static let heroTitle = Font.system(size: 12.5, weight: .semibold)
+    static let sectionTitle = Font.system(size: 10.5, weight: .semibold)
+    static let body = Font.system(size: 10.5, weight: .medium)
+    static let caption = Font.system(size: 9.5, weight: .regular)
+    static let micro = Font.system(size: 8.5, weight: .regular)
+    static let mono = Font.system(size: 10, weight: .medium, design: .monospaced)
+    static let monoLarge = Font.system(size: 11.5, weight: .semibold, design: .monospaced)
+
+    static let bodyTracking: CGFloat = 0.15
+    static let captionTracking: CGFloat = 0.2
 }
 
 enum BashXTheme {
@@ -278,18 +293,34 @@ struct PanelHomeModeToggle: View {
                 onSelectMinimal(false)
             }
         }
-        .padding(3)
+        .padding(4)
         .background {
             Capsule(style: .continuous)
-                .fill(BashXTheme.card(for: appearance))
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            BashXTheme.card(for: appearance),
+                            BashXTheme.secondaryFill(for: appearance).opacity(0.92),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .overlay(
                     Capsule(style: .continuous)
                         .strokeBorder(
-                            BashXTheme.accent(for: appearance).opacity(0.35),
+                            LinearGradient(
+                                colors: [
+                                    BashXTheme.accent(for: appearance).opacity(0.42),
+                                    BashXTheme.good(for: appearance).opacity(0.16),
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
                             lineWidth: 1
                         )
                 )
-                .shadow(color: BashXTheme.accent(for: appearance).opacity(0.18), radius: 8, y: 2)
+                .shadow(color: BashXTheme.accent(for: appearance).opacity(0.18), radius: 10, y: 3)
         }
         .help(isMinimal ? L10n.t("mac.minimal.toFull", lang) : L10n.t("mac.minimal.toSimple", lang))
     }
@@ -308,27 +339,39 @@ struct PanelHomeModeToggle: View {
                     .font(.system(size: 11, weight: .bold, design: .rounded))
             }
             .foregroundStyle(selected ? Color.white : BashXTheme.secondaryLabel(for: appearance))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
             .background {
-                if selected {
-                    Capsule(style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    BashXTheme.accent(for: appearance),
-                                    BashXTheme.accent(for: appearance).opacity(0.78),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                Capsule(style: .continuous)
+                    .fill(
+                        selected
+                            ? AnyShapeStyle(
+                                LinearGradient(
+                                    colors: [
+                                        BashXTheme.accent(for: appearance),
+                                        Color(red: 0.42, green: 0.78, blue: 1.0),
+                                        BashXTheme.good(for: appearance).opacity(0.82),
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .shadow(color: BashXTheme.accent(for: appearance).opacity(0.35), radius: 4, y: 1)
-                }
+                            : AnyShapeStyle(Color.clear)
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(
+                                selected
+                                    ? Color.white.opacity(appearance == .dark ? 0.26 : 0.5)
+                                    : BashXTheme.separator(for: appearance).opacity(0.16),
+                                lineWidth: selected ? 0.8 : 0.4
+                            )
+                    )
+                    .shadow(color: selected ? BashXTheme.accent(for: appearance).opacity(0.3) : .clear, radius: 6, y: 2)
             }
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PanelPressButtonStyle())
         .animation(.easeOut(duration: 0.14), value: selected)
     }
 }

@@ -141,9 +141,11 @@ func StartWithExternalController(addr, secret string) error {
 	cfg.Controller.Secret = secret
 
 	// Force usable DNS listen — binding 198.18.0.2 fails on iOS.
+	// Never answer AAAA on iOS — Douyin Happy-Eyeballs + gVisor IPv6 DIRECT = timeout/jetsam.
 	if cfg.DNS != nil {
 		cfg.DNS.Listen = "127.0.0.1:1053"
 		cfg.DNS.Enable = true
+		cfg.DNS.IPv6 = false
 	}
 
 	// Bind ALL dials to physical NIC (IP_BOUND_IF). Never let traffic re-enter utun.
@@ -159,24 +161,27 @@ func StartWithExternalController(addr, secret string) error {
 		cfg.General.Tun.AutoDetectInterface = false
 		cfg.General.Tun.StrictRoute = false
 		cfg.General.Tun.Inet6Address = nil
-		cfg.General.Tun.DNSHijack = []string{"any:53", "tcp://any:53"}
+		if tunIsSocketPair {
+			// iOS NE: only hijack tunnel DNS (198.18.0.2). any:53 pulls 抖音 DNS into gVisor → jetsam ~15 videos.
+			cfg.General.Tun.DNSHijack = []string{"198.18.0.2:53"}
+		} else {
+			cfg.General.Tun.DNSHijack = []string{"any:53", "tcp://any:53"}
+		}
 		cfg.General.Tun.Device = ""
 		cfg.General.Tun.MTU = 1400
 		if prefix, err := netip.ParsePrefix("198.18.0.1/16"); err == nil {
 			cfg.General.Tun.Inet4Address = []netip.Prefix{prefix}
 		}
-		// RecvMsgX sets UTUN_OPT — invalid on socketpair/injected fd.
 		cfg.General.Tun.RecvMsgX = false
 		cfg.General.Tun.SendMsgX = false
-		// packetFlow bridge: IP packets never hit kernel tcpListener; gVisor handles TCP in userspace.
 		cfg.General.Tun.Stack = constant.TunGvisor
 		dnsListen := ""
 		if cfg.DNS != nil {
 			dnsListen = cfg.DNS.Listen
 		}
-		log.Infoln("BashX TUN fd=%d socketpair=%v stack=%s bindIF=%q recvmsgx=%v dns=%s",
+		log.Infoln("BashX TUN fd=%d socketpair=%v stack=%s bindIF=%q dnsHijack=%v recvmsgx=%v dns=%s",
 			tunFdGlobal, tunIsSocketPair, cfg.General.Tun.Stack, bindIF,
-			cfg.General.Tun.RecvMsgX, dnsListen)
+			cfg.General.Tun.DNSHijack, cfg.General.Tun.RecvMsgX, dnsListen)
 	} else {
 		cfg.General.Tun.Enable = false
 		log.Infoln("BashX proxy-only mixed-port=%d bindIF=%q (no TUN capture)",

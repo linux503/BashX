@@ -1,16 +1,39 @@
 import Foundation
 
-/// High-priority REJECT rules for ads: video sites, app splash/interstitial SDKs,
+/// High-priority REJECT rules for ads: YouTube / video sites, app splash SDKs,
 /// ecommerce redirect / affiliate jumps (JD / Tmall / Taobao / PDD etc.).
 /// Domain-level only — cannot strip ads served from the same CDN as content itself.
 enum VideoAdBlock {
     static let rules: [String] = loadBundledRules()
+
+    /// YouTube IMA / DoubleClick ad SDK — prepended first when ad block is on.
+    private static let youtubeCoreRules: [String] = [
+        "DOMAIN-SUFFIX,imasdk.googleapis.com,REJECT",
+        "DOMAIN-SUFFIX,pubads.g.doubleclick.net,REJECT",
+        "DOMAIN-SUFFIX,securepubads.g.doubleclick.net,REJECT",
+        "DOMAIN-SUFFIX,tpc.googlesyndication.com,REJECT",
+        "DOMAIN-SUFFIX,video-ads.googlevideo.com,REJECT",
+        "DOMAIN-SUFFIX,ads.youtube.com,REJECT",
+        "DOMAIN-SUFFIX,ad.youtube.com,REJECT",
+    ]
 
     /// Extra geosite categories lifted to the front (before CN DIRECT).
     /// Only use lists that exist in MetaCubeX GeoSite.dat (category-ads-cn does NOT).
     private static let geositePriority: [String] = [
         "GEOSITE,category-ads-all,REJECT",
     ]
+
+    /// Bundled list + YouTube core, deduped (YouTube rules stay at front).
+    private static let allInlineRules: [String] = {
+        var seen = Set<String>()
+        var out: [String] = []
+        for r in youtubeCoreRules + rules {
+            let t = r.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty, seen.insert(t).inserted else { continue }
+            out.append(t)
+        }
+        return out
+    }()
 
     /// Known-bad / renamed geosite rules that crash mihomo on startup.
     static let brokenGeositeRules: Set<String> = [
@@ -21,7 +44,7 @@ enum VideoAdBlock {
 
     /// Prepend ad REJECT rules (high priority). Removes previous copies to avoid dupes.
     static func merge(into base: [String], enabled: Bool) -> [String] {
-        let adDomains = Set(rules)
+        let adDomains = Set(allInlineRules)
         var cleaned = base.filter { rule in
             let trimmed = rule.trimmingCharacters(in: .whitespaces)
             if adDomains.contains(trimmed) { return false }
@@ -32,10 +55,10 @@ enum VideoAdBlock {
         }
         guard enabled else { return cleaned }
         if ShadowrocketForeverRules.isReady {
-            // SR-REJECT RULE-SET replaces bundled inline ad list.
-            return geositePriority + cleaned
+            // SR-REJECT RULE-SET replaces bundled inline ad list; keep YouTube + geosite front.
+            return geositePriority + youtubeCoreRules + cleaned
         }
-        return geositePriority + rules + cleaned
+        return geositePriority + allInlineRules + cleaned
     }
 
     static func isBrokenGeosite(_ rule: String) -> Bool {
@@ -44,7 +67,7 @@ enum VideoAdBlock {
         return upper.hasPrefix("GEOSITE,CATEGORY-ADS-CN,")
     }
 
-    static var ruleCount: Int { geositePriority.count + rules.count }
+    static var ruleCount: Int { geositePriority.count + allInlineRules.count }
 
     private static func loadBundledRules() -> [String] {
         for sub in ["rules", "Resources/rules"] {
@@ -71,6 +94,10 @@ enum VideoAdBlock {
 
     /// Minimal fallback if the bundled list is missing (dev / tests).
     private static let embeddedFallback: [String] = [
+        "DOMAIN-SUFFIX,imasdk.googleapis.com,REJECT",
+        "DOMAIN-SUFFIX,pubads.g.doubleclick.net,REJECT",
+        "DOMAIN-SUFFIX,video-ads.googlevideo.com,REJECT",
+        "DOMAIN-SUFFIX,ads.youtube.com,REJECT",
         "DOMAIN-SUFFIX,doubleclick.net,REJECT",
         "DOMAIN-SUFFIX,googleadservices.com,REJECT",
         "DOMAIN-SUFFIX,googlesyndication.com,REJECT",

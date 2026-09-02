@@ -491,10 +491,36 @@ final class AppUpdateController: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var lastChecked: Date?
+    /// Hidden for current launch after user taps close on the home banner.
+    @Published private(set) var homeBannerDismissed = false
+
+    private var checkedThisLaunch = false
 
     private init() {}
 
-    func check(silent: Bool = false) async {
+    var shouldShowHomeBanner: Bool {
+        guard !homeBannerDismissed else { return false }
+        switch phase {
+        case .available, .downloading:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func dismissHomeBanner() {
+        homeBannerDismissed = true
+    }
+
+    /// Once per app launch — check GitHub releases and show home banner when newer.
+    func checkForHomeBannerIfNeeded() async {
+        guard !checkedThisLaunch else { return }
+        checkedThisLaunch = true
+        homeBannerDismissed = false
+        await check(silent: true, autoInstall: false)
+    }
+
+    func check(silent: Bool = false, autoInstall: Bool = false) async {
         phase = .checking
         do {
             let release = try await AppUpdateService.fetchLatestRelease()
@@ -502,7 +528,9 @@ final class AppUpdateController: ObservableObject {
             switch AppUpdateService.compareVersion(release.version, to: AppVersion.short) {
             case .orderedDescending:
                 phase = .available(release)
-                await downloadAndInstall()
+                if autoInstall {
+                    await downloadAndInstall()
+                }
             case .orderedSame:
                 phase = .upToDate(remote: release.version)
             case .orderedAscending:
@@ -510,7 +538,11 @@ final class AppUpdateController: ObservableObject {
             }
         } catch {
             lastChecked = Date()
-            phase = .failed(error.localizedDescription)
+            if silent {
+                phase = .idle
+            } else {
+                phase = .failed(error.localizedDescription)
+            }
             NSLog("BashX update check failed: \(error.localizedDescription)")
         }
     }

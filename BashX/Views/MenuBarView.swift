@@ -84,7 +84,6 @@ struct MenuBarView: View {
         next.showMenuBarTraffic = state.settings.showMenuBarTraffic
         next.tunEnabled = state.settings.tunEnabled
         next.videoAdBlockEnabled = state.settings.videoAdBlockEnabled
-        next.autoSpeedTestEnabled = state.settings.autoSpeedTestEnabled
         next.autoSelectFastest = state.settings.autoSelectFastest
         next.proxyMode = state.settings.proxyMode
         next.proxyModeTitle = state.settings.proxyMode.title(lang: next.lang)
@@ -97,7 +96,6 @@ struct MenuBarView: View {
             runtime: next.runtimeOutboundName,
             lang: next.lang
         )
-        next.isTesting = state.isTesting
         next.isBusy = state.isBusy
         next.status = MenuBarSnapshot.menuCoreStatusPublic(state: state, lang: next.lang)
         if next != snap {
@@ -227,11 +225,6 @@ private struct MenuBarFrozenContent: View, Equatable {
 
         subscriptionSection
 
-        Button(snap.isTesting ? t("mac.menu.speedTesting") : t("mac.menu.speedTest")) {
-            Task { await state.runSpeedTest() }
-        }
-        .disabled(snap.isTesting || snap.menuNodes.isEmpty)
-
         Divider()
 
         settingsSection
@@ -357,17 +350,6 @@ private struct MenuBarFrozenContent: View, Equatable {
     private var settingsSection: some View {
         Menu(t("mac.menu.settings")) {
             Toggle(isOn: Binding(
-                get: { snap.autoSpeedTestEnabled },
-                set: { v in
-                    state.setAutoSpeedTestEnabled(v)
-                    onRefresh()
-                }
-            )) {
-                Text(t("mac.menu.autoSpeed"))
-            }
-            .disabled(snap.menuNodes.isEmpty)
-
-            Toggle(isOn: Binding(
                 get: { snap.autoSelectFastest },
                 set: { v in
                     state.setAutoSelectFastest(v)
@@ -425,7 +407,6 @@ private struct MenuBarSnapshot: Equatable {
     var status: String
     var coreRunning: Bool
     var isBusy: Bool
-    var isTesting: Bool
     var proxyMode: ProxyMode
     var proxyModeTitle: String
     var hubMode: ProxyHubMode
@@ -441,7 +422,6 @@ private struct MenuBarSnapshot: Equatable {
     var runtimeOutboundName: String?
     var launchAtLoginEnabled: Bool
     var showMenuBarTraffic: Bool
-    var autoSpeedTestEnabled: Bool
     var autoSelectFastest: Bool
     var logoStyle: LogoStyle
     var logoStyleTitle: String
@@ -453,7 +433,6 @@ private struct MenuBarSnapshot: Equatable {
         status: "",
         coreRunning: false,
         isBusy: false,
-        isTesting: false,
         proxyMode: .rule,
         proxyModeTitle: ProxyMode.rule.title,
         hubMode: .smart,
@@ -469,7 +448,6 @@ private struct MenuBarSnapshot: Equatable {
         runtimeOutboundName: nil,
         launchAtLoginEnabled: false,
         showMenuBarTraffic: false,
-        autoSpeedTestEnabled: false,
         autoSelectFastest: false,
         logoStyle: .ring,
         logoStyleTitle: LogoStyle.ring.title,
@@ -517,7 +495,6 @@ private struct MenuBarSnapshot: Equatable {
             status: menuCoreStatus(state: state, lang: lang),
             coreRunning: state.coreRunning,
             isBusy: state.isBusy,
-            isTesting: state.isTesting,
             proxyMode: state.settings.proxyMode,
             proxyModeTitle: state.settings.proxyMode.title(lang: lang),
             hubMode: hub,
@@ -533,7 +510,6 @@ private struct MenuBarSnapshot: Equatable {
             runtimeOutboundName: runtime,
             launchAtLoginEnabled: state.launchAtLoginOn,
             showMenuBarTraffic: state.settings.showMenuBarTraffic,
-            autoSpeedTestEnabled: state.settings.autoSpeedTestEnabled,
             autoSelectFastest: state.settings.autoSelectFastest,
             logoStyle: state.settings.logoStyle,
             logoStyleTitle: state.settings.logoStyle.title,

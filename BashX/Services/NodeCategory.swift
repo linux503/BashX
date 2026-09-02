@@ -13,6 +13,22 @@ enum NodeCategory {
     private static let gatCodes: Set<String> = ["HK", "MO", "TW"]
     private static let jkCodes: Set<String> = ["JP", "KR"]
     private static let anzCodes: Set<String> = ["AU", "NZ"]
+    /// North America — US + Canada.
+    private static let uscaCodes: Set<String> = ["US", "CA"]
+    /// Europe (continent bucket).
+    private static let euCodes: Set<String> = [
+        "GB", "UK", "IE", "FR", "DE", "NL", "BE", "CH", "AT", "IT", "ES", "PT",
+        "SE", "NO", "FI", "DK", "PL", "CZ", "HU", "RO", "UA", "GR", "IS", "LU",
+        "AD", "MT", "MC", "LI", "SM", "VA", "CY", "BG", "HR", "SK", "SI", "EE", "LV", "LT",
+    ]
+    /// Africa (continent bucket).
+    private static let afCodes: Set<String> = [
+        "NG", "EG", "ZA", "KE", "MA", "TN", "DZ", "GH", "ET", "TZ", "UG", "SN", "CM", "CI",
+    ]
+    /// CIS / Central Asia.
+    private static let cisCodes: Set<String> = [
+        "RU", "KZ", "UZ", "GE", "AM", "AZ", "BY", "MD", "KG", "TJ", "TM",
+    ]
 
     /// Southeast Asia — always shown as one region.
     private static let seaCodes: Set<String> = [
@@ -42,14 +58,19 @@ enum NodeCategory {
     /// Keep these as standalone even when only 1 node.
     private static let majorCodes: Set<String> = [
         "GAT", "JK", "ANZ", "SEA", "SAS", "SAM", "CAM", "ME",
+        "USCA", "EU", "AF", "CIS",
         "HK", "MO", "TW", "JP", "KR", "US", "CA", "MX", "GB", "UK",
-        "DE", "FR", "NL", "AU", "CN", "OTHER", "SPARSE"
+        "DE", "FR", "NL", "AU", "CN", "OTHER", "SPARSE",
     ]
 
     private static let codeTitles: [(code: String, title: String, flag: String)] = [
         ("GAT", "港澳台", "🇭🇰"),
         ("JK", "日韩", "🇯🇵"),
         ("ANZ", "澳新", "🇦🇺"),
+        ("USCA", "美加", "🇺🇸"),
+        ("EU", "欧洲", "🇪🇺"),
+        ("AF", "非洲", "🌍"),
+        ("CIS", "独联体", "🌐"),
         ("HK", "香港", "🇭🇰"),
         ("MO", "澳门", "🇲🇴"),
         ("TW", "台湾", "🇹🇼"),
@@ -153,6 +174,10 @@ enum NodeCategory {
         ("港澳台", "GAT"), ("港澳", "GAT"), ("港台", "GAT"), ("台港澳", "GAT"),
         ("日韩", "JK"), ("韩日", "JK"),
         ("澳新", "ANZ"), ("新澳", "ANZ"),
+        ("美加", "USCA"), ("北美", "USCA"),
+        ("欧洲", "EU"), ("欧盟", "EU"),
+        ("非洲", "AF"),
+        ("独联体", "CIS"),
         ("香港", "HK"), ("澳门", "MO"), ("台灣", "TW"), ("台湾", "TW"),
         ("新加坡", "SG"), ("日本", "JP"), ("韩国", "KR"), ("韓國", "KR"),
         ("美国", "US"), ("美國", "US"), ("加拿大", "CA"), ("墨西哥", "MX"),
@@ -186,9 +211,8 @@ enum NodeCategory {
     ]
 
     private static let preferredOrder = [
-        "GAT", "JK", "ANZ", "SEA", "SAS", "US", "CA", "MX", "GB", "DE", "FR", "NL",
-        "CH", "IT", "ES", "SE", "NO", "FI", "DK", "ME", "RU", "SAM", "CAM",
-        "SG", "TH", "VN", "PH", "MY", "ID"
+        "GAT", "JK", "ANZ", "SEA", "SAS", "USCA", "MX", "EU", "ME", "SAM", "CAM", "AF", "CIS",
+        "GB", "DE", "FR", "NL", "CH", "IT", "ES", "SG", "TH", "VN", "PH", "MY", "ID",
     ]
 
     private static var codeLookup: [String: (title: String, flag: String)] = {
@@ -231,7 +255,7 @@ enum NodeCategory {
 
     /// Fixed chip strip keys — always shown on iOS Nodes page (count may be 0).
     private static let fixedChipKeys = [
-        "GAT", "JK", "ANZ", "SEA", "SAS", "US", "CA", "GB", "DE", "FR", "NL", "ME", "SAM", "OTHER",
+        "GAT", "JK", "ANZ", "SEA", "SAS", "USCA", "EU", "MX", "ME", "SAM", "AF", "OTHER",
     ]
 
     /// Stable region chips for UI: preferred fixed set + any extra groups present in `nodes`.
@@ -324,10 +348,16 @@ enum NodeCategory {
     }
 
     private static func regionBucket(_ country: String) -> String {
-        if ["GAT", "JK", "ANZ", "SEA", "SAS", "SAM", "CAM", "ME"].contains(country) { return country }
+        if ["GAT", "JK", "ANZ", "SEA", "SAS", "SAM", "CAM", "ME", "USCA", "EU", "AF", "CIS"].contains(country) {
+            return country
+        }
         if gatCodes.contains(country) { return "GAT" }
         if jkCodes.contains(country) { return "JK" }
         if anzCodes.contains(country) { return "ANZ" }
+        if uscaCodes.contains(country) { return "USCA" }
+        if euCodes.contains(country) { return "EU" }
+        if afCodes.contains(country) { return "AF" }
+        if cisCodes.contains(country) { return "CIS" }
         if seaCodes.contains(country) { return "SEA" }
         if sasCodes.contains(country) { return "SAS" }
         if samCodes.contains(country) { return "SAM" }

@@ -353,6 +353,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.mask)
     }
 
+    private static let domesticIPv6BypassRoutes: [NEIPv6Route] = DomesticBypassRoutes.ipv6CIDRs.map {
+        NEIPv6Route(destinationAddress: $0.address, networkPrefixLength: NSNumber(value: $0.prefix))
+    }
+
     /// Telegram DC IPv6 prefixes (clients dial these literals; must enter TUN).
     private static let telegramIPv6Routes: [NEIPv6Route] = [
         NEIPv6Route(destinationAddress: "2001:67c:4e8::", networkPrefixLength: 48),
@@ -387,21 +391,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             // Domestic CDN off utun — WeChat/淘宝/抖音 video otherwise jetsam the NE (~50MB).
             // TikTok overseas CDN is NOT in douyinChinaBypassRoutes (byteoversea stays in-tunnel).
             ipv4.excludedRoutes = Self.domesticBypassRoutes
+            let dns = NEDNSSettings(servers: [AppConstants.tunDNS])
+            // 抖音/国内不在此列表 → 系统 DNS → 真实 IP 走 excludedRoutes，不进 gVisor。
+            dns.matchDomains = DomesticBypassRoutes.tunnelDNSMatchDomains
+            dns.matchDomainsNoSearch = true
+            writeLog("NE bypass v4=\(Self.domesticBypassRoutes.count) v6=\(Self.domesticIPv6BypassRoutes.count) dns=split(\(dns.matchDomains?.count ?? 0))")
             settings.ipv4Settings = ipv4
-            // Keep most IPv6 on the physical path (WeChat media CDN). Pull Telegram DC +
-            // (when enabled) APNs IPv6 into TUN — otherwise Happy-Eyeballs hangs on blocked v6.
+            // Only Telegram DC (+ optional APNs) enter TUN on IPv6. Mainland CDN IPv6
+            // (2408/2409/240e…) must stay on physical path — gVisor DIRECT times out → jetsam.
             let ipv6 = NEIPv6Settings(addresses: ["fd00:beef::1"], networkPrefixLengths: [64])
             var v6Routes = Self.telegramIPv6Routes
             if Self.loadTelegramPushEnabled() {
                 v6Routes.append(contentsOf: Self.apnsIPv6Routes)
             }
             ipv6.includedRoutes = v6Routes
+            ipv6.excludedRoutes = Self.domesticIPv6BypassRoutes
             settings.ipv6Settings = ipv6
-
-            let dns = NEDNSSettings(servers: [AppConstants.tunDNS])
-            // Split DNS: domestic apps (抖音/淘宝/微信) use system DNS → real CN IP → excludedRoutes bypass TUN.
-            // Full hijack (matchDomains=[""]) forced all DNS + video through gVisor → jetsam → idleTimeout flap.
-            dns.matchDomains = DomesticBypassRoutes.tunnelDNSMatchDomains
             settings.dnsSettings = dns
         } else {
             // HTTP 代理实验：不全量接管路由（≠ TUN）。
@@ -612,6 +617,41 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         Self.localAPISession().dataTask(with: req).resume()
     }
 
+    /// Close only domestic video CDN sockets stuck in gVisor (Douyin / 头条).
+    private func closeDomesticVideoConnectionsBestEffort() {
+        guard let url = URL(string: "http://\(AppConstants.externalController)/connections") else { return }
+        var req = URLRequest(url: url, timeoutInterval: 2)
+        req.httpMethod = "GET"
+        if let secret = apiSecretHeader() {
+            req.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        }
+        Self.localAPISession().dataTask(with: req) { [weak self] data, _, _ in
+            guard let self, let data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let list = json["connections"] as? [[String: Any]] else { return }
+            let markers = DomesticBypassRoutes.domesticVideoHostMarkers
+            var closed = 0
+            for conn in list {
+                let meta = conn["metadata"] as? [String: Any]
+                let host = ((meta?["host"] as? String) ?? (meta?["destinationIP"] as? String) ?? "")
+                    .lowercased()
+                guard markers.contains(where: { host.contains($0) }) else { continue }
+                guard let id = conn["id"] as? String, !id.isEmpty,
+                      let delURL = URL(string: "http://\(AppConstants.externalController)/connections/\(id)") else { continue }
+                var del = URLRequest(url: delURL, timeoutInterval: 1)
+                del.httpMethod = "DELETE"
+                if let secret = self.apiSecretHeader() {
+                    del.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+                }
+                Self.localAPISession().dataTask(with: del).resume()
+                closed += 1
+            }
+            if closed > 0 {
+                self.writeLog("closed \(closed) domestic-video conns (rss pressure)")
+            }
+        }.resume()
+    }
+
     private func startMemoryManagement() {
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         // Jetsam ~50MB. Baseline NE RSS is often 50–70MB — do NOT closeAll on that
@@ -625,10 +665,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             // Jetsam ~50MB. Baseline NE RSS is often 30–45MB with trading apps.
             // NEVER DELETE /connections under memory pressure — that is exactly the
             // Binance「网络线路中断」storm. Prefer GC; if jetsam kills us, On-Demand restarts.
-            if footprint > 18 * 1024 * 1024 {
+            if footprint > 10 * 1024 * 1024 {
                 BridgeForceGC()
             }
-            if footprint > 40 * 1024 * 1024, self.gcTickCount.isMultiple(of: 2) {
+            // Douyin video buffers in gVisor → jetsam ~15 clips. Drop those DIRECT
+            // conns early; never DELETE all (kills Binance / Telegram WS).
+            if footprint > 40 * 1024 * 1024 {
+                self.closeDomesticVideoConnectionsBestEffort()
+                BridgeForceGC()
+                self.writeLog("mem high rss=\(footprint / 1024)KB — drop 抖音 conns + GC")
+            } else if footprint > 28 * 1024 * 1024, self.gcTickCount.isMultiple(of: 2) {
                 BridgeForceGC()
                 self.writeLog("mem high rss=\(footprint / 1024)KB — GC only (keep WS)")
             }

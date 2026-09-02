@@ -128,7 +128,7 @@ enum IOSConfigWriter {
                 controller: AppConstants.externalController,
                 secret: secret,
                 tunEnabled: tunnelCapture,
-                tunStack: "gvisor",
+                tunStack: "mixed",
                 mode: mode,
                 allowLan: false,
                 dnsPreference: dnsPreference,
@@ -145,7 +145,7 @@ enum IOSConfigWriter {
                 secret: secret,
                 rules: rules,
                 tunEnabled: tunnelCapture,
-                tunStack: "gvisor",
+                tunStack: "mixed",
                 mode: mode,
                 allowLan: false,
                 turboMode: false,
@@ -168,7 +168,7 @@ enum IOSConfigWriter {
     private static func patchForPacketTunnel(_ yaml: String) -> String {
         var out: [String] = []
         var inTun = false
-        var skippingDnsHijackList = false
+        var skippingList = false
 
         for line in yaml.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -180,7 +180,7 @@ enum IOSConfigWriter {
 
             if trimmed.hasPrefix("tun:") {
                 inTun = true
-                skippingDnsHijackList = false
+                skippingList = false
                 out.append(line)
                 continue
             }
@@ -188,7 +188,7 @@ enum IOSConfigWriter {
             if inTun {
                 if !line.hasPrefix(" ") && !line.hasPrefix("\t") && !trimmed.isEmpty {
                     inTun = false
-                    skippingDnsHijackList = false
+                    skippingList = false
                 } else if trimmed.hasPrefix("auto-route:") {
                     out.append("  auto-route: false")
                     continue
@@ -196,18 +196,20 @@ enum IOSConfigWriter {
                     out.append("  auto-detect-interface: false")
                     continue
                 } else if trimmed.hasPrefix("stack:") {
-                    out.append("  stack: gvisor")
+                    out.append("  stack: mixed")
                     continue
                 } else if trimmed.hasPrefix("dns-hijack:") {
-                    out.append("  dns-hijack:")
-                    out.append("    - \(AppConstants.tunDNS):53")
-                    out.append("    - any:53")
-                    skippingDnsHijackList = true
+                    out.append("  dns-hijack: []")
+                    skippingList = true
                     continue
-                } else if skippingDnsHijackList && trimmed.hasPrefix("-") {
+                } else if trimmed.hasPrefix("inet4-address:") {
+                    // socketpair: NE assigns 198.18.0.1 later — YAML inet4 breaks gVisor bind.
+                    skippingList = true
                     continue
-                } else if skippingDnsHijackList && !trimmed.hasPrefix("-") {
-                    skippingDnsHijackList = false
+                } else if skippingList && trimmed.hasPrefix("-") {
+                    continue
+                } else if skippingList && !trimmed.hasPrefix("-") {
+                    skippingList = false
                 }
             }
 

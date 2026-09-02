@@ -281,18 +281,9 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
 
     /// iOS Network Extension (~15MB RAM): no geosite/geoip in DNS — avoids loading multi-MB databases.
     static func iosDnsBlock(for preference: DnsPreference) -> [String: Any] {
-        let cnNS = [
-            "https://223.5.5.5/dns-query",
-            "https://1.12.12.12/dns-query",
-            "https://doh.pub/dns-query",
-        ]
-        // DoH first — bare UDP:53 often fails under NE bind ("network is unreachable").
-        let foreignNS = [
-            "https://8.8.8.8/dns-query",
-            "https://1.1.1.1/dns-query",
-            "8.8.8.8",
-            "1.1.1.1",
-        ]
+        // UDP only — DoH :443 through gVisor/TUN timed out → douyinvod/amemv "couldn't find ip".
+        let cnNS = ["223.5.5.5", "119.29.29.29", "1.12.12.12"]
+        let foreignNS = ["8.8.8.8", "1.1.1.1", "9.9.9.9"]
         let (nameserver, fallback): ([String], [String]) = {
             switch preference {
             // Domestic-first: unmatched apps/domains stay on CN DNS + DIRECT routing.
@@ -303,11 +294,7 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         }()
         // Never use "system" DNS in NE — /etc/resolv.conf does not exist; DIRECT dials fail with
         // "can't resolve ip … open /etc/resolv.conf: no such file or directory".
-        let bootstrapNS = [
-            "223.5.5.5",
-            "119.29.29.29",
-            "https://223.5.5.5/dns-query",
-        ]
+        let bootstrapNS = ["223.5.5.5", "119.29.29.29", "1.12.12.12"]
         // Build programmatically — duplicate keys in dictionary literals trap at runtime in Debug.
         var policy: [String: Any] = [:]
         for suffix in [
@@ -363,43 +350,15 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         // Never answer AAAA on iOS — only Telegram DC IPv6 is routed into TUN;
         // other AAAA would bypass the tunnel and hang Happy-Eyeballs.
         block["ipv6"] = false
-        // Bind localhost — 198.18.0.2:53 cannot bind; NE still points DNS at 198.18.0.2,
-        // and TUN dns-hijack feeds queries into mihomo (BaoLianDeng pattern).
+        // Bind localhost — mihomo internal DNS (proxy bootstrap only; NE uses system DNS).
         block["listen"] = "127.0.0.1:1053"
-        block["enhanced-mode"] = "fake-ip"
-        block["fake-ip-range"] = "198.18.0.1/16"
+        // redir-host: 真实 IP，不产生 198.18.x fake-ip（抖音 CDN 因此可 excludedRoutes 绕过 TUN）。
+        block["enhanced-mode"] = "redir-host"
         block["use-system-hosts"] = false
         block["respect-rules"] = true
-        block["fake-ip-filter"] = [
-            "*.lan", "*.local", "+.local", "+.lan",
-            // Apple：Push/系统服务需要真实 IP；分流靠下方 IP-CIDR + DOMAIN 规则。
-            "+.apple.com", "+.icloud.com", "+.cdn-apple.com", "+.mzstatic.com",
-            "+.push.apple.com", "+.apple-cloudkit.com",
-            // 国内站走真实 IP（对齐 Shadowrocket dns-direct-system）
-            "+.cn",
-            "+.baidu.com", "+.bdstatic.com", "+.bdimg.com",
-            "+.baidubce.com", "+.bcebos.com",
-            "+.qq.com", "+.weixin.qq.com", "+.weixin.com", "+.wechat.com",
-            "+.qpic.cn", "+.qlogo.cn", "+.gtimg.cn", "+.gtimg.com",
-            "+.servicewechat.com", "+.tenpay.com", "+.idqqimg.com",
-            "+.taobao.com", "+.tmall.com", "+.alipay.com", "+.alicdn.com",
-            "+.aliyun.com", "+.goofish.com", "+.idlefish.com",
-            "+.jd.com", "+.pinduoduo.com", "+.yangkeduo.com", "+.vip.com",
-            "+.bilibili.com", "+.zhihu.com",
-            "+.douyin.com", "+.douyincdn.com", "+.bytedance.com", "+.zijieapi.com", "+.amemv.com", "+.byteimg.com", "+.snssdk.com", "+.xiaohongshu.com", "+.xhscdn.com", "+.xhslink.com", "+.meituan.com", "+.ctrip.com",
-        ] + DomesticBypassRoutes.douyinDomainSuffixes.map({ "+.\($0)" }) + [
-            "localhost.ptlogin2.qq.com",
-            "+.stun.*.*", "lens.l.google.com",
-            // TikTok intl stays on fake-ip (not listed). snssdk.com = 抖音 → real IP above.
-        ] + telegramFakeIPFilters + cursorFakeIPFilters + binanceFakeIPFilters + huobiFakeIPFilters
-        // snssdk / TikTok: foreign DNS + fake-ip so DOMAIN rules match.
         // IP-literal DoH bootstrap — plain UDP:53 often returns "network is unreachable" under NE bind.
         block["default-nameserver"] = bootstrapNS
-        block["proxy-server-nameserver"] = [
-            "https://223.5.5.5/dns-query",
-            "https://doh.pub/dns-query",
-            "119.29.29.29",
-        ]
+        block["proxy-server-nameserver"] = ["223.5.5.5", "119.29.29.29", "1.12.12.12"]
         block["nameserver"] = nameserver
         block["fallback"] = fallback
         // Explicit geoip:false — mihomo Default() has geoip:true; YAML merge keeps it

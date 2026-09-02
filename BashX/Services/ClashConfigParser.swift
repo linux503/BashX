@@ -63,7 +63,7 @@ enum ClashConfigParser {
                 : real
             guard !pool.isEmpty else { return nodes }
             // Keep NE under ~50MB jetsam budget — 24 leaves + sniffer was killing tunnels (80MB+).
-            let cap = 12
+            let cap = 8
             let selected = selectedName.flatMap { name in pool.first(where: { $0.name == name }) }
             var names = Self.urlTestPool(from: pool.map(\.name), selected: selected?.name, limit: cap)
             if names.isEmpty { names = Array(pool.prefix(cap).map(\.name)) }
@@ -181,7 +181,7 @@ enum ClashConfigParser {
         // iOS NE has a tight RAM budget: keep pools small or jetsam kills the tunnel.
         let urlTestLimit = forIOS ? 8 : 36
         // iOS NE: no url-test health checks — periodic batch dials spike RAM and trigger jetsam.
-        let iosPickerLimit = 6
+        let iosPickerLimit = 4
         let telegramProxies: [String] = {
             if poolSource.isEmpty { return ["DIRECT"] }
             // Telegram needs low-latency Asia hubs; keep pool tight so url-test finishes.
@@ -260,7 +260,6 @@ enum ClashConfigParser {
                 // Must include every hub listed in PROXY/GLOBAL (TW was missing → mihomo reject).
                 return [
                     Self.iosSelectGroup(name: "AUTO", proxies: autoProxies),
-                    // 负载均衡 / 故障转移: lazy so health checks only run if actively selected (jetsam-safe).
                     [
                         "name": balanceHubName,
                         "type": "load-balance",
@@ -286,6 +285,7 @@ enum ClashConfigParser {
                 ] + Self.telegramGroups(proxies: telegramProxies, forIOS: true)
                     + Self.apnsGroups(proxies: telegramProxies, selected: selected, forIOS: true)
                     + cursorGroups + aiGroups + serviceGroups
+                // Rules still reference TIKTOK/CURSOR/OPENAI/etc — omitting groups breaks mihomo parse.
             }
             // Shadowrocket-style: GOOGLE prefers JP, then HK, then GOOGLE-AUTO / PROXY.
             // Do not nest PROXY inside GOOGLE if PROXY may list GOOGLE — PROXY is leaf+region only.
@@ -418,8 +418,7 @@ enum ClashConfigParser {
             root["tcp-concurrent"] = false
             // Longer keep-alive for Binance / trading WebSockets (10s was too chatty + flappy).
             root["keep-alive-interval"] = 25
-            // Sniffer OFF — enabling it in 1.0.48 jetsam'd the NE so TikTok (and often all
-            // tunnel traffic) could not open. Domain rules + fake-ip-filter cover named hosts.
+            // Sniffer OFF on iOS NE — TLS sniff + gVisor already near jetsam; domestic bypass is NE excludedRoutes.
             root["sniffer"] = ["enable": false]
             root["profile"] = ["store-selected": true, "store-fake-ip": false]
         }
@@ -556,8 +555,10 @@ enum ClashConfigParser {
         ]
         if forIOS {
             tun["mtu"] = 1400
-            // Exclude domestic CDN CIDRs so chat/video media bypasses gVisor (RSS).
+            // Do NOT set inet4-address — socketpair+gVisor starts before NE routes; kernel bind to 198.18.0.1 fails.
             tun["route-exclude-address"] = DomesticBypassRoutes.ipv4CIDRs
+                + DomesticBypassRoutes.ipv6CIDRs.map { "\($0.address)/\($0.prefix)" }
+            tun["dns-hijack"] = []
         }
         // Mac: do NOT set inet4-route-address. Restricting to 198.18/16 + Telegram DCs
         // drops WhatsApp when system DNS returns real Meta IPs (bypass/DoH) — those
@@ -633,28 +634,24 @@ enum ClashConfigParser {
         ]
     ]
 
-    /// iOS NE: sniff SNI so bare-IP TikTok/WeChat CDN hits DOMAIN rules (not MATCH,DIRECT).
-    private static let iosSnifferBlock: [String: Any] = [
-        "enable": true,
-        "force-dns-mapping": true,
-        "parse-pure-ip": true,
-        "override-destination": false,
-        "sniff": [
-            "TLS": ["ports": [443, 8443]],
-            "HTTP": ["ports": [80, 8080]],
-        ],
-        "skip-domain": [
-            "+.push.apple.com",
-            "+.apple.com",
-            "+.icloud.com",
-            "+.cdn-apple.com",
-            "+.mzstatic.com",
-            "+.qq.com",
-            "+.weixin.qq.com",
-            "+.baidu.com",
-            "+.alicdn.com",
+    /// iOS NE: TLS SNI only — system DNS gives real IPs; skip 抖音/国内 domains if any leak into TUN.
+    private static func iosSnifferBlock() -> [String: Any] {
+        var skip = [
+            "+.push.apple.com", "+.apple.com", "+.icloud.com", "+.cdn-apple.com", "+.mzstatic.com",
+            "+.qq.com", "+.weixin.qq.com", "+.weixin.com", "+.wechat.com", "+.qpic.cn", "+.gtimg.cn",
+            "+.baidu.com", "+.bdstatic.com", "+.alicdn.com", "+.taobao.com", "+.tmall.com",
+            "+.alipay.com", "+.jd.com", "+.bilibili.com", "+.zhihu.com", "+.cn",
         ]
-    ]
+        skip += DomesticBypassRoutes.douyinDomainSuffixes.map { "+.\($0)" }
+        return [
+            "enable": true,
+            "force-dns-mapping": false,
+            "parse-pure-ip": false,
+            "override-destination": false,
+            "sniff": ["TLS": ["ports": [443, 8443]]],
+            "skip-domain": skip,
+        ]
+    }
 
     /// iOS NE: manual select only — url-test batch health checks exhaust the ~50MB jetsam budget.
     private static func iosSelectGroup(name: String, proxies: [String]) -> [String: Any] {
@@ -672,7 +669,7 @@ enum ClashConfigParser {
         twProxies: [String],
         forIOS: Bool
     ) -> [[String: Any]] {
-        let leafCap = forIOS ? 6 : 24
+        let leafCap = forIOS ? 4 : 24
         let leaves = Array(poolSource.filter { $0 != "DIRECT" && !Self.isPlaceholderNodeName($0) }.prefix(leafCap))
 
         func hasHub(_ proxies: [String]) -> Bool {
@@ -963,8 +960,8 @@ enum ClashConfigParser {
         } else if let pinned, names.contains(pinned) {
             sticky.insert(pinned, at: 0)
         }
-        if sticky.count > (forIOS ? 10 : 36) {
-            sticky = Array(sticky.prefix(forIOS ? 10 : 36))
+        if sticky.count > (forIOS ? 6 : 36) {
+            sticky = Array(sticky.prefix(forIOS ? 6 : 36))
         }
         if sticky.isEmpty { sticky = ["DIRECT"] }
         else if !sticky.contains("DIRECT") { sticky.append("DIRECT") }
@@ -990,7 +987,7 @@ enum ClashConfigParser {
         if aiSelect.isEmpty { aiSelect = ["DIRECT"] }
         else if !aiSelect.contains("DIRECT") { aiSelect.append("DIRECT") }
         // Never nest PROXY here — PROXY may list AI and mihomo rejects the loop.
-        let aiCap = forIOS ? 10 : 40
+        let aiCap = forIOS ? 6 : 40
         groups.append(["name": "AI", "type": "select", "proxies": Array(aiSelect.prefix(aiCap))])
         return groups
     }

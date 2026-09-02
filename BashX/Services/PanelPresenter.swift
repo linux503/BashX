@@ -116,6 +116,8 @@ final class SettingsPresenter {
             win.isReleasedWhenClosed = false
             win.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             win.identifier = NSUserInterfaceItemIdentifier(AppActivation.settingsID)
+            win.acceptsMouseMovedEvents = true
+            win.isMovableByWindowBackground = false
             let delegate = BashXWindowDelegate { [weak self] in
                 self?.window?.orderOut(nil)
                 AppActivation.refreshAfterWindowClosed()
@@ -141,10 +143,10 @@ final class SettingsPresenter {
 final class PanelPresenter {
     static let shared = PanelPresenter()
 
-    private static let defaultSize = NSSize(width: 1100, height: 740)
-    private static let minimumSize = NSSize(width: 980, height: 640)
-    private static let minimalSize = NSSize(width: 440, height: 720)
-    private static let minimalMinimum = NSSize(width: 400, height: 640)
+    private static let defaultSize = NSSize(width: 1000, height: 680)
+    private static let minimumSize = NSSize(width: 920, height: 580)
+    private static let minimalSize = NSSize(width: 400, height: 660)
+    private static let minimalMinimum = NSSize(width: 380, height: 600)
 
     private var window: NSWindow?
     private var host: NSHostingController<AnyView>?

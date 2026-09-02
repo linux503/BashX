@@ -35,7 +35,7 @@ struct SettingsView: View {
     @State private var showGeneralAdvanced = false
     @State private var showNetworkSpeed = false
     @State private var showNetworkCore = false
-    @State private var showLaunchLog = true
+    @State private var showLaunchLog = false
 
     private var lang: AppLanguage { state.settings.uiLanguage }
     private func t(_ key: String) -> String { L10n.t(key, lang) }
@@ -71,6 +71,20 @@ struct SettingsView: View {
         }
     }
 
+    /// macOS Form defaults swallow clicks on plain buttons — bordered style is required.
+    private func settingsActionButton(_ title: String, role: ButtonRole? = nil, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Group {
+            if let role {
+                Button(title, role: role, action: action)
+            } else {
+                Button(title, action: action)
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(disabled)
+    }
+
     private var settingsTabBar: some View {
         HStack(spacing: 6) {
             ForEach(SettingsTab.allCases) { item in
@@ -102,138 +116,142 @@ struct SettingsView: View {
     // MARK: - 常用
 
     private var generalTab: some View {
-        Form {
-            if state.launchHasError {
-                launchDiagnosticSection
-            }
-
-            Section {
-                HStack(spacing: 8) {
-                    ForEach(ProxyMode.allCases) { mode in
-                        settingsProxyModeButton(mode)
-                    }
+        ScrollView {
+            Form {
+                if state.launchHasError {
+                    launchDiagnosticSection
                 }
-                .padding(.vertical, 4)
 
-                Toggle(t("mac.sec.systemProxy"), isOn: Binding(
-                    get: { state.systemProxyOn },
-                    set: { v in Task { await state.setSystemProxy(v) } }
-                ))
-                .help(t("mac.systemProxy.hint").replacingOccurrences(of: "%@", with: "\(state.settings.mixedPort)"))
-
-                Toggle(t("mac.tun"), isOn: Binding(
-                    get: { state.settings.tunEnabled },
-                    set: { v in Task { await state.setTUN(v) } }
-                ))
-                .help(t("mac.tun.hint"))
-
-                Toggle(t("mac.adblock"), isOn: Binding(
-                    get: { state.settings.videoAdBlockEnabled },
-                    set: { v in Task { await state.setVideoAdBlock(v) } }
-                ))
-                .help(t("mac.adblock.hint"))
-
-                Toggle(t("mac.launchAtLogin"), isOn: Binding(
-                    get: { state.launchAtLoginOn },
-                    set: { state.setLaunchAtLogin($0) }
-                ))
-            } header: {
-                Text(t("mac.sec.proxyMode"))
-            }
-
-            Section {
-                Toggle(t("mac.autoSpeed"), isOn: Binding(
-                    get: { state.settings.autoSpeedTestEnabled },
-                    set: { state.setAutoSpeedTestEnabled($0) }
-                ))
-                .disabled(state.nodes.isEmpty)
-
-                Toggle(t("mac.autoFastest"), isOn: Binding(
-                    get: { state.settings.autoSelectFastest },
-                    set: { state.setAutoSelectFastest($0) }
-                ))
-            } header: {
-                Text(t("mac.sec.speedQuick"))
-            }
-
-            Section {
-                DisclosureGroup(isExpanded: $showGeneralAdvanced) {
-                    Toggle(t("mac.closeConnOnSwitch"), isOn: Binding(
-                        get: { state.settings.closeConnectionsOnSwitch },
-                        set: { state.setCloseConnectionsOnSwitch($0) }
-                    ))
-                    .help(t("mac.closeConnOnSwitch.hint"))
-
-                    Toggle(t("mac.httpSubs"), isOn: Binding(
-                        get: { state.settings.allowInsecureHTTPSubscriptions },
-                        set: {
-                            state.settings.allowInsecureHTTPSubscriptions = $0
-                            state.persist()
-                            state.statusText = $0 ? t("mac.httpSubs.on") : t("mac.httpSubs.off")
-                        }
-                    ))
-                    .help(t("mac.httpSubs.hint"))
-
-                    Picker(t("mac.dns.picker"), selection: Binding(
-                        get: { state.settings.dnsPreference },
-                        set: { v in Task { await state.setDnsPreference(v) } }
-                    )) {
-                        ForEach(DnsPreference.allCases) { pref in
-                            Text(pref.title(lang: lang)).tag(pref)
+                Section {
+                    HStack(spacing: 8) {
+                        ForEach(ProxyMode.allCases) { mode in
+                            settingsProxyModeButton(mode)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .help(state.settings.dnsPreference.subtitle(lang: lang))
+                    .padding(.vertical, 4)
 
-                    if SystemProxy.hasSnapshot() {
-                        Button(t("mac.restoreProxy")) {
-                            let ok = SystemProxy.restoreFromSnapshot()
-                            state.statusText = ok ? t("mac.restoreProxy.ok") : t("mac.restoreProxy.none")
+                    Toggle(t("mac.sec.systemProxy"), isOn: Binding(
+                        get: { state.systemProxyOn },
+                        set: { v in Task { await state.setSystemProxy(v) } }
+                    ))
+                    .help(t("mac.systemProxy.hint").replacingOccurrences(of: "%@", with: "\(state.settings.mixedPort)"))
+
+                    Toggle(t("mac.tun"), isOn: Binding(
+                        get: { state.settings.tunEnabled },
+                        set: { v in Task { await state.setTUN(v) } }
+                    ))
+                    .help(t("mac.tun.hint"))
+
+                    Toggle(t("mac.launchAtLogin"), isOn: Binding(
+                        get: { state.launchAtLoginOn },
+                        set: { state.setLaunchAtLogin($0) }
+                    ))
+                } header: {
+                    Text(t("mac.sec.proxyMode"))
+                }
+
+                Section {
+                    Toggle(t("mac.youtube.adblock"), isOn: Binding(
+                        get: { state.settings.videoAdBlockEnabled },
+                        set: { v in Task { await state.setVideoAdBlock(v) } }
+                    ))
+                    .help(t("mac.youtube.adblock.hint"))
+
+                    if state.settings.videoAdBlockEnabled {
+                        LabeledContent(t("mac.youtube.adblock.rules")) {
+                            Text("\(VideoAdBlock.ruleCount)")
+                                .foregroundStyle(.secondary)
                         }
                     }
+                } header: {
+                    Text(t("mac.youtube.adblock.section"))
+                } footer: {
+                    Text(t("mac.youtube.adblock.footer"))
+                }
 
-                    HStack(spacing: 10) {
-                        Button(TunPrivilege.isReady ? t("mac.tun.reinstall") : t("mac.tun.install")) {
-                            do {
-                                try TunPrivilege.install()
-                                state.statusText = t("mac.tun.ready")
-                            } catch {
-                                state.statusText = error.localizedDescription
+                Section {
+                    Toggle(t("mac.autoFastest"), isOn: Binding(
+                        get: { state.settings.autoSelectFastest },
+                        set: { state.setAutoSelectFastest($0) }
+                    ))
+                } header: {
+                    Text(t("mac.sec.speedQuick"))
+                }
+
+                Section {
+                    DisclosureGroup(isExpanded: $showGeneralAdvanced) {
+                        Toggle(t("mac.closeConnOnSwitch"), isOn: Binding(
+                            get: { state.settings.closeConnectionsOnSwitch },
+                            set: { state.setCloseConnectionsOnSwitch($0) }
+                        ))
+                        .help(t("mac.closeConnOnSwitch.hint"))
+
+                        Toggle(t("mac.httpSubs"), isOn: Binding(
+                            get: { state.settings.allowInsecureHTTPSubscriptions },
+                            set: {
+                                state.settings.allowInsecureHTTPSubscriptions = $0
+                                state.persist()
+                                state.statusText = $0 ? t("mac.httpSubs.on") : t("mac.httpSubs.off")
+                            }
+                        ))
+                        .help(t("mac.httpSubs.hint"))
+
+                        Picker(t("mac.dns.picker"), selection: Binding(
+                            get: { state.settings.dnsPreference },
+                            set: { v in Task { await state.setDnsPreference(v) } }
+                        )) {
+                            ForEach(DnsPreference.allCases) { pref in
+                                Text(pref.title(lang: lang)).tag(pref)
                             }
                         }
-                        if TunPrivilege.isInstalledOnDisk {
-                            Button(t("mac.tun.remove"), role: .destructive) {
+                        .pickerStyle(.segmented)
+                        .help(state.settings.dnsPreference.subtitle(lang: lang))
+
+                        if SystemProxy.hasSnapshot() {
+                            settingsActionButton(t("mac.restoreProxy")) {
+                                let ok = SystemProxy.restoreFromSnapshot()
+                                state.statusText = ok ? t("mac.restoreProxy.ok") : t("mac.restoreProxy.none")
+                            }
+                        }
+
+                        HStack(spacing: 10) {
+                            settingsActionButton(TunPrivilege.isReady ? t("mac.tun.reinstall") : t("mac.tun.install")) {
                                 do {
-                                    try TunPrivilege.uninstall()
-                                    state.statusText = t("mac.tun.removed")
+                                    try TunPrivilege.install()
+                                    state.statusText = t("mac.tun.ready")
                                 } catch {
                                     state.statusText = error.localizedDescription
                                 }
                             }
+                            if TunPrivilege.isInstalledOnDisk {
+                                settingsActionButton(t("mac.tun.remove"), role: .destructive) {
+                                    do {
+                                        try TunPrivilege.uninstall()
+                                        state.statusText = t("mac.tun.removed")
+                                    } catch {
+                                        state.statusText = error.localizedDescription
+                                    }
+                                }
+                            }
                         }
-                    }
 
-                    HStack(spacing: 10) {
-                        Button {
-                            state.openConfigFolder()
-                        } label: {
-                            Label(t("mac.openConfig"), systemImage: "folder")
+                        HStack(spacing: 10) {
+                            settingsActionButton(t("mac.openConfig")) {
+                                state.openConfigFolder()
+                            }
+                            settingsActionButton(t("mac.openDashboard"), disabled: !state.coreRunning) {
+                                state.openDashboard()
+                            }
                         }
-                        Button {
-                            state.openDashboard()
-                        } label: {
-                            Label(t("mac.openDashboard"), systemImage: "safari")
-                        }
-                        .disabled(!state.coreRunning)
+                    } label: {
+                        Text(t("mac.sec.advanced"))
                     }
-                } label: {
-                    Text(t("mac.sec.advanced"))
                 }
             }
+            .formStyle(.grouped)
+            .font(.system(size: 12.5))
+            .padding(10)
         }
-        .formStyle(.grouped)
-        .font(.system(size: 12.5))
-        .padding(10)
     }
 
     private var launchDiagnosticSection: some View {
@@ -258,22 +276,21 @@ struct SettingsView: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 200)
+                .frame(height: 200)
             } label: {
                 Text(t("mac.launchDiag.detail"))
             }
 
             HStack(spacing: 10) {
-                Button(t("mac.launchDiag.copy")) {
+                settingsActionButton(t("mac.launchDiag.copy")) {
                     state.copyLaunchDiagnosticReport()
                 }
-                Button(t("mac.launchDiag.openLog")) {
+                settingsActionButton(t("mac.launchDiag.openLog")) {
                     state.openLaunchDiagnosticLog()
                 }
-                Button(t("mac.core.repair")) {
+                settingsActionButton(t("mac.core.repair"), disabled: state.isBusy) {
                     Task { await state.installOrRepairCore() }
                 }
-                .disabled(state.isBusy)
             }
         } header: {
             Text(t("mac.launchDiag.header"))
@@ -303,166 +320,171 @@ struct SettingsView: View {
     // MARK: - 网络（外置代理 + 测速 + 内核）
 
     private var networkTab: some View {
-        Form {
-            Section {
-                LabeledContent(t("mac.proxy.core")) {
-                    Text(state.coreRunning ? t("common.running") : t("common.stopped"))
-                        .foregroundStyle(state.coreRunning ? BashXTheme.good(for: appearance) : .secondary)
-                }
-                LabeledContent(t("mac.proxy.address")) {
-                    Text(state.externalProxyAddress)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                TextField("mixed-port", value: $state.settings.mixedPort, format: .number)
-                Toggle(t("mac.proxy.allowLan"), isOn: Binding(
-                    get: { state.settings.allowLan },
-                    set: { v in Task { await state.setAllowLan(v) } }
-                ))
-                .help(t("mac.proxy.lanHint"))
-
-                HStack(spacing: 8) {
-                    Button(t("mac.copyHTTP")) { state.copyExternalProxy(kind: .http) }
-                    Button(t("mac.copySOCKS")) { state.copyExternalProxy(kind: .socks) }
-                    Button(t("mac.copyEnv")) { state.copyExternalProxy(kind: .exportEnv) }
-                }
-            } header: {
-                Text(t("mac.proxy.ports"))
-            }
-
-            Section {
-                DisclosureGroup(isExpanded: $showNetworkSpeed) {
-                    TextField(t("mac.timeout"), value: $state.settings.testTimeoutMs, format: .number)
-                    TextField(t("mac.concurrency"), value: $state.settings.concurrency, format: .number)
-                    TextField(t("mac.testURL"), text: $state.settings.testURL)
-
-                    Toggle(t("mac.turbo"), isOn: Binding(
-                        get: { state.settings.turboMode },
-                        set: { v in Task { await state.setTurboMode(v) } }
+        ScrollView {
+            Form {
+                Section {
+                    LabeledContent(t("mac.proxy.core")) {
+                        Text(state.coreRunning ? t("common.running") : t("common.stopped"))
+                            .foregroundStyle(state.coreRunning ? BashXTheme.good(for: appearance) : .secondary)
+                    }
+                    LabeledContent(t("mac.proxy.address")) {
+                        Text(state.externalProxyAddress)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    TextField("mixed-port", value: $state.settings.mixedPort, format: .number)
+                    Toggle(t("mac.proxy.allowLan"), isOn: Binding(
+                        get: { state.settings.allowLan },
+                        set: { v in Task { await state.setAllowLan(v) } }
                     ))
-                    .help(t("mac.turbo.hint"))
+                    .help(t("mac.proxy.lanHint"))
 
-                    Toggle(t("mac.sniffing"), isOn: Binding(
-                        get: { state.settings.domainSniffing },
-                        set: { v in Task { await state.setDomainSniffing(v) } }
-                    ))
-                    .disabled(!state.settings.turboMode)
-                    .help(t("mac.sniffing.hint"))
-
-                    TextField(t("mac.autoInterval"), value: Binding(
-                        get: { state.settings.autoSpeedTestIntervalMinutes },
-                        set: { state.setAutoSpeedTestIntervalMinutes($0) }
-                    ), format: .number)
-                    .disabled(!state.settings.autoSpeedTestEnabled)
-                } label: {
-                    Text(t("mac.tab.speed"))
+                    HStack(spacing: 8) {
+                        settingsActionButton(t("mac.copyHTTP")) { state.copyExternalProxy(kind: .http) }
+                        settingsActionButton(t("mac.copySOCKS")) { state.copyExternalProxy(kind: .socks) }
+                        settingsActionButton(t("mac.copyEnv")) { state.copyExternalProxy(kind: .exportEnv) }
+                    }
+                } header: {
+                    Text(t("mac.proxy.ports"))
                 }
 
-                DisclosureGroup(isExpanded: $showNetworkCore) {
-                    TextField(t("mac.core.binary"), text: $state.settings.clashBinaryPath)
-                    TextField("external-controller", text: $state.settings.externalController)
-                    SecureField("secret", text: $state.settings.secret)
+                Section {
+                    DisclosureGroup(isExpanded: $showNetworkSpeed) {
+                        TextField(t("mac.timeout"), value: $state.settings.testTimeoutMs, format: .number)
+                        TextField(t("mac.concurrency"), value: $state.settings.concurrency, format: .number)
+                        TextField(t("mac.testURL"), text: $state.settings.testURL)
 
-                    Picker(t("mac.core.stack"), selection: $state.settings.tunStack) {
-                        Text("mixed").tag("mixed")
-                        Text("system").tag("system")
-                        Text("gvisor").tag("gvisor")
-                    }
-                    .help(t("mac.core.tunHint"))
+                        Toggle(t("mac.turbo"), isOn: Binding(
+                            get: { state.settings.turboMode },
+                            set: { v in Task { await state.setTurboMode(v) } }
+                        ))
+                        .help(t("mac.turbo.hint"))
 
-                    if state.coreRunning || state.isCoreVisiblyAlive {
-                        Button(t("mac.core.stop")) {
-                            state.stopCore(force: true)
-                        }
-                    } else if !state.coreConnecting {
-                        Button(t("mac.core.start")) {
-                            Task { await state.ensureCoreRunning() }
-                        }
+                        Toggle(t("mac.sniffing"), isOn: Binding(
+                            get: { state.settings.domainSniffing },
+                            set: { v in Task { await state.setDomainSniffing(v) } }
+                        ))
+                        .disabled(!state.settings.turboMode)
+                        .help(t("mac.sniffing.hint"))
+
+                        TextField(t("mac.autoInterval"), value: Binding(
+                            get: { state.settings.autoSpeedTestIntervalMinutes },
+                            set: { state.setAutoSpeedTestIntervalMinutes($0) }
+                        ), format: .number)
+                        .disabled(!state.settings.autoSpeedTestEnabled)
+                    } label: {
+                        Text(t("mac.tab.speed"))
                     }
-                    Button(t("mac.core.repair")) {
-                        Task { await state.installOrRepairCore() }
+
+                    DisclosureGroup(isExpanded: $showNetworkCore) {
+                        TextField(t("mac.core.binary"), text: $state.settings.clashBinaryPath)
+                        TextField("external-controller", text: $state.settings.externalController)
+                        SecureField("secret", text: $state.settings.secret)
+
+                        Picker(t("mac.core.stack"), selection: $state.settings.tunStack) {
+                            Text("mixed").tag("mixed")
+                            Text("system").tag("system")
+                            Text("gvisor").tag("gvisor")
+                        }
+                        .help(t("mac.core.tunHint"))
+
+                        HStack(spacing: 10) {
+                            if state.coreRunning || state.isCoreVisiblyAlive {
+                                settingsActionButton(t("mac.core.stop")) {
+                                    state.stopCore(force: true)
+                                }
+                            } else if !state.coreConnecting {
+                                settingsActionButton(t("mac.core.start")) {
+                                    Task { await state.ensureCoreRunning() }
+                                }
+                            }
+                            settingsActionButton(t("mac.core.repair"), disabled: state.isBusy) {
+                                Task { await state.installOrRepairCore() }
+                            }
+                        }
+                    } label: {
+                        Text(t("mac.tab.core"))
                     }
-                    .disabled(state.isBusy)
-                } label: {
-                    Text(t("mac.tab.core"))
                 }
             }
+            .formStyle(.grouped)
+            .font(.system(size: 12.5))
+            .padding(10)
         }
-        .formStyle(.grouped)
-        .font(.system(size: 12.5))
-        .padding(10)
     }
 
     // MARK: - 外观
 
     private var appearanceTab: some View {
-        Form {
-            Section {
-                Picker(t("lang.title"), selection: Binding(
-                    get: { state.settings.uiLanguage },
-                    set: { state.setUiLanguage($0) }
-                )) {
-                    ForEach(AppLanguage.allCases) { item in
-                        Text(item.pickerTitle).tag(item)
+        ScrollView {
+            Form {
+                Section {
+                    Picker(t("lang.title"), selection: Binding(
+                        get: { state.settings.uiLanguage },
+                        set: { state.setUiLanguage($0) }
+                    )) {
+                        ForEach(AppLanguage.allCases) { item in
+                            Text(item.pickerTitle).tag(item)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
+                    .pickerStyle(.segmented)
 
-                Picker(t("mac.appearance.theme"), selection: Binding(
-                    get: { state.settings.appearance },
-                    set: { state.setAppearance($0) }
-                )) {
-                    ForEach(AppAppearance.allCases) { mode in
-                        Text(mode.title(lang: lang)).tag(mode)
+                    Picker(t("mac.appearance.theme"), selection: Binding(
+                        get: { state.settings.appearance },
+                        set: { state.setAppearance($0) }
+                    )) {
+                        ForEach(AppAppearance.allCases) { mode in
+                            Text(mode.title(lang: lang)).tag(mode)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
+                    .pickerStyle(.segmented)
 
-                Picker(t("mac.nodeDisplay"), selection: Binding(
-                    get: { state.settings.nodeDisplayMode },
-                    set: { state.setNodeDisplayMode($0) }
-                )) {
-                    ForEach(NodeDisplayMode.allCases) { mode in
-                        Text(mode.title(lang: lang)).tag(mode)
+                    Picker(t("mac.nodeDisplay"), selection: Binding(
+                        get: { state.settings.nodeDisplayMode },
+                        set: { state.setNodeDisplayMode($0) }
+                    )) {
+                        ForEach(NodeDisplayMode.allCases) { mode in
+                            Text(mode.title(lang: lang)).tag(mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
+
+                Section {
+                    Stepper(
+                        t("mac.menuNodeLimit").replacingOccurrences(of: "%@", with: "\(state.settings.menuNodeLimit)"),
+                        value: Binding(
+                            get: { state.settings.menuNodeLimit },
+                            set: { state.setMenuNodeLimit($0) }
+                        ),
+                        in: 5...50
+                    )
+
+                    Toggle(t("mac.menuTraffic"), isOn: Binding(
+                        get: { state.settings.showMenuBarTraffic },
+                        set: { state.setShowMenuBarTraffic($0) }
+                    ))
+                    .help(t("mac.menuTraffic.hint"))
+
+                    Toggle(t("mac.dockIcon"), isOn: Binding(
+                        get: { state.settings.showDockIcon },
+                        set: { state.setShowDockIcon($0) }
+                    ))
+                    .help(t("mac.dockIcon.hint"))
+
+                    LogoStylePicker(
+                        selection: Binding(
+                            get: { state.settings.logoStyle },
+                            set: { state.setLogoStyle($0) }
+                        ),
+                        appearance: appearance
+                    )
+                }
             }
-
-            Section {
-                Stepper(
-                    t("mac.menuNodeLimit").replacingOccurrences(of: "%@", with: "\(state.settings.menuNodeLimit)"),
-                    value: Binding(
-                        get: { state.settings.menuNodeLimit },
-                        set: { state.setMenuNodeLimit($0) }
-                    ),
-                    in: 5...50
-                )
-
-                Toggle(t("mac.menuTraffic"), isOn: Binding(
-                    get: { state.settings.showMenuBarTraffic },
-                    set: { state.setShowMenuBarTraffic($0) }
-                ))
-                .help(t("mac.menuTraffic.hint"))
-
-                Toggle(t("mac.dockIcon"), isOn: Binding(
-                    get: { state.settings.showDockIcon },
-                    set: { state.setShowDockIcon($0) }
-                ))
-                .help(t("mac.dockIcon.hint"))
-
-                LogoStylePicker(
-                    selection: Binding(
-                        get: { state.settings.logoStyle },
-                        set: { state.setLogoStyle($0) }
-                    ),
-                    appearance: appearance
-                )
-            }
+            .formStyle(.grouped)
+            .font(.system(size: 12.5))
+            .padding(10)
         }
-        .formStyle(.grouped)
-        .font(.system(size: 12.5))
-        .padding(10)
     }
 
     // MARK: - 关于
@@ -484,6 +506,8 @@ struct SettingsView: View {
                             .font(.body.monospacedDigit())
                     }
                     Button(t("mac.openConfig")) { state.openConfigFolder() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -529,6 +553,8 @@ struct SettingsView: View {
                 } label: {
                     Text(updaterCheckButtonTitle)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .disabled(isUpdaterBusy)
 
                 if case .available = updater.phase {
@@ -538,6 +564,7 @@ struct SettingsView: View {
                         Text(t("mac.update.download"))
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                     .tint(BashXTheme.accent(for: appearance))
                     .disabled(isUpdaterBusy)
                 }
@@ -546,6 +573,8 @@ struct SettingsView: View {
                     Button(t("mac.update.retry")) {
                         Task { await updater.check() }
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
         }
@@ -587,7 +616,7 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         case .available(let info):
             VStack(alignment: .leading, spacing: 4) {
-                Text(t("mac.update.available").replacingOccurrences(of: "%1", with: info.version))
+                Text(t("mac.update.available").replacingOccurrences(of: "%@", with: info.version))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(BashXTheme.accent(for: appearance))
                 if info.fileSize > 0 {

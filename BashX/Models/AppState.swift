@@ -58,6 +58,8 @@ final class AppState: ObservableObject {
     @Published private(set) var subscriptionsRevision = 0
     /// Bumped when per-app routing rules change — apps pane subscribes.
     @Published private(set) var appRoutingRevision = 0
+    /// Bumped when selected node / runtime outbound label changes — sidebar node card only.
+    @Published private(set) var selectionRevision = 0
     /// Last known mixed-port TCP state (updated off main / from health ticks).
     @Published private(set) var mixedPortCachedAlive = false
 
@@ -82,6 +84,7 @@ final class AppState: ObservableObject {
     private var lastCursorNodeProbe = Date.distantPast
     private var persistTask: Task<Void, Never>?
     private var chromeBumpTask: Task<Void, Never>?
+    private var nodeFilterRefreshTask: Task<Void, Never>?
     private var writeConfigTask: Task<Void, Never>?
     private var writeConfigBuildTask: Task<Void, Never>?
     private var coreHealthMissStreak = 0
@@ -176,6 +179,20 @@ final class AppState: ObservableObject {
         nodeListRevision &+= 1
     }
 
+    /// Debounce search/filter refreshes so typing in the node search field doesn't rebuild the list every key.
+    func scheduleNodeListFilterRefresh() {
+        nodeFilterRefreshTask?.cancel()
+        nodeFilterRefreshTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.bumpNodeListRevision()
+        }
+    }
+
+    func bumpSelectionRevision() {
+        selectionRevision &+= 1
+    }
+
     func bumpHubModeRevision() {
         hubModeRevision &+= 1
     }
@@ -210,6 +227,10 @@ final class AppState: ObservableObject {
         block(&rules)
         settings.appRoutingRules = rules
         bumpAppRoutingRevision()
+    }
+
+    private func normalizedAppRoutingGroupName(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Reassign so nested subscription edits reliably publish to SwiftUI.
@@ -354,6 +375,10 @@ final class AppState: ObservableObject {
         // Defer huge rulesText join — only needed when Rules tab opens.
         rulesText = ""
         clampPerfDefaults()
+        if settings.autoSpeedTestEnabled {
+            settings.autoSpeedTestEnabled = false
+            _ = SettingsStore.save(settings)
+        }
         settings.nodeDelayCache = pruneNodeDelayCache(settings.nodeDelayCache)
         launchAtLoginOn = LaunchAtLogin.isEnabled
         if settings.launchAtLoginEnabled != launchAtLoginOn {
@@ -508,6 +533,8 @@ final class AppState: ObservableObject {
         }
 
         recordBootstrapOutcome()
+
+        Task { await AppUpdateController.shared.checkForHomeBannerIfNeeded() }
     }
 
     func refreshLaunchDiagnostics() {
@@ -1982,19 +2009,11 @@ final class AppState: ObservableObject {
     }
 
     func setAutoSpeedTestEnabled(_ enabled: Bool) {
-        settings.autoSpeedTestEnabled = enabled
-        if enabled {
-            sortByDelay = true
-        }
+        settings.autoSpeedTestEnabled = false
         bumpChromeRevision()
         schedulePersist()
         restartAutoSpeedLoop()
-        statusText = enabled
-            ? "自动测速已开启（约每 \(max(3, settings.autoSpeedTestIntervalMinutes)) 分钟）"
-            : "自动测速已关闭"
-        if enabled, !isTesting, !nodes.isEmpty {
-            Task { await runSpeedTest() }
-        }
+        statusText = enabled ? "Mac 面板已关闭自动测速，请手动测速" : "自动测速已关闭"
     }
 
     func setAutoSelectFastest(_ enabled: Bool) {
@@ -2334,17 +2353,8 @@ final class AppState: ObservableObject {
         autoSpeedTask?.cancel()
         autoSpeedTask = nil
         guard settings.autoSpeedTestEnabled else { return }
-        autoSpeedTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            while !Task.isCancelled {
-                guard let self else { return }
-                if !self.isTesting, !self.nodes.isEmpty {
-                    await self.runSpeedTest()
-                }
-                let mins = max(3, self.settings.autoSpeedTestIntervalMinutes)
-                try? await Task.sleep(nanoseconds: UInt64(mins) * 60 * 1_000_000_000)
-            }
-        }
+        settings.autoSpeedTestEnabled = false
+        schedulePersist()
     }
 
     private func applyDelayCache(to list: [ProxyNode]) -> [ProxyNode] {
@@ -2672,8 +2682,8 @@ final class AppState: ObservableObject {
         if pinAIStable, name != "AUTO", name != "DIRECT" {
             settings.stableAINodeName = name
         }
-        // Chrome only — remounting the full node list on every switch was a major hitch.
-        bumpChromeRevision()
+        // Selection card only — avoid remounting the whole sidebar on every node click.
+        bumpSelectionRevision()
         statusText = "切换中：\(name)"
         await Task.yield()
 
@@ -2823,7 +2833,7 @@ final class AppState: ObservableObject {
         if settings.proxyMode == .direct {
             if runtimeOutboundName != "DIRECT" {
                 runtimeOutboundName = "DIRECT"
-                bumpChromeRevision()
+                bumpSelectionRevision()
             }
             return
         }
@@ -2831,7 +2841,7 @@ final class AppState: ObservableObject {
         if let leaf = await resolveProxyLeaf(groupOrProxy: group) {
             if runtimeOutboundName != leaf {
                 runtimeOutboundName = leaf
-                bumpChromeRevision()
+                bumpSelectionRevision()
             }
         }
     }
@@ -2869,6 +2879,9 @@ final class AppState: ObservableObject {
             }) {
                 var merged = rule
                 merged.id = rules[idx].id
+                if merged.groupName.isEmpty {
+                    merged.groupName = rules[idx].groupName
+                }
                 rules[idx] = merged
             } else {
                 rules.append(rule)
@@ -2879,6 +2892,53 @@ final class AppState: ObservableObject {
         await applyConfig(reloadIfRunning: true)
         bumpChromeRevision()
         statusText = "应用分组已更新"
+    }
+
+    func addAppRoutingCustomGroup(_ name: String) {
+        let normalized = normalizedAppRoutingGroupName(name)
+        guard !normalized.isEmpty else { return }
+        if settings.appRoutingCustomGroups.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+            statusText = "这个分组已经存在"
+            return
+        }
+        settings.appRoutingCustomGroups.append(normalized)
+        settings.appRoutingCustomGroups.sort { $0.localizedStandardCompare($1) == .orderedAscending }
+        persist()
+        bumpAppRoutingRevision()
+        statusText = "已添加分组：\(normalized)"
+    }
+
+    func removeAppRoutingCustomGroup(_ name: String) async {
+        let normalized = normalizedAppRoutingGroupName(name)
+        guard !normalized.isEmpty else { return }
+        settings.appRoutingCustomGroups.removeAll { $0.caseInsensitiveCompare(normalized) == .orderedSame }
+        mutateAppRoutingRules { rules in
+            for idx in rules.indices where rules[idx].groupName.caseInsensitiveCompare(normalized) == .orderedSame {
+                rules[idx].groupName = ""
+            }
+        }
+        persist()
+        scheduleWriteConfig()
+        await applyConfig(reloadIfRunning: true)
+        bumpChromeRevision()
+        statusText = "已删除分组：\(normalized)"
+    }
+
+    func setAppRoutingRuleGroup(id: UUID, groupName: String) async {
+        let normalized = normalizedAppRoutingGroupName(groupName)
+        mutateAppRoutingRules { rules in
+            guard let idx = rules.firstIndex(where: { $0.id == id }) else { return }
+            rules[idx].groupName = normalized
+        }
+        if !normalized.isEmpty, !settings.appRoutingCustomGroups.contains(where: { $0.caseInsensitiveCompare(normalized) == .orderedSame }) {
+            settings.appRoutingCustomGroups.append(normalized)
+            settings.appRoutingCustomGroups.sort { $0.localizedStandardCompare($1) == .orderedAscending }
+        }
+        persist()
+        scheduleWriteConfig()
+        await applyConfig(reloadIfRunning: true)
+        bumpChromeRevision()
+        statusText = normalized.isEmpty ? "已移出自定义分组" : "已移到分组：\(normalized)"
     }
 
     func addAppRoutingPreset(_ preset: AppRoutingRules.CommonAppPreset) async {
@@ -3747,16 +3807,16 @@ final class AppState: ObservableObject {
             settings.proxyMode = .rule
         }
         bumpChromeRevision()
-        statusText = enabled ? "正在开启去广告…" : "正在关闭去广告…"
+        statusText = enabled ? "正在开启 YouTube 去广告…" : "正在关闭 YouTube 去广告…"
         await Task.yield()
         schedulePersist()
         scheduleWriteConfig()
         await applyConfig(reloadIfRunning: true)
         bumpChromeRevision()
         if enabled {
-            statusText = "去广告已开启（\(VideoAdBlock.ruleCount) 条）· 规则模式"
+            statusText = "YouTube 去广告已开启（\(VideoAdBlock.ruleCount) 条）· 规则模式"
         } else {
-            statusText = "去广告已关闭"
+            statusText = "YouTube 去广告已关闭"
         }
     }
 
