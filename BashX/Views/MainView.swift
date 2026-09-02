@@ -1639,13 +1639,13 @@ struct MainView: View {
     private var subscriptionsPane: some View {
         PanelSubscriptionsHost(state: state) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     subscriptionsHeader
 
                     if state.settings.subscriptions.isEmpty {
                         subscriptionsEmptyState
                     } else {
-                        LazyVStack(spacing: 2) {
+                        LazyVStack(spacing: 8) {
                             ForEach(Array(state.settings.subscriptions.enumerated()), id: \.element.id) { idx, sub in
                                 SubscriptionManageCard(
                                     state: state,
@@ -1653,15 +1653,6 @@ struct MainView: View {
                                     index: idx
                                 )
                             }
-                        }
-                        .padding(4)
-                        .background {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(BashXTheme.card(for: appearance))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .strokeBorder(BashXTheme.separator(for: appearance), lineWidth: 0.5)
-                                )
                         }
                     }
                 }
@@ -1674,12 +1665,39 @@ struct MainView: View {
 
     private var subscriptionsHeader: some View {
         HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("订阅")
-                    .font(PanelMetrics.heroTitle)
-                Text("\(state.settings.subscriptions.filter(\.enabled).count)/\(state.settings.subscriptions.count) 启用")
-                    .font(PanelMetrics.caption)
-                    .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+            HStack(spacing: 10) {
+                Image(systemName: "link.circle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                BashXTheme.accent(for: appearance),
+                                BashXTheme.accent(for: appearance).opacity(0.72)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("订阅")
+                        .font(PanelMetrics.heroTitle)
+                    HStack(spacing: 6) {
+                        Text("\(state.settings.subscriptions.filter(\.enabled).count) 启用")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(BashXTheme.good(for: appearance))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(
+                                    BashXTheme.good(for: appearance).opacity(appearance == .dark ? 0.2 : 0.12)
+                                )
+                            )
+                        Text("共 \(state.settings.subscriptions.count) 个")
+                            .font(PanelMetrics.caption)
+                            .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                    }
+                }
             }
             Spacer()
             Button {
@@ -1704,7 +1722,7 @@ struct MainView: View {
             .tint(BashXTheme.accent(for: appearance))
             .contentShape(Rectangle())
         }
-        .padding(.bottom, 1)
+        .padding(.bottom, 2)
     }
 
     private var subscriptionsEmptyState: some View {

@@ -31,6 +31,34 @@ enum TunnelDiagnostics {
         defaults?.set(userFacingStopMessage(label: label), forKey: errorKey)
     }
 
+    private static let sessionBeginKey = "lastTunnelSessionBeginAt"
+    private static let sessionBeginCountKey = "tunnelSessionBeginCount"
+    private static let sessionBeginWindowKey = "tunnelSessionBeginWindowAt"
+    private static let onDemandPauseUntilKey = "onDemandPauseUntil"
+
+    /// Track rapid NE restarts (jetsam death loop) and pause On-Demand briefly.
+    static func recordSessionBegin() {
+        let now = Date().timeIntervalSince1970
+        let windowStart = defaults?.double(forKey: sessionBeginWindowKey) ?? 0
+        var count = defaults?.integer(forKey: sessionBeginCountKey) ?? 0
+        if now - windowStart > 90 {
+            count = 0
+            defaults?.set(now, forKey: sessionBeginWindowKey)
+        }
+        count += 1
+        defaults?.set(count, forKey: sessionBeginCountKey)
+        defaults?.set(now, forKey: sessionBeginKey)
+        if count >= 4 {
+            defaults?.set(now + 120, forKey: onDemandPauseUntilKey)
+            defaults?.set("内存不足，已暂停自动重连 2 分钟", forKey: errorKey)
+        }
+    }
+
+    static func shouldPauseOnDemand() -> Bool {
+        let until = defaults?.double(forKey: onDemandPauseUntilKey) ?? 0
+        return Date().timeIntervalSince1970 < until
+    }
+
     static func lastFailureMessage() -> String? {
         defaults?.string(forKey: errorKey)
     }

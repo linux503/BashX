@@ -84,7 +84,7 @@ func init() {
 	// Leave headroom for Swift bridge + socket buffers; jetsam kill is ~50MB physical.
 	// 45MB soft limit still let RSS climb to 80–90MB under Douyin → silent reconnect loops.
 	debug.SetGCPercent(20)
-	debug.SetMemoryLimit(32 * 1024 * 1024)
+	debug.SetMemoryLimit(24 * 1024 * 1024)
 	runtime.GOMAXPROCS(1)
 	// GC is driven from PacketTunnelProvider (BridgeForceGC) — no duplicate ticker here.
 }

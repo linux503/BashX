@@ -941,9 +941,6 @@ final class AppState: ObservableObject {
         return false
     }
 
-    /// Turn on macOS system proxy when settings ask for it and mihomo is listening.
-    /// Clash Verge style: system proxy and TUN are **independent**. TUN captures at
-    /// the IP layer; system proxy covers HTTP(S)-aware apps. Both may be on at once.
     private func applyDefaultSystemProxyIfEnabled() async {
         // TUN preferred but not live → keep/restore system proxy so apps still work.
         if settings.tunEnabled, !effectiveTunInConfig(),
@@ -1250,6 +1247,11 @@ final class AppState: ObservableObject {
         if settings.rules.count != before { changed = true }
         if !settings.rules.contains(where: { $0.contains("ipfoxy.com,PROXY") }) {
             settings.rules.insert(contentsOf: MacAppBypassRules.residentialProxyChainRules, at: 0)
+            changed = true
+        }
+        for line in MacAppBypassRules.adsPowerRules {
+            guard !settings.rules.contains(where: { $0.trimmingCharacters(in: .whitespaces) == line }) else { continue }
+            settings.rules.insert(line, at: 0)
             changed = true
         }
         if changed {
@@ -2137,9 +2139,6 @@ final class AppState: ObservableObject {
         // Never prompt again here — ensureReady already asked once if needed.
         systemProxyTask?.cancel()
         let port = settings.mixedPort
-        // Clash Verge: TUN + system proxy are independent. Prefer both on for connect
-        // (browsers → system proxy; TG/UDP/stubborn apps → TUN). WhatsApp stays on
-        // SystemProxy.bypassDomains so it uses TUN, not HTTP CONNECT.
         if !settings.userDisabledSystemProxy {
             systemProxyOn = true
             settings.systemProxyEnabled = true
@@ -3557,8 +3556,7 @@ final class AppState: ObservableObject {
             requestElevatedCoreStart = false
         }
         bumpChromeRevision()
-        let proxyNote = systemProxyOn ? " · 系统代理同步开着" : ""
-        statusText = enabled ? "TUN 已开启\(proxyNote)" : "TUN 已关闭"
+        statusText = enabled ? "TUN 已开启" : "TUN 已关闭"
     }
 
     /// Selected node, or strategy hub when smart/LB/failover is on.

@@ -232,7 +232,8 @@ final class VPNManager: ObservableObject {
     }
 
     private func applyOnDemand(to mgr: NETunnelProviderManager, enabled: Bool) {
-        if enabled {
+        let effective = enabled && !TunnelDiagnostics.shouldPauseOnDemand()
+        if effective {
             let rule = NEOnDemandRuleConnect()
             rule.interfaceTypeMatch = .any
             mgr.onDemandRules = [rule]
@@ -368,26 +369,18 @@ final class VPNManager: ObservableObject {
         proto.providerBundleIdentifier = AppConstants.tunnelBundleIdentifier
         proto.disconnectOnSleep = false
 
-        let wantPush = telegramPushEnabledFromDefaults()
-        let nodeServer = selectedNodeServerFromDefaults()
-        // includeAllNetworks requires a literal IP that iOS can exclude from the tunnel.
-        // Hostnames (e.g. oss-xxx.com) often fail exclusion → dials loop into utun →
-        // no network → jetsam/On-Demand flap (looks like auto-disconnect).
-        let literalIP = nodeServer.flatMap { Self.literalIPAddress($0) }
-        let canIncludeAll = wantPush && literalIP != nil
-        if canIncludeAll, let literalIP {
-            proto.serverAddress = literalIP
-        } else {
-            proto.serverAddress = profileServerAddress
-        }
+        // NEVER includeAllNetworks on iOS — it pulls Douyin IPv6 (2409::) into utun
+        // even when excludedRoutes lists those CIDRs. Douyin must stay on physical path.
+        _ = telegramPushEnabledFromDefaults()
+        _ = selectedNodeServerFromDefaults()
+        proto.serverAddress = profileServerAddress
 
         if #available(iOS 14.2, *) {
-            proto.includeAllNetworks = canIncludeAll
+            proto.includeAllNetworks = false
             proto.excludeLocalNetworks = true
         }
         if #available(iOS 16.4, *) {
-            // excludeAPNs only applies when includeAllNetworks is true.
-            proto.excludeAPNs = !canIncludeAll
+            proto.excludeAPNs = true
             proto.excludeCellularServices = true
         }
         if #available(iOS 17.4, *) {
@@ -717,6 +710,7 @@ final class VPNManager: ObservableObject {
     private func scheduleAutoReconnect() {
         reconnectTask?.cancel()
         guard Self.userWantsConnection() else { return }
+        guard !TunnelDiagnostics.shouldPauseOnDemand() else { return }
         guard !softRestartInProgress, !userInitiatedDisconnect else { return }
         let stopLabel = (TunnelDiagnostics.lastStopLabel() ?? "").lowercased()
         // App disconnect() clears wantsConnected. A "user" stop with wants still true

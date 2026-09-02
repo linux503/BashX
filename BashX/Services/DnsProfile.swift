@@ -126,6 +126,69 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         "+.gstatic.com",
         "+.googleusercontent.com",
         "+.translate.goog",
+        // ClashX Pro / airport fake-ip-filter — GCM push needs real IP.
+        "mtalk.google.com",
+        "alt1-mtalk.google.com",
+        "alt2-mtalk.google.com",
+        "alt3-mtalk.google.com",
+        "alt4-mtalk.google.com",
+        "alt5-mtalk.google.com",
+        "alt6-mtalk.google.com",
+        "alt7-mtalk.google.com",
+        "alt8-mtalk.google.com",
+    ]
+
+    /// NTP / time sync — fake-ip breaks clock (copied from ClashX Pro / prprCloud).
+    private static let ntpFakeIPFilters: [String] = [
+        "time.*.com",
+        "time.*.gov",
+        "time.*.edu.cn",
+        "time.*.apple.com",
+        "time1.*.com",
+        "time2.*.com",
+        "time3.*.com",
+        "time4.*.com",
+        "time5.*.com",
+        "time6.*.com",
+        "time7.*.com",
+        "ntp.*.com",
+        "ntp1.*.com",
+        "ntp2.*.com",
+        "ntp3.*.com",
+        "ntp4.*.com",
+        "ntp5.*.com",
+        "ntp6.*.com",
+        "ntp7.*.com",
+        "*.ntp.org.cn",
+        "*.openwrt.pool.ntp.org",
+        "pool.ntp.org",
+        "time.apple.com",
+        "time.asia.apple.com",
+        "time.windows.com",
+        "time.nist.gov",
+        "ntp.aliyun.com",
+        "ntp.ubuntu.com",
+    ]
+
+    /// Domestic music CDNs — fake-ip causes silent/stuck playback (ClashX Pro list).
+    private static let musicFakeIPFilters: [String] = [
+        "music.163.com",
+        "*.music.163.com",
+        "y.qq.com",
+        "*.y.qq.com",
+        "streamoc.music.tc.qq.com",
+        "mobileoc.music.tc.qq.com",
+        "isure.stream.qqmusic.qq.com",
+        "dl.stream.qqmusic.qq.com",
+        "aqqmusic.tc.qq.com",
+        "amobile.music.tc.qq.com",
+        "songsearch.kugou.com",
+        "trackercdn.kugou.com",
+        "*.kuwo.cn",
+        "*.music.migu.cn",
+        "music.migu.cn",
+        "musicapi.taihe.com",
+        "music.taihe.com",
     ]
 
     /// +.google.com does NOT cover google.com.hk / google.cn — CN DNS poisons these unless listed explicitly.
@@ -242,6 +305,8 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         let fakeIPFilter: [String] =
             ["*.lan", "*.local", "+.local", "geosite:cn", "geosite:private"]
             + googleFakeIPFilters
+            + ntpFakeIPFilters
+            + musicFakeIPFilters
             + telegramFakeIPFilters
             + cursorFakeIPFilters
             + binanceFakeIPFilters
@@ -310,7 +375,11 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "+.servicewechat.com", "+.tenpay.com",
             "+.taobao.com", "+.tmall.com", "+.aliyun.com", "+.alicdn.com",
             "+.goofish.com", "+.idlefish.com", "+.jd.com",
-            "+.bilibili.com", "+.zhihu.com",
+            "+.meituan.com", "+.meituan.net", "+.dianping.com", "+.dpfile.com", "+.sankuai.com",
+            "+.kuaishou.com", "+.yximgs.com", "+.gifshow.com",
+            "+.bilibili.com", "+.hdslb.com", "+.163.com", "+.netease.com",
+            "+.amap.com", "+.ctrip.com", "+.12306.cn",
+            "+.zhihu.com",
         ] {
             policy[suffix] = cnNS
         }
@@ -330,14 +399,15 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "+.tiktok.com", "+.tiktok-row.net", "+.tiktokv.com", "+.tiktokv.us", "+.tiktokv.eu",
             "+.tiktokcdn.com", "+.tiktokcdn-us.com", "+.tiktokcdn-eu.com", "+.tiktokcdn-in.com",
             "+.byteoversea.com", "+.byteoversea.net", "+.musical.ly", "+.ttlivecdn.com",
-            "+.isnssdk.com", "+.sgsnssdk.com", "+.ibyteimg.com", "+.ibytedtos.com",
-            // snssdk.com = 抖音 → cnNS（下方）
-            "+.muscdn.com", "+.ipstatp.com", "+.sgpstatp.com", "+.goofy.app", "+.bytegecko.com",
+            "+.isnssdk.com", "+.sgsnssdk.com",
+            // ibyteimg/ipstatp 大陆抖音也可能用 — 勿走 foreignNS
+            "+.muscdn.com", "+.sgpstatp.com", "+.goofy.app", "+.bytegecko.com",
             "+.bytegecko-i18n.com", "+.byteintlapi.com", "+.byteintl.net",
             "+.tv", "+.twitch.tv", "+.ttvnw.net", "+.jtvnw.net", "+.twitchcdn.net",
         ] {
             policy[suffix] = foreignNS
         }
+        // 抖音域名 — 必须最后写入，盖掉上方 TikTok foreignNS 重叠项。
         for suffix in DomesticBypassRoutes.douyinDomainSuffixes.map({ "+.\($0)" }) {
             policy[suffix] = cnNS
         }

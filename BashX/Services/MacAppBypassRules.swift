@@ -19,7 +19,8 @@ enum MacAppBypassRules {
     ]
 
     /// Other fingerprint browsers still ship local S5; keep process DIRECT.
-    /// AdsPower / SunBrowser intentionally excluded (need PROXY chain for overseas S5).
+    /// AdsPower / SunBrowser use the dedicated rules below so their control-plane
+    /// domains can still be proxied before their S5 socket is made DIRECT.
     static let fingerprintRules: [String] = [
         "PROCESS-NAME-REGEX,(?i)(BitBrowser|Hubstudio|MoreLogin|GoLogin|Orbita|Dolphin|Multilogin|Incogniton|VMLogin|Kameleo|IxBrowser|LinxBrowser),DIRECT",
         "PROCESS-PATH-REGEX,(?i)(bitbrowser|hubstudio|morelogin|gologin|orbita|dolphin|multilogin|incogniton|vmlogin|kameleo|ixbrowser),DIRECT",
@@ -34,9 +35,20 @@ enum MacAppBypassRules {
         "DOMAIN-SUFFIX,adspower.com,PROXY",
         "DOMAIN-SUFFIX,adspowerapp.com,PROXY",
         "DOMAIN-KEYWORD,adspower,PROXY",
+        "DOMAIN-SUFFIX,myclientip.com,PROXY",
         "DOMAIN-SUFFIX,wswebpic.com,PROXY",
         "DOMAIN-SUFFIX,data4.net,PROXY",
         "DOMAIN-KEYWORD,ip-scan,PROXY",
+    ]
+
+    /// AdsPower connects to the user supplied SOCKS5 endpoint from its browser/helper
+    /// processes.  When that endpoint is an IP literal there is no hostname for a
+    /// DOMAIN rule to match, so letting it fall through to MATCH,PROXY creates a
+    /// second proxy hop (and commonly a loop).  Keep control-plane DOMAIN rules
+    /// above these rules, then dial the actual S5 endpoint on the physical network.
+    static let adsPowerSocksDirectRules: [String] = [
+        "PROCESS-NAME-REGEX,(?i)(AdsPower|SunBrowser)( Helper( \\(GPU\\)| \\(Renderer\\)| \\(Plugin\\)| \\(Alerts\\)| \\(Network\\))?)?,DIRECT",
+        "PROCESS-PATH-REGEX,(?i)(adspower|sunbrowser),DIRECT",
     ]
 
     /// Overseas residential / ISP proxy gates — must beat any leftover process DIRECT.
@@ -60,6 +72,7 @@ enum MacAppBypassRules {
         residentialProxyChainRules.forEach(add)
         fingerprintRules.forEach(add)
         adsPowerRules.forEach(add)
+        adsPowerSocksDirectRules.forEach(add)
         for name in cnProcessNames {
             add("PROCESS-NAME,\(name),DIRECT")
             if !name.contains("Helper") {
@@ -96,6 +109,7 @@ enum MacAppBypassRules {
         "哔哩哔哩", "Bilibili", "iQIYI", "Youku", "TencentVideo", "qqlive",
         "Douyin", "抖音",
         "BaiduNetdisk", "aDrive", "QuarkCloudDrive", "Thunder", "ThunderX",
+        "OneDrive", "OneDriveUpdater", "Folx", "Transmission", "qBittorrent", "qbittorrent", "uTorrent", "aria2c", "Motrix",
         "wpsoffice", "TencentDocs",
         "Alipay", "支付宝",
         "Meituan", "Eleme", "Taobao", "淘宝",

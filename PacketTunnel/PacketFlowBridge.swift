@@ -110,6 +110,10 @@ final class PacketFlowBridge {
         packetFlow.readPackets { [weak self] packets, protocols in
             guard let self, self.running else { return }
             for (packet, proto) in zip(packets, protocols) {
+                // Drop IPv6 entirely. 抖音/点评/闲鱼 Happy-Eyeballs prefer 2409:: CDN;
+                // those packets in gVisor (ipv6=false) → "ip version error" → App 全挂.
+                // Drop → App falls back to IPv4 → NE excludedRoutes / system path.
+                if Self.isIPv6Packet(packet, protocolNumber: proto) { continue }
                 if self.writePacketToBridge(packet, protocolNumber: proto) {
                     self.statsLock.lock()
                     self.inboundPackets &+= 1
@@ -203,6 +207,12 @@ final class PacketFlowBridge {
     private static func protocolNumber(for packet: Data) -> NSNumber {
         guard let first = packet.first else { return NSNumber(value: AF_INET) }
         return NSNumber(value: (first >> 4) == 6 ? AF_INET6 : AF_INET)
+    }
+
+    private static func isIPv6Packet(_ packet: Data, protocolNumber: NSNumber) -> Bool {
+        if protocolNumber.int32Value == AF_INET6 { return true }
+        guard let first = packet.first else { return false }
+        return (first >> 4) == 6
     }
 
     private func setNonBlocking(_ fd: Int32) {

@@ -25,12 +25,10 @@ enum DomesticBypassRoutes {
         "36.0.0.0/8",
         "39.0.0.0/8",
         "42.0.0.0/8",
-        "49.0.0.0/8",
         "58.0.0.0/7",
         "60.0.0.0/7",
         "101.0.0.0/8",
         "106.0.0.0/8",
-        "109.0.0.0/8",
         "111.0.0.0/8",
         "112.0.0.0/8",
         "113.0.0.0/8",
@@ -46,18 +44,15 @@ enum DomesticBypassRoutes {
         "123.0.0.0/8",
         "124.0.0.0/8",
         "125.0.0.0/8",
-        "129.0.0.0/8",
         "139.0.0.0/8",
-        "140.0.0.0/8",
-        "157.0.0.0/8",
         "171.16.0.0/12",
         "175.0.0.0/11",
         "180.0.0.0/8",
         "182.0.0.0/8",
         "183.0.0.0/8",
-        "202.0.0.0/8",
-        "203.0.0.0/8",
-        "210.0.0.0/8",
+        // Do not use 49/8, 109/8, 129/8, 140/8, 157/8, 202/8, 203/8 or 210/8
+        // here. They contain large non-mainland allocations; excluding them from
+        // the VPN silently blackholes foreign services that share those ranges.
         "218.0.0.0/8",
         "219.0.0.0/8",
         "220.0.0.0/8",
@@ -71,7 +66,12 @@ enum DomesticBypassRoutes {
     static let domesticSystemDNSDomains: [String] = douyinDomainSuffixes + [
         "weixin.qq.com", "weixin.com", "wechat.com", "qq.com", "qpic.cn", "gtimg.cn",
         "taobao.com", "tmall.com", "alipay.com", "alicdn.com", "aliyun.com",
-        "jd.com", "bilibili.com", "baidu.com", "bdstatic.com",
+        "goofish.com", "idlefish.com", "xianyu.com",
+        "meituan.com", "meituan.net", "dianping.com", "dpfile.com", "sankuai.com",
+        "kuaishou.com", "yximgs.com", "gifshow.com",
+        "bilibili.com", "hdslb.com", "163.com", "netease.com",
+        "amap.com", "ctrip.com", "12306.cn", "zhihu.com", "weibo.com",
+        "jd.com", "baidu.com", "bdstatic.com",
     ]
 
     /// Only foreign/proxy domains use tunnel DNS. Everything else (含抖音) → 系统 DNS → 国内 IP 走 excludedRoutes 绕过 TUN。
@@ -111,6 +111,8 @@ enum DomesticBypassRoutes {
         "ixigua.com", "toutiao.com", "toutiaovod.com", "toutiaostatic.com",
         "huoshan.com", "huoshanstatic.com", "volces.com", "volccdn.com",
         "ulikecam.com", "faceu.mobi", "bytedanceapi.com",
+        "aweme.com", "aweme.cn", "iesdouyin.com", "douyinpay.com",
+        "oceanengine.com", "csjplatform.com", "pglstatp-toutiao.com",
     ]
 
     /// mihomo IP-CIDR rules — Mac only; iOS relies on NE excludedRoutes (rule bloat costs NE RAM).

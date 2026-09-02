@@ -31,6 +31,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         // Keep prior session tail for diagnosing abrupt jetsam kills.
         writeLog("——— session begin ———")
+        TunnelDiagnostics.recordSessionBegin()
+        let ver = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        writeLog("PacketTunnel \(ver) ipv6Capture=off dropIPv6=true")
 
         #if canImport(MihomoCore)
         var logErr: NSError?
@@ -395,18 +398,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             // 抖音/国内不在此列表 → 系统 DNS → 真实 IP 走 excludedRoutes，不进 gVisor。
             dns.matchDomains = DomesticBypassRoutes.tunnelDNSMatchDomains
             dns.matchDomainsNoSearch = true
-            writeLog("NE bypass v4=\(Self.domesticBypassRoutes.count) v6=\(Self.domesticIPv6BypassRoutes.count) dns=split(\(dns.matchDomains?.count ?? 0))")
+            writeLog("NE bypass v4=\(Self.domesticBypassRoutes.count) dns=split(\(dns.matchDomains?.count ?? 0)) ipv6=off")
             settings.ipv4Settings = ipv4
-            // Only Telegram DC (+ optional APNs) enter TUN on IPv6. Mainland CDN IPv6
-            // (2408/2409/240e…) must stay on physical path — gVisor DIRECT times out → jetsam.
-            let ipv6 = NEIPv6Settings(addresses: ["fd00:beef::1"], networkPrefixLengths: [64])
-            var v6Routes = Self.telegramIPv6Routes
-            if Self.loadTelegramPushEnabled() {
-                v6Routes.append(contentsOf: Self.apnsIPv6Routes)
-            }
-            ipv6.includedRoutes = v6Routes
-            ipv6.excludedRoutes = Self.domesticIPv6BypassRoutes
-            settings.ipv6Settings = ipv6
+            // NEVER claim IPv6 on iOS NE. Douyin Happy-Eyeballs prefers 2409:: CDN;
+            // once those packets enter utun, mihomo (ipv6=false) dies with
+            // "dns resolve failed: ip version error" → 一条视频都刷不了.
+            // Telegram/APNs fall back to IPv4 via PROXY rules.
+            settings.ipv6Settings = nil
             settings.dnsSettings = dns
         } else {
             // HTTP 代理实验：不全量接管路由（≠ TUN）。
@@ -668,13 +666,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             if footprint > 10 * 1024 * 1024 {
                 BridgeForceGC()
             }
-            // Douyin video buffers in gVisor → jetsam ~15 clips. Drop those DIRECT
-            // conns early; never DELETE all (kills Binance / Telegram WS).
-            if footprint > 40 * 1024 * 1024 {
-                self.closeDomesticVideoConnectionsBestEffort()
-                BridgeForceGC()
-                self.writeLog("mem high rss=\(footprint / 1024)KB — drop 抖音 conns + GC")
-            } else if footprint > 28 * 1024 * 1024, self.gcTickCount.isMultiple(of: 2) {
+            // Douyin buffers in gVisor can push RSS up — GC only; never DELETE conns (kills WS).
+            if footprint > 28 * 1024 * 1024, self.gcTickCount.isMultiple(of: 2) {
                 BridgeForceGC()
                 self.writeLog("mem high rss=\(footprint / 1024)KB — GC only (keep WS)")
             }
@@ -804,8 +797,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         if healInFlight { return }
         // After a real switch, cool down — false flips kill Binance / HTX WebSockets.
         if Date().timeIntervalSince(lastHealSwitchAt) < 120 { return }
-        // Under memory pressure delay probes often false-fail — skip heal entirely.
-        if Self.residentMemoryBytes() > 42 * 1024 * 1024 {
+        // Under memory pressure delay probes often false-fail — skip heal only near jetsam ceiling.
+        if Self.residentMemoryBytes() > 78 * 1024 * 1024 {
             writeLog("heal skipped (rss high)")
             return
         }

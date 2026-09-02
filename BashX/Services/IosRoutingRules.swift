@@ -3,13 +3,20 @@ import Foundation
 /// Shared Mac/iOS routing aligned with LingJingMaster/Shadowrocket-Rules priority.
 /// https://github.com/LingJingMaster/Shadowrocket-Rules
 ///
+/// ## iOS = 小火箭手机分流（适配 NE 无 GeoDB）
+/// 小火箭原版：国内直连 → 境外 PROXY → GEOIP,CN,DIRECT → FINAL PROXY
+/// BashX iOS：国内高优 DIRECT → 境外域名 PROXY → **MATCH,DIRECT**
+///   （NE 不能加载 GEOIP；FINAL PROXY 会把裸国内 IP 送进节点 → 点评/闲鱼/抖音全挂）
+///
 /// Order (top → bottom):
-/// 0. (Mac) ClashFX process DIRECT (cn-apps-direct + fingerprint browsers)
-/// 1. WeChat local + LAN
-/// 2. Google / AI / Telegram / GitHub / YouTube  → strategy groups
-/// 3. Apple (push optional PROXY; rest APPLE/DIRECT)
-/// 4. 国内服务 blanket DIRECT（含 B 站/抖音 — 勿默认进策略组）
-/// 5. GFWList + GeoIP；Mac 漏网之鱼 → MATCH,PROXY（ACL4SSR）；iOS → MATCH,DIRECT（小火箭 FINAL）
+/// 0. (Mac) ClashFX process DIRECT
+/// 1. WeChat / APNS / AnyDesk / 抖音 / 电商点评闲鱼 / 小红书银行 — 高优 DIRECT
+/// 2. TikTok 国际（与大陆抖音分开）
+/// 3. 广告 REJECT + Shadowrocket Forever SR-REJECT/SR-PROXY
+/// 4. Google / AI / Telegram / GitHub … → 策略组
+/// 5. Apple（推送 APNS；其余 DIRECT）
+/// 6. 国内 blanket DIRECT
+/// 7. iOS FINAL = MATCH,DIRECT（小火箭安全版兜底）
 enum IosRoutingRules {
     /// Highest-priority APNs rules — prepended on iOS so apple.com DIRECT/APPLE cannot steal push.
     static let apnsPriorityRules: [String] = [
@@ -45,12 +52,15 @@ enum IosRoutingRules {
         // IPFoxy / residential gates + Ads control-plane before any process DIRECT.
         out.append(contentsOf: MacAppBypassRules.residentialProxyChainRules)
         out.append(contentsOf: MacAppBypassRules.adsPowerRules)
+        // DOMAIN rules above keep AdsPower's control plane proxied; IP-literal S5
+        // endpoints cannot match a domain and must be dialled directly.
+        out.append(contentsOf: MacAppBypassRules.adsPowerSocksDirectRules)
         out.append(contentsOf: prepend)
         out.append(contentsOf: extraProcess)
-        // ClashFX cn-apps-direct: CN apps process DIRECT; AdsPower is domain-only.
+        // ClashFX cn-apps-direct: CN apps process DIRECT; AdsPower is handled above.
         // https://github.com/Clash-FX/cn-apps-direct
         out.append(contentsOf: AppRoutingRules.macAppBypassRules)
-        // Extra PROCESS lines from smart rules / plugins (AdsPower helper never hijacked).
+        // Extra PROCESS lines from smart rules / plugins (keep the dedicated AdsPower policy).
         for raw in base {
             let t = raw.trimmingCharacters(in: .whitespaces)
             let u = t.uppercased()
@@ -69,25 +79,25 @@ enum IosRoutingRules {
         out.append(contentsOf: apnsPriorityRules)
         // AnyDesk before DOMAIN-SUFFIX,cn (*.anydesk.com.cn otherwise forced DIRECT → offline).
         out.append(contentsOf: IosDirectDomains.anydeskPriorityRules)
-        // TikTok 国际域名先匹配；大陆抖音（含 snssdk.com）在 douyinPriorityRules 里一律 DIRECT。
+        // 大陆抖音 — 必须在 TikTok/PROXY 之前；snssdk/bytedanceapi 不能被 TIKTOK 抢走。
+        out.append(contentsOf: IosDirectDomains.douyinPriorityRules)
         #if os(iOS)
         out.append(contentsOf: IosDirectDomains.tiktokRulesForPlatform(forIOS: true))
         #else
         out.append(contentsOf: IosDirectDomains.tiktokPriorityRules)
         #endif
-        // Plugin / VideoAdBlock REJECT must beat china/ecommerce DIRECT blankets
-        // (e.g. DOMAIN-SUFFIX,kugou.com,DIRECT would otherwise swallow ads.service.kugou.com).
+        // Critical domestic apps BEFORE any REJECT / SR list (小火箭：国内服务优先直连).
+        // Dianping / Xianyu login endpoints appear in some third-party reject sets.
+        out.append(contentsOf: IosDirectDomains.ecommercePriorityRules)
+        out.append(contentsOf: IosDirectDomains.chinaDailyAppsRules)
+        out.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules)
+        out.append(contentsOf: IosDirectDomains.bankPriorityRules)
+        // Plugin / VideoAdBlock REJECT still beats the general China blanket.
         let earlyRejects = rejectRulesHoisted(from: base)
         let earlyRejectSet = Set(earlyRejects)
         out.append(contentsOf: earlyRejects)
         // Shadowrocket-ADBlock-Rules-Forever — 5w+ REJECT + 3w+ GFW PROXY (local RULE-SET).
         out.append(contentsOf: ShadowrocketForeverRules.headerRules())
-        // 淘宝 / 闲鱼 / 国内电商 — goofish 等须在 MATCH,PROXY 之前；也盖过 adblock 误伤.
-        out.append(contentsOf: IosDirectDomains.ecommercePriorityRules)
-        out.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules)
-        out.append(contentsOf: IosDirectDomains.bankPriorityRules)
-        // 抖音在 TikTok 之后：isnssdk 已被 TIKTOK 吃掉；snssdk.com 在此 DIRECT。
-        out.append(contentsOf: IosDirectDomains.douyinPriorityRules)
         // GFWList upstream — fallback until Shadowrocket banlist RULE-SET is cached.
         if !ShadowrocketForeverRules.isReady {
             out.append(contentsOf: GfwListRules.directRules())

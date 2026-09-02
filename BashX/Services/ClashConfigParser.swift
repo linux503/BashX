@@ -114,18 +114,29 @@ enum ClashConfigParser {
             var out = IosDirectDomains.dnsBootstrapDirectRules
             out.append(contentsOf: IosRoutingRules.apnsPriorityRules)
             out.append(contentsOf: IosDirectDomains.wechatPriorityRules)
+            // 抖音必须在 TikTok / PROXY 之前 — bytedanceapi/snssdk 曾被 TIKTOK 抢走。
+            out.append(contentsOf: IosDirectDomains.douyinPriorityRules)
             out.append(contentsOf: IosDirectDomains.tiktokRulesForPlatform(forIOS: true))
             out.append(contentsOf: IosDirectDomains.ecommercePriorityRules)
+            out.append(contentsOf: IosDirectDomains.chinaDailyAppsRules)
             out.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules)
             out.append(contentsOf: IosDirectDomains.bankPriorityRules)
-            out.append(contentsOf: IosDirectDomains.douyinPriorityRules)
             out.append(contentsOf: IosProxyDomains.rules)
+            // Bare proxy node IPs must not fall through to MATCH,DIRECT (gVisor dial loop → RSS/jetsam).
+            out.append(contentsOf: Self.proxyServerIPCIDRRules(exportNodes.map(\.server)))
             let head = base.filter { !$0.uppercased().hasPrefix("MATCH,") }
             // Drop duplicate APNS lines already prepended (base from RuntimeRules also has them).
             let apnsMarkers = ["PUSH.APPLE.COM", "17.249.", "17.252.", "17.57.144.", "17.188.128.", "17.188.20.", "PUSH-APPLE.COM"]
+            let douyinMarkers = ["DOUYIN", "SNSSDK", "AMEMV", "DOUYINVOD", "DOUYINCDN", "BYTEIMG", "PSTATP",
+                                   "ZIJIEAPI", "BYTEDANCE", "IXIGUA", "TOUTIAO", "HUOSHAN", "VOLCES"]
             let filteredHead = head.filter { line in
                 let u = line.uppercased()
-                return !apnsMarkers.contains { u.contains($0) }
+                if apnsMarkers.contains(where: { u.contains($0) }) { return false }
+                if douyinMarkers.contains(where: { u.contains($0) }),
+                   u.contains(",PROXY") || u.contains(",TIKTOK") || u.contains(",GLOBAL") {
+                    return false
+                }
+                return true
             }
             out.append(contentsOf: filteredHead)
             out.append("MATCH,DIRECT")
@@ -147,7 +158,7 @@ enum ClashConfigParser {
             } else if forIOS {
                 // iOS: real nodes first (NE cannot nest url-test). Prefer leaf so MATCH,PROXY works.
                 // BALANCE/FALLBACK are lazy — no probing unless the user actually picks them.
-                let leaves = Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
+                let leaves = Self.urlTestPool(from: poolSource, selected: selected, limit: 8)
                 list = leaves + [autoHubName, balanceHubName, fallbackHubName, "JP", "HK", "US", "TW", "DIRECT"]
             } else {
                 let hubFirst: String = {
@@ -362,9 +373,8 @@ enum ClashConfigParser {
             "log-level": forIOS ? "warning" : "warning",
             "external-controller": controller,
             "secret": secret,
-            // Mac + TUN: disable IPv6 stack — Meta Happy-Eyeballs dials AAAA:5222 and QR WebSocket dies.
-            // iOS NE still needs v6 for Telegram DC literals when utun is on.
-            "ipv6": forIOS && tunEnabled,
+            // iOS NE: disable IPv6 stack — gVisor AAAA dials blow RSS and jetsam the extension.
+            "ipv6": forIOS ? false : tunEnabled,
             // Same as Clash Verge / Meta — one delay per proxy instead of per hop.
             "unified-delay": true,
             "dns": forIOS
@@ -480,8 +490,10 @@ enum ClashConfigParser {
         root["log-level"] = "warning"
         root["external-controller"] = controller
         root["secret"] = secret
-        // TUN needs IPv6 stack for Telegram DC literals; dns.ipv6 stays false — no AAAA pollution.
-        if forIOS || tunEnabled {
+        // iOS NE: no IPv6 stack (jetsam). Mac TUN keeps v6 for Telegram DC literals.
+        if forIOS {
+            root["ipv6"] = false
+        } else if tunEnabled {
             root["ipv6"] = true
         } else if root["ipv6"] == nil {
             root["ipv6"] = false
@@ -503,7 +515,14 @@ enum ClashConfigParser {
             sanitizeIOSPassthroughGroups(&root)
             applyPassthroughSelectedNode(&root, selectedName: selectedName)
             let scrubbed = scrubIOSIncompatibleRules(stringList(root["rules"]) ?? [])
-            root["rules"] = patchIOSPassthroughRules(scrubbed, groupNames: proxyGroupNames(in: root))
+            let servers: [String] = ((root["proxies"] as? [[String: Any]]) ?? [])
+                .compactMap { ($0["server"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            root["rules"] = patchIOSPassthroughRules(
+                scrubbed,
+                groupNames: proxyGroupNames(in: root),
+                proxyServers: servers
+            )
             root["geodata-mode"] = false
             root["geo-auto-update"] = false
             root["find-process-mode"] = "off"
@@ -1119,7 +1138,11 @@ enum ClashConfigParser {
     }
 
     /// After scrubbing GEOSITE/GEOIP, inject domain + Telegram DC rules so Google/TG work.
-    private static func patchIOSPassthroughRules(_ rules: [String], groupNames: Set<String>) -> [String] {
+    private static func patchIOSPassthroughRules(
+        _ rules: [String],
+        groupNames: Set<String>,
+        proxyServers: [String] = []
+    ) -> [String] {
         let googleTarget = groupNames.contains("GOOGLE") ? "GOOGLE" : "PROXY"
         let telegramTarget = groupNames.contains("TELEGRAM") ? "TELEGRAM" : "PROXY"
         let tiktokTarget = groupNames.contains("TIKTOK") ? "TIKTOK" : "PROXY"
@@ -1135,15 +1158,17 @@ enum ClashConfigParser {
 
         var inject = ShadowrocketForeverRules.headerRules()
         inject.append(contentsOf: IosDirectDomains.wechatPriorityRules.map(retarget))
+        inject.append(contentsOf: IosDirectDomains.douyinPriorityRules.map(retarget))
         inject.append(contentsOf: IosDirectDomains.tiktokRulesForPlatform(forIOS: true).map(retarget))
         inject.append(contentsOf: IosDirectDomains.ecommercePriorityRules.map(retarget))
+        inject.append(contentsOf: IosDirectDomains.chinaDailyAppsRules.map(retarget))
         inject.append(contentsOf: IosDirectDomains.xiaohongshuPriorityRules.map(retarget))
         inject.append(contentsOf: IosDirectDomains.bankPriorityRules.map(retarget))
-        inject.append(contentsOf: IosDirectDomains.douyinPriorityRules.map(retarget))
         // DNS bootstrap MUST be DIRECT — MATCH,PROXY would send 223.5.5.5 DoH via node
         // (chicken/egg → 502 → every foreign site dies).
         inject.append(contentsOf: IosDirectDomains.dnsBootstrapDirectRules)
         inject.append(contentsOf: IosProxyDomains.rules.map(retarget))
+        inject.append(contentsOf: proxyServerIPCIDRRules(proxyServers))
         // Foreign DoH only after a working node exists.
         inject.append(contentsOf: [
             "IP-CIDR,8.8.8.8/32,\(proxyTarget),no-resolve",
@@ -2030,6 +2055,20 @@ enum ClashConfigParser {
             merged[key] = value
         }
         root["rule-providers"] = merged
+    }
+
+    /// Proxy server literals must route via PROXY — MATCH,DIRECT sends them through gVisor and loops.
+    private static func proxyServerIPCIDRRules(_ servers: [String]) -> [String] {
+        var rules: [String] = []
+        var seen = Set<String>()
+        for server in servers {
+            let trimmed = server.trimmingCharacters(in: .whitespacesAndNewlines)
+            let parts = trimmed.split(separator: ".")
+            guard parts.count == 4, parts.allSatisfy({ UInt8($0) != nil }),
+                  seen.insert(trimmed).inserted else { continue }
+            rules.append("IP-CIDR,\(trimmed)/32,PROXY,no-resolve")
+        }
+        return rules
     }
 }
 

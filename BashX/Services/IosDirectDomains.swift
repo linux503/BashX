@@ -34,6 +34,16 @@ enum IosDirectDomains {
         "DOMAIN-KEYWORD,goofish,DIRECT",
         "DOMAIN-KEYWORD,xianyu,DIRECT",
         "DOMAIN-KEYWORD,idlefish,DIRECT",
+        // 美团 / 大众点评 — 必须直连，绝不进代理
+        "DOMAIN-SUFFIX,meituan.com,DIRECT",
+        "DOMAIN-SUFFIX,meituan.net,DIRECT",
+        "DOMAIN-SUFFIX,dianping.com,DIRECT",
+        "DOMAIN-SUFFIX,dpfile.com,DIRECT",
+        "DOMAIN-SUFFIX,dpapi.com,DIRECT",
+        "DOMAIN-SUFFIX,sankuai.com,DIRECT",
+        "DOMAIN-KEYWORD,meituan,DIRECT",
+        "DOMAIN-KEYWORD,dianping,DIRECT",
+        "DOMAIN-KEYWORD,sankuai,DIRECT",
         // 淘宝 / 天猫 / 支付宝 / 阿里 CDN（含 HTTPDNS，勿 REJECT）
         "DOMAIN,httpdns.alicdn.com,DIRECT",
         "DOMAIN-SUFFIX,httpdns.alicdn.com,DIRECT",
@@ -71,6 +81,70 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,cainiao.com,DIRECT",
         "DOMAIN-SUFFIX,ele.me,DIRECT",
         "DOMAIN-SUFFIX,elemecdn.com,DIRECT",
+    ]
+
+    /// 小火箭「国内服务」高频 App — 必须在 SR-REJECT / PROXY 之前。
+    /// 覆盖：快手 / B站 / 网易云 / 出行 / 视频站（电商点评闲鱼见 ecommercePriorityRules）。
+    static let chinaDailyAppsRules: [String] = [
+        // 快手
+        "DOMAIN-SUFFIX,kuaishou.com,DIRECT",
+        "DOMAIN-SUFFIX,kuaishoupay.com,DIRECT",
+        "DOMAIN-SUFFIX,kuaishouzt.com,DIRECT",
+        "DOMAIN-SUFFIX,yximgs.com,DIRECT",
+        "DOMAIN-SUFFIX,gifshow.com,DIRECT",
+        "DOMAIN-SUFFIX,ksapisrv.com,DIRECT",
+        "DOMAIN-SUFFIX,ksyun.com,DIRECT",
+        "DOMAIN-KEYWORD,kuaishou,DIRECT",
+        // B站
+        "DOMAIN-SUFFIX,bilibili.com,DIRECT",
+        "DOMAIN-SUFFIX,bilibili.tv,DIRECT",
+        "DOMAIN-SUFFIX,bilivideo.com,DIRECT",
+        "DOMAIN-SUFFIX,biliapi.net,DIRECT",
+        "DOMAIN-SUFFIX,biliapi.com,DIRECT",
+        "DOMAIN-SUFFIX,hdslb.com,DIRECT",
+        "DOMAIN-KEYWORD,bilibili,DIRECT",
+        // 网易云 / 网易
+        "DOMAIN-SUFFIX,music.163.com,DIRECT",
+        "DOMAIN-SUFFIX,163.com,DIRECT",
+        "DOMAIN-SUFFIX,126.net,DIRECT",
+        "DOMAIN-SUFFIX,netease.com,DIRECT",
+        "DOMAIN-SUFFIX,nosdn.127.net,DIRECT",
+        // 出行 / 地图
+        "DOMAIN-SUFFIX,didiglobal.com,DIRECT",
+        "DOMAIN-SUFFIX,diditaxi.com.cn,DIRECT",
+        "DOMAIN-SUFFIX,udache.com,DIRECT",
+        "DOMAIN-SUFFIX,xiaojukeji.com,DIRECT",
+        "DOMAIN-SUFFIX,amap.com,DIRECT",
+        "DOMAIN-SUFFIX,autonavi.com,DIRECT",
+        "DOMAIN-SUFFIX,ctrip.com,DIRECT",
+        "DOMAIN-SUFFIX,c-ctrip.com,DIRECT",
+        "DOMAIN-SUFFIX,trip.com,DIRECT",
+        "DOMAIN-SUFFIX,qunar.com,DIRECT",
+        "DOMAIN-SUFFIX,qunarzz.com,DIRECT",
+        "DOMAIN-SUFFIX,12306.cn,DIRECT",
+        "DOMAIN-SUFFIX,rails.com.cn,DIRECT",
+        // 视频站
+        "DOMAIN-SUFFIX,iqiyi.com,DIRECT",
+        "DOMAIN-SUFFIX,iqiyipic.com,DIRECT",
+        "DOMAIN-SUFFIX,youku.com,DIRECT",
+        "DOMAIN-SUFFIX,ykimg.com,DIRECT",
+        "DOMAIN-SUFFIX,mgtv.com,DIRECT",
+        "DOMAIN-SUFFIX,hitv.com,DIRECT",
+        "DOMAIN-SUFFIX,hunantv.com,DIRECT",
+        // 社交 / 内容
+        "DOMAIN-SUFFIX,weibo.com,DIRECT",
+        "DOMAIN-SUFFIX,weibo.cn,DIRECT",
+        "DOMAIN-SUFFIX,sinaimg.cn,DIRECT",
+        "DOMAIN-SUFFIX,zhihu.com,DIRECT",
+        "DOMAIN-SUFFIX,zhimg.com,DIRECT",
+        "DOMAIN-SUFFIX,douban.com,DIRECT",
+        "DOMAIN-SUFFIX,doubanio.com,DIRECT",
+        // 云 / CDN 常用国内
+        "DOMAIN-SUFFIX,qiniucdn.com,DIRECT",
+        "DOMAIN-SUFFIX,qiniudn.com,DIRECT",
+        "DOMAIN-SUFFIX,clouddn.com,DIRECT",
+        "DOMAIN-SUFFIX,myqcloud.com,DIRECT",
+        "DOMAIN-SUFFIX,upyun.com,DIRECT",
     ]
 
     /// TikTok（国际版）— 与大陆抖音完全分开。
@@ -150,12 +224,27 @@ enum IosDirectDomains {
         "DOMAIN-KEYWORD,worldfcdn,TIKTOK",
     ]
 
-    /// iOS: keep TIKTOK policy (Asia group). Mac/shared callers may still remap.
+    /// iOS: strip TikTok rules that overlap mainland 抖音 — 抖音绝不进 TIKTOK/PROXY.
     static func tiktokRulesForPlatform(forIOS: Bool) -> [String] {
-        // Always keep TIKTOK group — collapsing to PROXY broke TikTok when user
-        // picked a US/ME leaf (TikTok geo-blocks many DC exits).
-        _ = forIOS
-        return tiktokPriorityRules
+        guard forIOS else { return tiktokPriorityRules }
+        let douyinSuffixes = Set(DomesticBypassRoutes.douyinDomainSuffixes.map { $0.lowercased() })
+        return tiktokPriorityRules.filter { rule in
+            guard let host = domainRuleHost(rule) else { return true }
+            let h = host.lowercased()
+            if h == "snssdk.com" || h.hasSuffix(".snssdk.com") { return false }
+            if douyinSuffixes.contains(h) { return false }
+            if h.contains("douyin") || h.contains("amemv") { return false }
+            return true
+        }
+    }
+
+    /// Extract host from DOMAIN / DOMAIN-SUFFIX rule (ignores AND/REJECT wrappers).
+    private static func domainRuleHost(_ rule: String) -> String? {
+        let parts = rule.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        guard parts.count >= 3 else { return nil }
+        let kind = parts[0].uppercased()
+        guard kind == "DOMAIN-SUFFIX" || kind == "DOMAIN" else { return nil }
+        return parts[1]
     }
 
     /// AnyDesk — must beat DOMAIN-SUFFIX,cn,DIRECT (*.anydesk.com.cn was swallowed).

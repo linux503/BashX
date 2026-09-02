@@ -32,6 +32,10 @@ enum SystemProxy {
         "10.0.0.0/8",
         "172.16.0.0/12",
         "169.254.0.0/16",
+        // ClashX Pro proxyIgnoreList — Apple time/Siri auth should not go via system proxy.
+        "timestamp.apple.com",
+        "sequoia.apple.com",
+        "seed-sequoia.siri.apple.com",
         "*.whatsapp.com",
         "*.whatsapp.net",
         "*.whatsapp.biz",
