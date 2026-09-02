@@ -118,6 +118,7 @@ enum Paths {
 
     static func trimSupportLogs() {
         trimLogIfNeeded(supportDir.appendingPathComponent("core.log"))
+        trimLogIfNeeded(supportDir.appendingPathComponent("launch.log"))
         trimLogIfNeeded(supportDir.appendingPathComponent("tunnel.log"), maxBytes: 1024 * 1024)
     }
 }

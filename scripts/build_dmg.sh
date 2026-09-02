@@ -52,12 +52,16 @@ if [[ -f project.yml ]]; then
   command -v xcodegen >/dev/null 2>&1 && xcodegen generate
 fi
 
-echo "[0/6] Regenerate brand icons + fetch mihomo cores…"
+echo "[0/7] Clean local logs before pack…"
+chmod +x "$ROOT/scripts/clean_local_logs.sh"
+"$ROOT/scripts/clean_local_logs.sh"
+
+echo "[1/7] Regenerate brand icons + fetch mihomo cores…"
 swift "$ROOT/scripts/generate_icons.swift"
 chmod +x "$ROOT/scripts/fetch_mihomo.sh"
 "$ROOT/scripts/fetch_mihomo.sh"
 
-echo "[1/6] Release build (universal arm64+x86_64)…"
+echo "[2/7] Release build (universal arm64+x86_64)…"
 xcodebuild \
   -project "$ROOT/BashX.xcodeproj" \
   -scheme BashX \
@@ -79,7 +83,7 @@ echo "  ✓ $APP (v${VERSION})"
 file "$APP/Contents/MacOS/BashX" || true
 lipo -info "$APP/Contents/MacOS/BashX" 2>/dev/null || true
 
-echo "[2/6] Stage + strip quarantine…"
+echo "[3/7] Stage + strip quarantine…"
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/BashX.app"
@@ -100,7 +104,7 @@ strip -x "$STAGE/BashX.app/Contents/MacOS/BashX" 2>/dev/null || true
 xattr -cr "$STAGE/BashX.app" 2>/dev/null || true
 find "$STAGE/BashX.app" -exec xattr -c {} \; 2>/dev/null || true
 
-echo "[3/6] Codesign…"
+echo "[4/7] Codesign…"
 ENTITLEMENTS="$ROOT/BashX/BashX.entitlements"
 sign_one() {
   local path="$1"
@@ -137,7 +141,7 @@ codesign --verify --deep --strict --verbose=2 "$STAGE/BashX.app" 2>&1 | tail -10
   echo "WARN: codesign verify reported issues (continuing)"
 }
 
-echo "[4/6] Install helper…"
+echo "[5/7] Install helper…"
 # DMG keeps only: BashX.app + Applications + 安装.command
 cat > "$STAGE/安装.command" <<'UNLOCK'
 #!/bin/bash
@@ -199,7 +203,7 @@ UNLOCK
 chmod +x "$STAGE/安装.command"
 xattr -c "$STAGE/安装.command" 2>/dev/null || true
 
-echo "[5/6] Create DMG…"
+echo "[6/7] Create DMG…"
 mkdir -p "$DIST"
 hdiutil create \
   -volname "BashX" \
@@ -212,7 +216,7 @@ hdiutil create \
 xattr -c "$DMG" 2>/dev/null || true
 
 if [[ "$USE_DEV_ID" -eq 1 ]]; then
-  echo "[6/6] Notarize DMG…"
+  echo "[7/7] Notarize DMG…"
   codesign --force --sign "$SIGN_ID" --timestamp "$DMG" 2>/dev/null || true
   if [[ -n "$NOTARY_PROFILE" ]]; then
     xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
@@ -224,7 +228,7 @@ if [[ "$USE_DEV_ID" -eq 1 ]]; then
     echo "    然后: NOTARY_PROFILE=BashX-Notary ./scripts/build_dmg.sh"
   fi
 else
-  echo "[6/6] Skip notarization (no Developer ID)"
+  echo "[7/7] Skip notarization (no Developer ID)"
 fi
 
 rm -rf "$STAGE"
