@@ -35,6 +35,7 @@ struct SettingsView: View {
     @State private var showGeneralAdvanced = false
     @State private var showNetworkSpeed = false
     @State private var showNetworkCore = false
+    @State private var showLaunchLog = true
 
     private var lang: AppLanguage { state.settings.uiLanguage }
     private func t(_ key: String) -> String { L10n.t(key, lang) }
@@ -59,6 +60,7 @@ struct SettingsView: View {
             }
         }
         .onAppear { state.refreshLaunchAtLogin() }
+        .onAppear { state.refreshLaunchDiagnostics() }
         .onDisappear {
             let port = min(65535, max(1024, state.settings.mixedPort))
             if port != state.settings.mixedPort {
@@ -101,6 +103,10 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
+            if state.launchHasError {
+                launchDiagnosticSection
+            }
+
             Section {
                 HStack(spacing: 8) {
                     ForEach(ProxyMode.allCases) { mode in
@@ -228,6 +234,50 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .font(.system(size: 12.5))
         .padding(10)
+    }
+
+    private var launchDiagnosticSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("mac.launchDiag.title"))
+                        .font(.system(size: 12.5, weight: .semibold))
+                    Text(state.statusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(BashXTheme.secondaryLabel(for: appearance))
+                        .lineLimit(2)
+                }
+            }
+
+            DisclosureGroup(isExpanded: $showLaunchLog) {
+                ScrollView {
+                    Text(state.launchDiagnosticReport.isEmpty ? t("mac.launchDiag.empty") : state.launchDiagnosticReport)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 200)
+            } label: {
+                Text(t("mac.launchDiag.detail"))
+            }
+
+            HStack(spacing: 10) {
+                Button(t("mac.launchDiag.copy")) {
+                    state.copyLaunchDiagnosticReport()
+                }
+                Button(t("mac.launchDiag.openLog")) {
+                    state.openLaunchDiagnosticLog()
+                }
+                Button(t("mac.core.repair")) {
+                    Task { await state.installOrRepairCore() }
+                }
+                .disabled(state.isBusy)
+            }
+        } header: {
+            Text(t("mac.launchDiag.header"))
+        }
     }
 
     private func settingsProxyModeButton(_ mode: ProxyMode) -> some View {

@@ -39,6 +39,9 @@ final class AppState: ObservableObject {
     @Published var outboundIPLoading = false
     /// Resolved leaf proxy name from mihomo (e.g. actual node behind AUTO).
     @Published var runtimeOutboundName: String?
+    /// Settings: show launch diagnostic panel when bootstrap failed.
+    @Published private(set) var launchHasError = false
+    @Published private(set) var launchDiagnosticReport = ""
     /// True while bootstrap / startCoreAsync is bringing mihomo up.
     @Published private(set) var coreConnecting = false
     /// Bumped when node list / filters change — isolated views subscribe instead of whole AppState.
@@ -385,6 +388,15 @@ final class AppState: ObservableObject {
         userStoppedCore = false
         runtimeTunInConfig = false
         Paths.trimSupportLogs()
+        LaunchDiagnostics.beginSession()
+
+        let quit = await CompetingProxyApps.quitAllOnLaunch()
+        if !quit.isEmpty {
+            let msg = "已退出其他代理：\(quit.joined(separator: "、"))"
+            statusText = msg
+            LaunchDiagnostics.info(msg)
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
 
         coreConnecting = true
         defer {
@@ -425,16 +437,7 @@ final class AppState: ObservableObject {
         }
 
         // GEOSITE/GEOIP rules need geoip.metadb + geosite.dat — download before first core start on new Macs.
-        if !GeoDataBootstrap.isReady() {
-            statusText = "正在下载地理规则库（首次需联网）…"
-            do {
-                try await GeoDataBootstrap.ensurePresent { [weak self] msg in
-                    Task { @MainActor in self?.statusText = msg }
-                }
-            } catch {
-                statusText = "地理库下载失败：\(error.localizedDescription)"
-            }
-        }
+        await ensureGeoDataReady(progress: true)
 
         // GFWList / Shadowrocket are large — fetch after core is up (see background Task below).
 
@@ -465,11 +468,7 @@ final class AppState: ObservableObject {
             guard let self else { return }
             await self.ensureTelegramConnectivity(forceNodeProbe: true)
             await self.ensureCursorConnectivity(forceNodeProbe: true)
-            if !GeoDataBootstrap.isReady() {
-                try? await GeoDataBootstrap.ensurePresent { [weak self] msg in
-                    Task { @MainActor in self?.statusText = msg }
-                }
-            }
+            await self.ensureGeoDataReady(progress: false)
             let hadSR = ShadowrocketForeverRules.isReady
             try? await GfwListRules.ensurePresent { [weak self] msg in
                 Task { @MainActor in self?.statusText = msg }
@@ -507,6 +506,39 @@ final class AppState: ObservableObject {
                 await self.updateAllSubscriptions()
             }
         }
+
+        recordBootstrapOutcome()
+    }
+
+    func refreshLaunchDiagnostics() {
+        launchHasError = LaunchDiagnostics.isStartupFailure(
+            statusText: statusText,
+            coreRunning: coreRunning,
+            coreConnecting: coreConnecting
+        )
+        launchDiagnosticReport = LaunchDiagnostics.buildReport(
+            statusText: statusText,
+            coreRunning: coreRunning
+        )
+    }
+
+    private func recordBootstrapOutcome() {
+        refreshLaunchDiagnostics()
+        if launchHasError {
+            LaunchDiagnostics.error("bootstrap 结束: \(statusText)")
+        } else {
+            LaunchDiagnostics.info("bootstrap 完成 · coreRunning=\(coreRunning)")
+        }
+    }
+
+    func copyLaunchDiagnosticReport() {
+        refreshLaunchDiagnostics()
+        LaunchDiagnostics.copyReport(launchDiagnosticReport)
+        statusText = "已复制启动诊断日志"
+    }
+
+    func openLaunchDiagnosticLog() {
+        LaunchDiagnostics.revealLogFile()
     }
 
     /// Keep defaults lean for a menu-bar utility.
@@ -954,13 +986,14 @@ final class AppState: ObservableObject {
         }
         guard ClashCore.resolveBinary(customPath: settings.clashBinaryPath) != nil else {
             statusText = "内核安装失败，请重新打开 BashX"
+            LaunchDiagnostics.error(statusText)
             return
         }
 
         if !rebuildEnabledNodesFromCache() {
             reloadNodesFromDiskIfNeeded()
         }
-        writeConfig()
+        await writeConfigAndWait()
 
         let apiOK = await CoreHealth.apiAlive(controller: settings.externalController, secret: settings.secret)
         let portOK = await CoreHealth.mixedPortAliveAsync(port: settings.mixedPort)
@@ -974,7 +1007,7 @@ final class AppState: ObservableObject {
                 if attempt > 1 {
                     statusText = "正在重试启动内核（\(attempt)/3）…"
                     await migrateBusyPortsIfNeeded()
-                    writeConfig()
+                    await writeConfigAndWait()
                 }
                 await startCoreAsync(forceRestart: attempt > 1)
                 if !coreRunning {
@@ -985,6 +1018,7 @@ final class AppState: ObservableObject {
 
         if !coreRunning {
             statusText = "内核启动失败，正在后台重试…"
+            LaunchDiagnostics.error("内核启动失败：\(statusText)")
             // healthTick will retry within a few seconds
             return
         }
@@ -4110,12 +4144,22 @@ final class AppState: ObservableObject {
                 if nodes.isEmpty { reloadNodesFromDiskIfNeeded() }
             }
 
+            await writeConfigAndWait()
+            await ensureGeoDataReady(progress: true)
+
             // Quick syntax/loop check via mihomo -t before we elevate / spawn.
             if let testErr = await Self.mihomoConfigTestError() {
-                statusText = "配置异常：\(testErr)，正在重写…"
+                statusText = "配置异常：\(testErr)，正在修复…"
+                if Self.isGeoRelatedConfigError(testErr) {
+                    await ensureGeoDataReady(progress: true, force: true)
+                }
                 await writeConfigAndWait()
                 if let still = await Self.mihomoConfigTestError() {
-                    statusText = "配置仍异常：\(still)"
+                    let hint = Self.isGeoRelatedConfigError(still)
+                        ? "（需联网下载 geoip/geosite，可先连可用网络后重启）"
+                        : ""
+                    statusText = "配置仍异常：\(still)\(hint)"
+                    LaunchDiagnostics.error(statusText)
                     applyCoreRunning(false)
                     return
                 }
@@ -4368,6 +4412,36 @@ final class AppState: ObservableObject {
             statusText = "启动失败：\(error.localizedDescription)"
             applyCoreRunning(false)
         }
+    }
+
+    /// Download geo DBs mihomo needs for GEOSITE/GEOIP rules (first launch / after upgrade).
+    private func ensureGeoDataReady(progress: Bool, force: Bool = false) async {
+        guard force || !GeoDataBootstrap.isReady() else { return }
+        if progress {
+            statusText = "正在下载地理规则库（首次需联网）…"
+        }
+        do {
+            try await GeoDataBootstrap.ensurePresent { [weak self] msg in
+                guard progress else { return }
+                Task { @MainActor in self?.statusText = msg }
+            }
+        } catch {
+            if progress {
+                statusText = "地理库下载失败：\(error.localizedDescription)"
+            }
+            LaunchDiagnostics.error("地理库下载失败：\(error.localizedDescription)")
+        }
+    }
+
+    private static func isGeoRelatedConfigError(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("geosite")
+            || lower.contains("geoip")
+            || lower.contains("geo site")
+            || lower.contains("geoip.dat")
+            || lower.contains("geosite.dat")
+            || lower.contains("geoip.metadb")
+            || message.contains("地理")
     }
 
     /// Run `mihomo -t` so proxy-group loops / bad YAML fail before elevate.

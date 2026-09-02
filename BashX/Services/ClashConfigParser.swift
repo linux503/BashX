@@ -146,8 +146,9 @@ enum ClashConfigParser {
                 list = ["DIRECT"]
             } else if forIOS {
                 // iOS: real nodes first (NE cannot nest url-test). Prefer leaf so MATCH,PROXY works.
+                // BALANCE/FALLBACK are lazy — no probing unless the user actually picks them.
                 let leaves = Self.urlTestPool(from: poolSource, selected: selected, limit: 32)
-                list = leaves + [autoHubName, "JP", "HK", "US", "TW", "DIRECT"]
+                list = leaves + [autoHubName, balanceHubName, fallbackHubName, "JP", "HK", "US", "TW", "DIRECT"]
             } else {
                 let hubFirst: String = {
                     switch proxyHubMode {
@@ -259,6 +260,24 @@ enum ClashConfigParser {
                 // Must include every hub listed in PROXY/GLOBAL (TW was missing → mihomo reject).
                 return [
                     Self.iosSelectGroup(name: "AUTO", proxies: autoProxies),
+                    // 负载均衡 / 故障转移: lazy so health checks only run if actively selected (jetsam-safe).
+                    [
+                        "name": balanceHubName,
+                        "type": "load-balance",
+                        "proxies": autoProxies,
+                        "url": probeURL,
+                        "interval": 300,
+                        "strategy": "consistent-hashing",
+                        "lazy": true,
+                    ],
+                    [
+                        "name": fallbackHubName,
+                        "type": "fallback",
+                        "proxies": autoProxies,
+                        "url": probeURL,
+                        "interval": 300,
+                        "lazy": true,
+                    ],
                     Self.iosSelectGroup(name: "GOOGLE", proxies: googleProxies),
                     Self.iosSelectGroup(name: "JP", proxies: jpProxies),
                     Self.iosSelectGroup(name: "HK", proxies: hkProxies),

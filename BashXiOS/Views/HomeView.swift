@@ -723,6 +723,15 @@ struct HomeView: View {
         if state.proxyGroups.isEmpty {
             return t("home.loadingGroups")
         }
+        // Reflect the current strategy of the main 策略组 (PROXY).
+        if let hub = state.proxyGroups.first(where: { $0.name.uppercased() == "PROXY" }) {
+            switch hub.now.uppercased() {
+            case "AUTO": return t("groups.strategy.smart")
+            case "BALANCE": return t("groups.strategy.balance")
+            case "FALLBACK": return t("groups.strategy.failover")
+            default: return AppConstants.groupSelectionLabel(hub.now, limit: 20)
+            }
+        }
         let preview = state.proxyGroups.prefix(3).map {
             AppConstants.groupDisplayName($0.name)
         }.joined(separator: " · ")

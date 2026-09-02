@@ -35,6 +35,8 @@
 		21FE9DAE90B14D701D251F60 /* MihomoConfigCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA618BE8025F0DE5D461A8B7 /* MihomoConfigCheck.swift */; };
 		22099F8ED4572DF5B1E3841A /* Paths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD540993DF70F793F76776BB /* Paths.swift */; };
 		22ABB3228A60571467E6391E /* ClashConfigParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 462BB2796FCD6EFC3B1EED03 /* ClashConfigParser.swift */; };
+		22COMPETINGPROXYAPPS001 /* CompetingProxyApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22COMPETINGPROXYAPPS002 /* CompetingProxyApps.swift */; };
+		22LAUNCHDIAG001 /* LaunchDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22LAUNCHDIAG002 /* LaunchDiagnostics.swift */; };
 		241CA0B29427DAED74BDA99E /* IOSIconManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 971E0F281D05B66DE1C3AD2C /* IOSIconManager.swift */; };
 		269570CD870E6C191837E618 /* GlobalHotkeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA7EB8A23B7A03F1604A2101 /* GlobalHotkeys.swift */; };
 		2C578317371F468CAB7844B9 /* ChinaSmartRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB59AB7C2122B3BDAD003530 /* ChinaSmartRules.swift */; };
@@ -239,6 +241,8 @@
 		41DFFAD3EDA079B2C3E8A0CF /* MacAppBypassRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAppBypassRules.swift; sourceTree = "<group>"; };
 		4489FD6F348854B86F6107C3 /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
 		462BB2796FCD6EFC3B1EED03 /* ClashConfigParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClashConfigParser.swift; sourceTree = "<group>"; };
+		22COMPETINGPROXYAPPS002 /* CompetingProxyApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetingProxyApps.swift; sourceTree = "<group>"; };
+		22LAUNCHDIAG002 /* LaunchDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchDiagnostics.swift; sourceTree = "<group>"; };
 		47497158EE36B0D8942B8611 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		48C5B14437DB3CE9F19D6DD1 /* WebsiteProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebsiteProbe.swift; sourceTree = "<group>"; };
 		48D059BDA342876DC83C006B /* BashXControls.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = BashXControls.appex; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -454,6 +458,8 @@
 				163A5D9D3AF02FE9D97CF982 /* AppUpdateService.swift */,
 				EB59AB7C2122B3BDAD003530 /* ChinaSmartRules.swift */,
 				462BB2796FCD6EFC3B1EED03 /* ClashConfigParser.swift */,
+				22COMPETINGPROXYAPPS002 /* CompetingProxyApps.swift */,
+				22LAUNCHDIAG002 /* LaunchDiagnostics.swift */,
 				CD1CDE0FE5EDA36D207567C4 /* ClashCore.swift */,
 				8ED44EE9721D9848D8F211FB /* ClashCore+Extras.swift */,
 				7D777F4649C0DF0D58A6A6DA /* ClashRuleSyntax.swift */,
@@ -863,6 +869,8 @@
 				D0C64B01E325A66F1539EF65 /* ByteFormat.swift in Sources */,
 				2C578317371F468CAB7844B9 /* ChinaSmartRules.swift in Sources */,
 				22ABB3228A60571467E6391E /* ClashConfigParser.swift in Sources */,
+				22COMPETINGPROXYAPPS001 /* CompetingProxyApps.swift in Sources */,
+				22LAUNCHDIAG001 /* LaunchDiagnostics.swift in Sources */,
 				7FE4D8F6348D317B6B0A5F1E /* ClashCore+Extras.swift in Sources */,
 				89D30D70AEE4CBFA8E4D7D60 /* ClashCore.swift in Sources */,
 				09BDF458FCC53A4FD42D6887 /* ClashRuleSyntax.swift in Sources */,

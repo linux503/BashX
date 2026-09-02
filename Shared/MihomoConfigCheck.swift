@@ -1,7 +1,8 @@
 import Foundation
 
 enum MihomoConfigCheck {
-    static func validateFile(at url: URL = Paths.mihomoConfigURL) -> String? {
+    static func validateFile(at url: URL? = nil) -> String? {
+        let url = url ?? configFileURL()
         guard FileManager.default.fileExists(atPath: url.path) else {
             return "配置文件不存在"
         }
@@ -42,6 +43,15 @@ enum MihomoConfigCheck {
         return detectProxyGroupLoop()
     }
 
+    /// Mac writes `supportDir/config.yaml`; iOS NE uses `supportDir/mihomo/config.yaml`.
+    static func configFileURL() -> URL {
+        #if os(macOS)
+        Paths.configURL
+        #else
+        Paths.mihomoConfigURL
+        #endif
+    }
+
     #if os(iOS)
     /// Remove geo DBs that make mihomo hang downloading GitHub inside the NE.
     static func scrubStaleGeoDatabases() {
@@ -57,7 +67,8 @@ enum MihomoConfigCheck {
     #endif
 
     /// Mihomo rejects configs when a group lists a member that was never defined.
-    static func detectMissingProxyGroups(at url: URL = Paths.mihomoConfigURL) -> String? {
+    static func detectMissingProxyGroups(at url: URL? = nil) -> String? {
+        let url = url ?? configFileURL()
         guard let yaml = try? String(contentsOf: url, encoding: .utf8), !yaml.isEmpty else { return nil }
         var defined = Set<String>()
         var references: [(group: String, member: String)] = []
@@ -101,7 +112,8 @@ enum MihomoConfigCheck {
     }
 
     /// Mihomo refuses configs where select groups reference each other (e.g. PROXY↔AI).
-    static func detectProxyGroupLoop(at url: URL = Paths.mihomoConfigURL) -> String? {
+    static func detectProxyGroupLoop(at url: URL? = nil) -> String? {
+        let url = url ?? configFileURL()
         guard let yaml = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let groups = ["PROXY", "GOOGLE", "AI", "AUTO", "BALANCE", "FALLBACK", "JP", "HK", "US", "TW", "TELEGRAM", "APNS", "CURSOR", "OPENAI", "ANTHROPIC", "GOOGLE-AUTO", "TELEGRAM-AUTO"]
         var edges: [String: Set<String>] = [:]

@@ -2,8 +2,16 @@ import Foundation
 
 /// Prefetch mihomo geo databases into the App Group before VPN starts (avoids NE hang on first connect).
 enum GeoDataBootstrap {
-    private static let geoipURL = URL(string: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb")!
-    private static let geositeURL = URL(string: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat")!
+    private static let geoipURLs = [
+        "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb",
+        "https://ghfast.top/https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb",
+        "https://gh-proxy.com/https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.metadb",
+    ]
+    private static let geositeURLs = [
+        "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+        "https://ghfast.top/https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+        "https://gh-proxy.com/https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
+    ]
 
     /// mihomo `-d` home: Mac uses `supportDir`; iOS NE uses `supportDir/mihomo`.
     private static var geoHomeDir: URL {
@@ -61,9 +69,9 @@ enum GeoDataBootstrap {
         #endif
         _ = geoHomeDir
         onProgress?("正在准备 geoip…")
-        try await downloadIfNeeded(url: geoipURL, to: geoipFile, label: "geoip")
+        try await downloadIfNeeded(urls: geoipURLs, to: geoipFile, label: "geoip")
         onProgress?("正在准备 geosite…")
-        try await downloadIfNeeded(url: geositeURL, to: geositeFile, label: "geosite")
+        try await downloadIfNeeded(urls: geositeURLs, to: geositeFile, label: "geosite")
         onProgress?("地理库就绪")
     }
 
@@ -82,11 +90,27 @@ enum GeoDataBootstrap {
     }
     #endif
 
-    private static func downloadIfNeeded(url: URL, to dest: URL, label: String) async throws {
+    private static func downloadIfNeeded(urls: [String], to dest: URL, label: String) async throws {
         if let size = try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? Int64,
            size > 64 * 1024 {
             return
         }
+        var lastError: Error?
+        for raw in urls {
+            guard let url = URL(string: raw) else { continue }
+            do {
+                try await download(from: url, to: dest, label: label)
+                return
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? NSError(domain: "GeoDataBootstrap", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "\(label) 下载失败",
+        ])
+    }
+
+    private static func download(from url: URL, to dest: URL, label: String) async throws {
         let (tmp, response) = try await directSession.download(from: url)
         defer { try? FileManager.default.removeItem(at: tmp) }
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
