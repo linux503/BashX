@@ -16,5 +16,9 @@
     "DOMAIN-SUFFIX,jddebug.com,REJECT",
     "DOMAIN-KEYWORD,jd.ad,REJECT",
     "DOMAIN-KEYWORD,jdads,REJECT"
+  ],
+  "platforms": [
+    "mac",
+    "ios"
   ]
 }

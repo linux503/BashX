@@ -258,7 +258,7 @@ final class IOSAppState: ObservableObject {
 
     func setAllPluginsEnabled(_ enabled: Bool) {
         if enabled {
-            settings.enabledPluginIds = PluginEngine.catalog.map(\.id)
+            settings.enabledPluginIds = PluginEngine.catalogForCurrentPlatform.map(\.id)
             if settings.proxyMode != .rule {
                 settings.proxyMode = .rule
             }

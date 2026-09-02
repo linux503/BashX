@@ -53,7 +53,7 @@ struct PluginMarketViewIOS: View {
                 .listRowBackground(Color.clear)
             }
             Section(t("plugin.market.section")) {
-                ForEach(PluginEngine.catalog) { plugin in
+                ForEach(PluginEngine.catalogForCurrentPlatform) { plugin in
                     pluginRow(plugin)
                 }
             }

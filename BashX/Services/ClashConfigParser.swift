@@ -537,9 +537,8 @@ enum ClashConfigParser {
         ]
         if forIOS {
             tun["mtu"] = 1400
-            // Exclude WeChat/Tencent CDN CIDRs so chat media bypasses gVisor (RSS).
-            // Do NOT exclude ByteDance ranges — TikTok shares that infra; excluding it
-            // sends TikTok CDN DIRECT outside the tunnel →「无法连接」.
+            // Exclude domestic CDN CIDRs so chat/video media bypasses gVisor (RSS).
+            // ByteDance: mainland Douyin CDN only — do NOT add byteoversea/TikTok overseas.
             tun["route-exclude-address"] = [
                 // Tencent / WeChat
                 "1.12.0.0/14",
@@ -556,6 +555,23 @@ enum ClashConfigParser {
                 "183.57.0.0/16", "183.60.0.0/16",
                 "183.192.0.0/16", "183.232.0.0/16",
                 "203.205.128.0/19", "211.95.0.0/16",
+                // Alibaba / 淘宝 / 天猫
+                "42.120.0.0/16", "42.156.0.0/16",
+                "47.92.0.0/14", "47.96.0.0/13", "47.104.0.0/13",
+                "59.82.0.0/15",
+                "101.37.0.0/16", "106.11.0.0/16", "110.75.0.0/16",
+                "114.55.0.0/16", "115.124.0.0/16",
+                "118.31.0.0/16", "118.178.0.0/16",
+                "120.26.0.0/15", "120.55.0.0/16", "121.40.0.0/13",
+                "139.196.0.0/16", "139.224.0.0/16", "140.205.0.0/16",
+                "182.92.0.0/16", "203.119.128.0/17", "205.204.96.0/19",
+                "223.4.0.0/15", "223.6.0.0/16",
+                // 抖音 / 头条 mainland CDN
+                "49.51.0.0/16", "58.33.0.0/16", "101.89.0.0/16",
+                "111.202.0.0/15", "111.206.0.0/16", "116.63.0.0/16",
+                "123.125.0.0/16", "180.97.0.0/16", "180.149.0.0/16",
+                "182.61.0.0/16", "220.181.0.0/16", "220.243.0.0/16",
+                "221.194.0.0/16", "223.109.0.0/16", "223.111.0.0/16",
             ]
         }
         // Mac: do NOT set inet4-route-address. Restricting to 198.18/16 + Telegram DCs

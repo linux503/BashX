@@ -12,5 +12,9 @@
     "DOMAIN,security.wechat.com,DIRECT",
     "DOMAIN-KEYWORD,weixin110,DIRECT",
     "DOMAIN-KEYWORD,newredirectconfirmcgi,DIRECT"
+  ],
+  "platforms": [
+    "mac",
+    "ios"
   ]
 }

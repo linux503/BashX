@@ -13,5 +13,8 @@
     "DOMAIN-KEYWORD,eichong-ad,REJECT",
     "DOMAIN-KEYWORD,echarge-ad,REJECT",
     "DOMAIN-KEYWORD,eichong.ad,REJECT"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

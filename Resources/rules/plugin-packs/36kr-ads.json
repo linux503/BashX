@@ -14,5 +14,9 @@
     "DOMAIN-KEYWORD,36kr-ad,REJECT",
     "DOMAIN-KEYWORD,adapi.36kr,REJECT",
     "DOMAIN-KEYWORD,36kr.ad,REJECT"
+  ],
+  "platforms": [
+    "mac",
+    "ios"
   ]
 }

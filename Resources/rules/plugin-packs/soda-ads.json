@@ -14,5 +14,8 @@
     "DOMAIN-SUFFIX,pangle.io,REJECT",
     "DOMAIN-KEYWORD,qishui-ad,REJECT",
     "DOMAIN-KEYWORD,qishui.ad,REJECT"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

@@ -54,7 +54,7 @@ struct PluginMarketPane: View {
 
             ScrollView {
                 LazyVStack(spacing: 10) {
-                    ForEach(PluginEngine.catalog) { plugin in
+                    ForEach(PluginEngine.catalogForCurrentPlatform) { plugin in
                         pluginCard(plugin)
                     }
                 }

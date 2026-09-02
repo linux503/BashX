@@ -121,20 +121,39 @@ struct AppRoutingPane: View {
     }
 
     private var websiteProbeSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "globe.americas.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                Text(L10n.t("probe.title", lang))
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
+        let expanded = state.settings.panelShowWebsiteProbe
+        return VStack(alignment: .leading, spacing: expanded ? 10 : 0) {
+            Button {
+                state.settings.panelShowWebsiteProbe.toggle()
+                state.persist()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "globe.americas.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BashXTheme.accent(for: appearance))
+                    Text(L10n.t("probe.title", lang))
+                        .font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                    if !expanded {
+                        Text(L10n.t("mac.apps.probeHint", lang))
+                            .font(.caption2)
+                            .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                            .lineLimit(1)
+                    }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
                 Text(L10n.t("mac.apps.probeHint", lang))
                     .font(.caption2)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                WebsiteProbeStripMac(state: state, compact: false, showTitle: false)
             }
-
-            WebsiteProbeStripMac(state: state, compact: false, showTitle: false)
         }
         .padding(12)
         .background {

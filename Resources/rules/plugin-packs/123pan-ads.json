@@ -13,5 +13,9 @@
     "DOMAIN,adapi.123pan.com,REJECT",
     "DOMAIN-KEYWORD,123-ad,REJECT",
     "DOMAIN-KEYWORD,123pan.ad,REJECT"
+  ],
+  "platforms": [
+    "mac",
+    "ios"
   ]
 }

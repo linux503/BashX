@@ -19,5 +19,8 @@
     "DOMAIN-KEYWORD,cainiao-ad,REJECT",
     "DOMAIN-KEYWORD,cainiao.ad,REJECT",
     "DOMAIN-KEYWORD,guoguo.ads,REJECT"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

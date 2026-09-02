@@ -226,8 +226,8 @@ enum L10n {
         "plugin.market.title": ["zh": "插件市场", "en": "Plugin Market"],
         "plugin.market.section": ["zh": "精选插件", "en": "Featured"],
         "plugin.market.hint": [
-            "zh": "全部为 Clash 规则版（REJECT/分流），开启后请重连 VPN。",
-            "en": "All packs are Clash rules (REJECT/route). Reconnect VPN after enabling.",
+            "zh": "Mac 版以 PC/网页插件为主（Clash 规则 REJECT/分流）。开启后请重连。",
+            "en": "Mac focuses on PC/web packs (Clash REJECT/route). Reconnect after enabling.",
         ],
         "plugin.market.enableAll": ["zh": "一键开启", "en": "Enable All"],
         "plugin.market.disableAll": ["zh": "一键关闭", "en": "Disable All"],
@@ -492,11 +492,13 @@ enum L10n {
 
         // Mac settings tabs
         "mac.tab.general": ["zh": "常用", "en": "General"],
+        "mac.tab.network": ["zh": "网络", "en": "Network"],
         "mac.tab.speed": ["zh": "测速", "en": "Speed"],
         "mac.tab.proxy": ["zh": "外置代理", "en": "Proxy"],
         "mac.tab.core": ["zh": "内核", "en": "Core"],
         "mac.tab.appearance": ["zh": "外观", "en": "Look"],
         "mac.tab.about": ["zh": "关于", "en": "About"],
+        "mac.sec.advanced": ["zh": "高级选项", "en": "Advanced"],
         "mac.appearance.section": ["zh": "外观", "en": "Appearance"],
         "mac.appearance.theme": ["zh": "界面主题", "en": "Theme"],
         "mac.adblock": ["zh": "去广告", "en": "Ad Block"],

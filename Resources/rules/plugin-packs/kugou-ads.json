@@ -38,5 +38,9 @@
     "DOMAIN-KEYWORD,kugou.ad,REJECT",
     "DOMAIN-KEYWORD,kugou-ad,REJECT",
     "DOMAIN-KEYWORD,adservice.kugou,REJECT"
+  ],
+  "platforms": [
+    "mac",
+    "ios"
   ]
 }

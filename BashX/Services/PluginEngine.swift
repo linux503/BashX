@@ -13,8 +13,51 @@ enum PluginEngine {
         let rules: [String]
         /// Full effect needs MITM/script; packs here are rule approximations.
         let scriptHeavy: Bool
+        /// Optional platform tags: `"mac"` / `"ios"`. Nil or empty = all platforms.
+        let platforms: [String]?
 
         var ruleCount: Int { rules.count }
+
+        enum CodingKeys: String, CodingKey {
+            case id, name, summary, tag, symbol, rules, scriptHeavy, platforms
+        }
+
+        init(
+            id: String,
+            name: String,
+            summary: String,
+            tag: String,
+            symbol: String,
+            rules: [String],
+            scriptHeavy: Bool,
+            platforms: [String]? = nil
+        ) {
+            self.id = id
+            self.name = name
+            self.summary = summary
+            self.tag = tag
+            self.symbol = symbol
+            self.rules = rules
+            self.scriptHeavy = scriptHeavy
+            self.platforms = platforms
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            name = try c.decode(String.self, forKey: .name)
+            summary = try c.decode(String.self, forKey: .summary)
+            tag = try c.decode(String.self, forKey: .tag)
+            symbol = try c.decode(String.self, forKey: .symbol)
+            rules = try c.decode([String].self, forKey: .rules)
+            scriptHeavy = try c.decodeIfPresent(Bool.self, forKey: .scriptHeavy) ?? false
+            platforms = try c.decodeIfPresent([String].self, forKey: .platforms)
+        }
+
+        func available(on platform: String) -> Bool {
+            guard let platforms, !platforms.isEmpty else { return true }
+            return platforms.contains { $0.caseInsensitiveCompare(platform) == .orderedSame }
+        }
     }
 
     private static let allowedTypes: Set<String> = [
@@ -31,6 +74,15 @@ enum PluginEngine {
     /// Loaded once: bundle JSON packs, then built-in fallback for any missing ids.
     static let catalog: [Plugin] = loadCatalog()
 
+    /// Catalog for the current UI platform (Mac hides phone-app packs).
+    static var catalogForCurrentPlatform: [Plugin] {
+        #if os(macOS)
+        catalog.filter { $0.available(on: "mac") }
+        #else
+        catalog.filter { $0.available(on: "ios") }
+        #endif
+    }
+
     static func plugin(id: String) -> Plugin? {
         catalog.first { $0.id == id }
     }
@@ -38,6 +90,10 @@ enum PluginEngine {
     static func rules(forEnabledIds ids: [String]) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
+        #if os(macOS)
+        let visible = Set(catalogForCurrentPlatform.map(\.id))
+        let ids = ids.filter { visible.contains($0) }
+        #endif
         for id in ids {
             guard let p = plugin(id: id) else { continue }
             for raw in p.rules {
@@ -118,6 +174,16 @@ enum PluginEngine {
         return parts.joined(separator: ",")
     }
 
+    /// Phone-app packs — Mac market hides them (still available on iOS).
+    private static let iosOnlyIds: Set<String> = [
+        "amap-ads", "cainiao-ads", "echarge-ads", "soda-ads", "pdd-ads",
+        "volvo-ads", "lixiang-ads", "aito-ads", "apple-weather", "auto-join-tf",
+    ]
+
+    private static func defaultPlatforms(for id: String) -> [String] {
+        iosOnlyIds.contains(id) ? ["ios"] : ["mac", "ios"]
+    }
+
     // MARK: - Load
 
     private static func loadCatalog() -> [Plugin] {
@@ -130,7 +196,8 @@ enum PluginEngine {
                 tag: p.tag,
                 symbol: p.symbol,
                 rules: p.rules.compactMap(sanitize),
-                scriptHeavy: p.scriptHeavy
+                scriptHeavy: p.scriptHeavy,
+                platforms: p.platforms ?? defaultPlatforms(for: p.id)
             )
             byId[cleaned.id] = cleaned
         }
@@ -146,13 +213,24 @@ enum PluginEngine {
                 tag: pack.tag,
                 symbol: pack.symbol,
                 rules: pack.rules.compactMap(sanitize),
-                scriptHeavy: pack.scriptHeavy
+                scriptHeavy: pack.scriptHeavy,
+                platforms: pack.platforms ?? fallback.platforms ?? defaultPlatforms(for: pack.id)
             )
             ordered.append(cleaned)
             seen.insert(cleaned.id)
         }
         for (id, p) in byId where !seen.contains(id) {
-            ordered.append(p)
+            let cleaned = Plugin(
+                id: p.id,
+                name: p.name,
+                summary: p.summary,
+                tag: p.tag,
+                symbol: p.symbol,
+                rules: p.rules,
+                scriptHeavy: p.scriptHeavy,
+                platforms: p.platforms ?? defaultPlatforms(for: p.id)
+            )
+            ordered.append(cleaned)
         }
         return ordered
     }

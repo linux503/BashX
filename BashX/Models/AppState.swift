@@ -344,6 +344,7 @@ final class AppState: ObservableObject {
         migrateMacAppBypassRouting()
         migrateAdsPowerProxyChain()
         migrateAnyDeskProxyRouting()
+        migrateMacPluginCatalog()
         migrateNodeDisplayModeToCard()
         migrateTunDefaultOn()
         systemProxyOn = settings.systemProxyEnabled
@@ -1196,6 +1197,19 @@ final class AppState: ObservableObject {
             bumpChromeRevision()
             scheduleWriteConfig()
         }
+    }
+
+    /// Drop phone-app plugin IDs from Mac enabled list (market is PC-first).
+    private func migrateMacPluginCatalog() {
+        #if os(macOS)
+        let visible = Set(PluginEngine.catalogForCurrentPlatform.map(\.id))
+        let before = settings.enabledPluginIds
+        let after = before.filter { visible.contains($0) }
+        guard after != before else { return }
+        settings.enabledPluginIds = after
+        schedulePersist()
+        scheduleWriteConfig()
+        #endif
     }
 
     /// AnyDesk default DIRECT — PROXY exits often black-hole it; user can flip to PROXY in 应用分流.
@@ -3716,7 +3730,7 @@ final class AppState: ObservableObject {
 
     func setAllPluginsEnabled(_ enabled: Bool) async {
         if enabled {
-            settings.enabledPluginIds = PluginEngine.catalog.map(\.id)
+            settings.enabledPluginIds = PluginEngine.catalogForCurrentPlatform.map(\.id)
             if settings.proxyMode != .rule {
                 settings.proxyMode = .rule
             }

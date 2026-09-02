@@ -4,7 +4,7 @@ import Foundation
 enum PluginMarket {
     typealias Plugin = PluginEngine.Plugin
 
-    static var catalog: [Plugin] { PluginEngine.catalog }
+    static var catalog: [Plugin] { PluginEngine.catalogForCurrentPlatform }
 
     static func plugin(id: String) -> Plugin? {
         PluginEngine.plugin(id: id)

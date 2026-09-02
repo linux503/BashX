@@ -42,8 +42,9 @@ enum IosRoutingRules {
         out.reserveCapacity(512)
 
         #if os(macOS)
-        // IPFoxy / residential gates before any process DIRECT (Ads leftover rules).
+        // IPFoxy / residential gates + Ads control-plane before any process DIRECT.
         out.append(contentsOf: MacAppBypassRules.residentialProxyChainRules)
+        out.append(contentsOf: MacAppBypassRules.adsPowerRules)
         out.append(contentsOf: prepend)
         out.append(contentsOf: extraProcess)
         // ClashFX cn-apps-direct: CN apps process DIRECT; AdsPower is domain-only.

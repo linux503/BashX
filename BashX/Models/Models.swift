@@ -334,6 +334,10 @@ struct AppSettings: Codable {
     var uiLanguage: AppLanguage = .system
     /// Mac: route specific apps through different proxy lines.
     var appRoutingRules: [AppRoutingRule] = []
+    /// Mac panel: show「网站连通」(default hidden).
+    var panelShowWebsiteProbe: Bool = false
+    /// Mac panel: show「线路策略」(default hidden).
+    var panelShowProxyHub: Bool = false
 
     static let defaultRules: [String] = ChinaSmartRules.rules
 
@@ -346,7 +350,7 @@ struct AppSettings: Codable {
         case rules, rulesPrepend, rulesVersion, closeConnectionsOnSwitch, proxyMode, proxyHubMode
         case logoStyle, nodeDisplayMode, appearance, nodeDelayCache, stableAINodeName, isolatedNodeKeys
         case iosDisguiseEnabled, iosOnDemandEnabled, iosTelegramPushEnabled, uiLanguage
-        case appRoutingRules
+        case appRoutingRules, panelShowWebsiteProbe, panelShowProxyHub
     }
 
     init() {}
@@ -401,6 +405,8 @@ struct AppSettings: Codable {
         iosTelegramPushEnabled = try c.decodeIfPresent(Bool.self, forKey: .iosTelegramPushEnabled) ?? true
         uiLanguage = try c.decodeIfPresent(AppLanguage.self, forKey: .uiLanguage) ?? .system
         appRoutingRules = try c.decodeIfPresent([AppRoutingRule].self, forKey: .appRoutingRules) ?? []
+        panelShowWebsiteProbe = try c.decodeIfPresent(Bool.self, forKey: .panelShowWebsiteProbe) ?? false
+        panelShowProxyHub = try c.decodeIfPresent(Bool.self, forKey: .panelShowProxyHub) ?? false
         L10n.apply(uiLanguage)
     }
 

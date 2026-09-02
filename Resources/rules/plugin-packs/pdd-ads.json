@@ -21,5 +21,8 @@
     "DOMAIN,meta.pinduoduo.com,REJECT",
     "DOMAIN-KEYWORD,pdd-ad,REJECT",
     "DOMAIN-KEYWORD,pinduoduo.ad,REJECT"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

@@ -11,5 +11,8 @@
     "DOMAIN,weather-data.apple.com,PROXY",
     "DOMAIN-SUFFIX,weather.apple.com,PROXY",
     "DOMAIN,weather-data.apple.com.akadns.net,PROXY"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

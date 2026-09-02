@@ -30,5 +30,9 @@
     "DOMAIN-KEYWORD,trace.video.qq.com,REJECT",
     "DOMAIN-KEYWORD,vmind.qqvideo,REJECT",
     "IP-CIDR,47.110.187.87/32,REJECT,no-resolve"
+  ],
+  "platforms": [
+    "mac",
+    "ios"
   ]
 }

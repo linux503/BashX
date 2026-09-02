@@ -9,5 +9,8 @@
     "DOMAIN-SUFFIX,testflight.apple.com,PROXY",
     "DOMAIN,testflight.apple.com,PROXY",
     "DOMAIN-SUFFIX,beta.itunes.apple.com,PROXY"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

@@ -25,5 +25,8 @@
     "DOMAIN-SUFFIX,pangle.io,REJECT",
     "DOMAIN-SUFFIX,tingyun.com,REJECT",
     "DOMAIN-SUFFIX,networkbench.com,REJECT"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

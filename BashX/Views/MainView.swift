@@ -1537,7 +1537,7 @@ struct MainView: View {
             nodesSmartSection
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
-                .padding(.bottom, 6)
+                .padding(.bottom, state.settings.panelShowProxyHub ? 6 : 4)
 
             categoryBar
             Rectangle()
@@ -1562,99 +1562,117 @@ struct MainView: View {
     private var nodesSmartSection: some View {
         let hubMode = pendingHubMode ?? state.settings.proxyHubMode
         let activeTint = nodesHubModeTint(hubMode)
+        let expanded = state.settings.panelShowProxyHub
         let testingAll = state.isTesting && state.speedTestScopeKey == nil
         let canTest = !state.nodes.isEmpty && !state.isTesting
-        return VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .center, spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(activeTint.opacity(appearance == .dark ? 0.22 : 0.14))
-                        .frame(width: 26, height: 26)
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(activeTint)
-                }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(L10n.t("mac.nodes.smart", lang))
-                        .font(PanelMetrics.body)
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(activeTint)
-                            .frame(width: 4, height: 4)
-                        Text(hubMode.title(lang: lang))
-                            .font(PanelMetrics.micro)
+        return VStack(alignment: .leading, spacing: expanded ? 7 : 0) {
+            Button {
+                state.settings.panelShowProxyHub.toggle()
+                state.persist()
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(activeTint.opacity(appearance == .dark ? 0.22 : 0.14))
+                            .frame(width: 26, height: 26)
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(activeTint)
                     }
-                    Text(L10n.t("mac.groups.hubHint", lang))
-                        .font(PanelMetrics.micro)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L10n.t("mac.nodes.smart", lang))
+                            .font(PanelMetrics.body)
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(activeTint)
+                                .frame(width: 4, height: 4)
+                            Text(hubMode.title(lang: lang))
+                                .font(PanelMetrics.micro)
+                                .foregroundStyle(activeTint)
+                        }
+                    }
+
+                    Spacer(minLength: 6)
+
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
-                        .lineLimit(1)
                 }
-
-                Spacer(minLength: 6)
-
-                Button {
-                    guard canTest else {
-                        if state.nodes.isEmpty {
-                            state.statusText = "请先更新订阅加载节点"
-                        }
-                        return
-                    }
-                    Task {
-                        await state.runSpeedTest()
-                        // Hub modes must stay on AUTO/BALANCE/FALLBACK — pinning a leaf flips to 手动.
-                        if state.settings.proxyHubMode == .manual, state.settings.autoSelectFastest {
-                            await state.selectFastestNodeIfAvailable()
-                        } else if state.settings.proxyHubMode == .smart {
-                            _ = await ClashCore.retestProxyGroup(
-                                controller: state.settings.externalController,
-                                secret: state.settings.secret,
-                                group: "AUTO",
-                                url: state.settings.testURL,
-                                timeoutMs: max(state.settings.testTimeoutMs, 4000)
-                            )
-                            await state.syncSelectedOutbound()
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        if testingAll {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(BashXTheme.accent(for: appearance))
-                        } else {
-                            Image(systemName: "gauge.with.dots.needle.67percent")
-                                .font(.system(size: 9, weight: .semibold))
-                        }
-                        Text(testingAll
-                             ? L10n.t("mac.nodes.speedBigBusy", lang)
-                             : L10n.t("mac.nodes.speedAll", lang))
-                            .font(PanelMetrics.micro)
-                            .fontWeight(.semibold)
-                    }
-                    .foregroundStyle(BashXTheme.accent(for: appearance))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background {
-                        Capsule(style: .continuous)
-                            .fill(BashXTheme.accentSoft(for: appearance))
-                    }
-                }
-                .buttonStyle(PanelPressButtonStyle())
-                .opacity(canTest || testingAll ? 1 : 0.55)
-                .help(state.nodes.isEmpty ? "没有可测速节点" : "测速全部节点")
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
 
-            HStack(spacing: 4) {
-                ForEach([ProxyHubMode.smart, .loadBalance, .failover], id: \.self) { mode in
-                    nodesHubModeCard(mode, activeMode: hubMode)
-                }
-            }
-            if hubMode == .manual {
-                Text(L10n.t("mac.nodes.hubManual.hint", lang))
+            if expanded {
+                Text(L10n.t("mac.groups.hubHint", lang))
                     .font(PanelMetrics.micro)
                     .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                    .lineLimit(2)
+
+                HStack {
+                    Spacer(minLength: 0)
+                    Button {
+                        guard canTest else {
+                            if state.nodes.isEmpty {
+                                state.statusText = "请先更新订阅加载节点"
+                            }
+                            return
+                        }
+                        Task {
+                            await state.runSpeedTest()
+                            // Hub modes must stay on AUTO/BALANCE/FALLBACK — pinning a leaf flips to 手动.
+                            if state.settings.proxyHubMode == .manual, state.settings.autoSelectFastest {
+                                await state.selectFastestNodeIfAvailable()
+                            } else if state.settings.proxyHubMode == .smart {
+                                _ = await ClashCore.retestProxyGroup(
+                                    controller: state.settings.externalController,
+                                    secret: state.settings.secret,
+                                    group: "AUTO",
+                                    url: state.settings.testURL,
+                                    timeoutMs: max(state.settings.testTimeoutMs, 4000)
+                                )
+                                await state.syncSelectedOutbound()
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            if testingAll {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(BashXTheme.accent(for: appearance))
+                            } else {
+                                Image(systemName: "gauge.with.dots.needle.67percent")
+                                    .font(.system(size: 9, weight: .semibold))
+                            }
+                            Text(testingAll
+                                 ? L10n.t("mac.nodes.speedBigBusy", lang)
+                                 : L10n.t("mac.nodes.speedAll", lang))
+                                .font(PanelMetrics.micro)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundStyle(BashXTheme.accent(for: appearance))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background {
+                            Capsule(style: .continuous)
+                                .fill(BashXTheme.accentSoft(for: appearance))
+                        }
+                    }
+                    .buttonStyle(PanelPressButtonStyle())
+                    .opacity(canTest || testingAll ? 1 : 0.55)
+                    .help(state.nodes.isEmpty ? "没有可测速节点" : "测速全部节点")
+                }
+
+                HStack(spacing: 4) {
+                    ForEach([ProxyHubMode.smart, .loadBalance, .failover], id: \.self) { mode in
+                        nodesHubModeCard(mode, activeMode: hubMode)
+                    }
+                }
+                if hubMode == .manual {
+                    Text(L10n.t("mac.nodes.hubManual.hint", lang))
+                        .font(PanelMetrics.micro)
+                        .foregroundStyle(BashXTheme.tertiaryLabel(for: appearance))
+                }
             }
         }
         .padding(.horizontal, 9)

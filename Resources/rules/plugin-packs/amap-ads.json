@@ -13,5 +13,8 @@
     "DOMAIN-KEYWORD,amap-ad,REJECT",
     "DOMAIN-KEYWORD,amap.ad,REJECT",
     "DOMAIN-KEYWORD,aos-ads,REJECT"
+  ],
+  "platforms": [
+    "ios"
   ]
 }

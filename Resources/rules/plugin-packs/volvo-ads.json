@@ -24,5 +24,8 @@
     "DOMAIN-SUFFIX,googlesyndication.com,REJECT",
     "DOMAIN-SUFFIX,umeng.com,REJECT",
     "DOMAIN-SUFFIX,umengcloud.com,REJECT"
+  ],
+  "platforms": [
+    "ios"
   ]
 }
