@@ -117,6 +117,7 @@ targets:
       - path: BashX/Services/IosProxyDomains.swift
       - path: BashX/Services/IosDirectDomains.swift
       - path: BashX/Services/IosRoutingRules.swift
+      - path: BashX/Services/ClashRuleSyntax.swift
       - path: BashX/Services/RoutingGeoRules.swift
       - path: BashX/Services/DnsProfile.swift
       - path: BashX/Services/TelegramReliability.swift

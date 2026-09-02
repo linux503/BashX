@@ -141,6 +141,7 @@
 		D55C244752CE3458407283FD /* logo.png in Resources */ = {isa = PBXBuildFile; fileRef = CD525AAEBDF53BF953691941 /* logo.png */; };
 		D63747C547B2936482A11784 /* MacAppBypassRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41DFFAD3EDA079B2C3E8A0CF /* MacAppBypassRules.swift */; };
 		D70214425F2A2C25AC00583D /* TrafficChartView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8A83164369552472AD993F /* TrafficChartView.swift */; };
+		D972E4BA3F99A05024F82755 /* ClashRuleSyntax.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D777F4649C0DF0D58A6A6DA /* ClashRuleSyntax.swift */; };
 		DD1110233046B2FCE3F3194F /* IosDirectDomains.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1753C1625A0E90B63CE98322 /* IosDirectDomains.swift */; };
 		DDA6B1331E3C280B9B664388 /* RoutingGeoRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06B8A4BC3B1296F08915B7DC /* RoutingGeoRules.swift */; };
 		DDDDF5C12D0483AC002F132E /* IOSConnectControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D29CE19103EDDEF916488D /* IOSConnectControl.swift */; };
@@ -963,6 +964,7 @@
 				80E9B7B41437805D6430189A /* ByteFormat.swift in Sources */,
 				5026432F78466956F8333382 /* ChinaSmartRules.swift in Sources */,
 				4014EC935360DD937BA86A0B /* ClashConfigParser.swift in Sources */,
+				D972E4BA3F99A05024F82755 /* ClashRuleSyntax.swift in Sources */,
 				9B5EC7BFD830226FCD85421F /* CursorReliability.swift in Sources */,
 				9EB3502E9E114F503094BDCE /* DisguiseGalleryView.swift in Sources */,
 				16D9220DD6722D0B9D5FA293 /* DnsProfile.swift in Sources */,
