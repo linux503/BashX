@@ -348,90 +348,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         return ud?.bool(forKey: AppConstants.iosTunnelCaptureKey) ?? true
     }
 
-    /// Tencent / WeChat CDN — bypass utun at NE layer (mirrors mihomo route-exclude-address).
-    private static let wechatBypassRoutes: [NEIPv4Route] = [
-        NEIPv4Route(destinationAddress: "1.12.0.0", subnetMask: "255.252.0.0"),
-        NEIPv4Route(destinationAddress: "14.17.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "14.18.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "14.19.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "14.116.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "43.154.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "58.247.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "58.251.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "59.37.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "101.32.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "101.226.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "101.227.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "109.244.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "111.30.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "113.96.0.0", subnetMask: "255.240.0.0"),
-        NEIPv4Route(destinationAddress: "119.147.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "121.51.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "129.226.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "140.207.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "157.255.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "180.101.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "180.163.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "182.254.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "183.3.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "183.36.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "183.47.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "183.57.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "183.60.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "183.192.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "183.232.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "203.205.128.0", subnetMask: "255.255.192.0"),
-        NEIPv4Route(destinationAddress: "211.95.0.0", subnetMask: "255.255.0.0"),
-    ]
-
-    /// Alibaba / 淘宝 / 天猫 CDN — keep heavy image/video off gVisor (jetsam).
-    /// Domestic DIRECT apps still work; traffic never enters packetFlow.
-    private static let alibabaBypassRoutes: [NEIPv4Route] = [
-        NEIPv4Route(destinationAddress: "42.120.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "42.156.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "47.92.0.0", subnetMask: "255.252.0.0"),
-        NEIPv4Route(destinationAddress: "47.96.0.0", subnetMask: "255.248.0.0"),
-        NEIPv4Route(destinationAddress: "47.104.0.0", subnetMask: "255.248.0.0"),
-        NEIPv4Route(destinationAddress: "59.82.0.0", subnetMask: "255.254.0.0"),
-        NEIPv4Route(destinationAddress: "101.37.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "106.11.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "110.75.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "114.55.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "115.124.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "118.31.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "118.178.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "120.26.0.0", subnetMask: "255.254.0.0"),
-        NEIPv4Route(destinationAddress: "120.55.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "121.40.0.0", subnetMask: "255.248.0.0"),
-        NEIPv4Route(destinationAddress: "139.196.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "139.224.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "140.205.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "182.92.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "203.119.128.0", subnetMask: "255.255.128.0"),
-        NEIPv4Route(destinationAddress: "205.204.96.0", subnetMask: "255.255.224.0"),
-        NEIPv4Route(destinationAddress: "223.4.0.0", subnetMask: "255.254.0.0"),
-        NEIPv4Route(destinationAddress: "223.6.0.0", subnetMask: "255.255.0.0"),
-    ]
-
-    /// 抖音 / 头条 mainland CDN — China /16s only.
-    /// Do NOT add byteoversea / AWS TikTok CDN here or TikTok breaks outside the tunnel.
-    private static let douyinChinaBypassRoutes: [NEIPv4Route] = [
-        NEIPv4Route(destinationAddress: "49.51.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "58.33.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "101.89.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "111.202.0.0", subnetMask: "255.254.0.0"),
-        NEIPv4Route(destinationAddress: "111.206.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "116.63.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "123.125.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "180.97.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "180.149.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "182.61.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "220.181.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "220.243.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "221.194.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "223.109.0.0", subnetMask: "255.255.0.0"),
-        NEIPv4Route(destinationAddress: "223.111.0.0", subnetMask: "255.255.0.0"),
-    ]
+    /// Domestic CDN bypass — shared list with mihomo route-exclude-address (WeChat/淘宝/抖音 video).
+    private static let domesticBypassRoutes: [NEIPv4Route] = DomesticBypassRoutes.neIPv4Routes().map {
+        NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.mask)
+    }
 
     /// Telegram DC IPv6 prefixes (clients dial these literals; must enter TUN).
     private static let telegramIPv6Routes: [NEIPv6Route] = [
@@ -466,9 +386,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             ipv4.includedRoutes = [NEIPv4Route.default()]
             // Domestic CDN off utun — WeChat/淘宝/抖音 video otherwise jetsam the NE (~50MB).
             // TikTok overseas CDN is NOT in douyinChinaBypassRoutes (byteoversea stays in-tunnel).
-            ipv4.excludedRoutes = Self.wechatBypassRoutes
-                + Self.alibabaBypassRoutes
-                + Self.douyinChinaBypassRoutes
+            ipv4.excludedRoutes = Self.domesticBypassRoutes
             settings.ipv4Settings = ipv4
             // Keep most IPv6 on the physical path (WeChat media CDN). Pull Telegram DC +
             // (when enabled) APNs IPv6 into TUN — otherwise Happy-Eyeballs hangs on blocked v6.

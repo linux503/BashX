@@ -13,17 +13,24 @@ enum MihomoConfigCheck {
             return "配置缺少节点（proxies）"
         }
 
+        #if os(macOS)
+        // Mac: yaml may omit `tun:` until elevated start succeeds — validate what's actually written.
+        if yaml.contains("tun:") {
+            return nil
+        }
+        if !hasPositiveMixedPort(yaml) {
+            return "配置缺少 mixed-port（未启用 TUN 时需系统代理端口）"
+        }
+        #else
         let tunnelCapture = isTunnelCaptureEnabled()
         if tunnelCapture {
             if !yaml.contains("tun:") {
                 return "配置缺少 TUN 段"
             }
-        } else {
-            // HTTP 代理实验：无 tun:，但必须有可用 mixed-port。
-            if !hasPositiveMixedPort(yaml) {
-                return "HTTP 代理模式配置缺少 mixed-port"
-            }
+        } else if !hasPositiveMixedPort(yaml) {
+            return "HTTP 代理模式配置缺少 mixed-port"
         }
+        #endif
         return nil
     }
 

@@ -3631,6 +3631,21 @@ final class AppState: ObservableObject {
         settings.tunEnabled && runtimeTunInConfig
     }
 
+    /// Set `runtimeTunInConfig` / elevate flags before writing yaml or running `mihomo -t`.
+    /// Returns whether core should start elevated (user wants TUN).
+    @discardableResult
+    private func prepareTunForCoreStart() -> Bool {
+        guard settings.tunEnabled else {
+            runtimeTunInConfig = false
+            requestElevatedCoreStart = false
+            return false
+        }
+        // Clash Verge style: if user wants TUN, always try elevate (install helper once if needed).
+        requestElevatedCoreStart = true
+        runtimeTunInConfig = TunPrivilege.isReady
+        return true
+    }
+
     /// Rules written to mihomo — prepend (Merge) + base + optional video-ad REJECT.
     func effectiveRuntimeRules() -> [String] {
         RuntimeRules.effective(
@@ -4144,8 +4159,11 @@ final class AppState: ObservableObject {
                 if nodes.isEmpty { reloadNodesFromDiskIfNeeded() }
             }
 
-            await writeConfigAndWait()
             await ensureGeoDataReady(progress: true)
+            // Resolve whether yaml should include `tun:` before mihomo -t (helper installed → include now).
+            var useRoot = prepareTunForCoreStart()
+            let wantTUN = settings.tunEnabled
+            await writeConfigAndWait()
 
             // Quick syntax/loop check via mihomo -t before we elevate / spawn.
             if let testErr = await Self.mihomoConfigTestError() {
@@ -4167,22 +4185,6 @@ final class AppState: ObservableObject {
 
             var attempt = 0
             var lastFailDetail = ""
-            // Clash Verge style: if user wants TUN, always try elevate (install helper once if needed).
-            // Bug was: requestElevatedCoreStart only set on toggle → restart dropped TUN from yaml
-            // while UI still showed TUN on → Telegram MTProto UDP bypassed SOCKS and spun forever.
-            if settings.tunEnabled {
-                requestElevatedCoreStart = true
-                if TunPrivilege.isReady {
-                    runtimeTunInConfig = true
-                }
-            }
-            let wantTUN = settings.tunEnabled
-            var useRoot = wantTUN
-            if settings.tunEnabled, !useRoot {
-                runtimeTunInConfig = false
-            } else if wantTUN {
-                runtimeTunInConfig = true
-            }
             var didElevate = false
             while attempt < 3 {
                 attempt += 1
@@ -4221,6 +4223,10 @@ final class AppState: ObservableObject {
                     if useRoot {
                         didElevate = true
                         requestElevatedCoreStart = false
+                        if !runtimeTunInConfig {
+                            runtimeTunInConfig = true
+                            writeConfig()
+                        }
                     }
                     statusText = attempt == 1 ? "正在启动内核…" : "正在以修复配置重启内核…"
                 }
@@ -4435,13 +4441,21 @@ final class AppState: ObservableObject {
 
     private static func isGeoRelatedConfigError(_ message: String) -> Bool {
         let lower = message.lowercased()
-        return lower.contains("geosite")
+        if lower.contains("geosite")
             || lower.contains("geoip")
             || lower.contains("geo site")
             || lower.contains("geoip.dat")
             || lower.contains("geosite.dat")
             || lower.contains("geoip.metadb")
-            || message.contains("地理")
+            || message.contains("地理") {
+            return true
+        }
+        // mihomo often prints only "configuration file … test failed" when geo DBs are missing.
+        if !GeoDataBootstrap.isReady(),
+           lower.contains("test failed") || lower.contains("configuration file") {
+            return true
+        }
+        return false
     }
 
     /// Run `mihomo -t` so proxy-group loops / bad YAML fail before elevate.
@@ -4464,15 +4478,31 @@ final class AppState: ObservableObject {
             p.waitUntilExit()
             guard p.terminationStatus != 0 else { return nil }
             let raw = String(data: err.fileHandleForReading.readDataToEndOfFile() + out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let line = raw.split(separator: "\n").reversed().first(where: {
+            let lines = raw
+                .split(separator: "\n")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let meaningful = lines.filter {
                 $0.localizedCaseInsensitiveContains("err")
                     || $0.localizedCaseInsensitiveContains("loop")
                     || $0.localizedCaseInsensitiveContains("parse")
                     || $0.localizedCaseInsensitiveContains("fail")
-            }).map(String.init) ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            let clipped = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !clipped.isEmpty else { return "配置校验失败" }
-            return String(clipped.suffix(180))
+                    || $0.localizedCaseInsensitiveContains("geo")
+            }
+            let summary: String
+            if meaningful.count >= 2 {
+                summary = meaningful.suffix(2).joined(separator: " | ")
+            } else if let one = meaningful.last ?? lines.last {
+                summary = one
+            } else {
+                summary = "配置校验失败"
+            }
+            var clipped = String(summary.suffix(240)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !GeoDataBootstrap.isReady(),
+               clipped.localizedCaseInsensitiveContains("test failed") {
+                clipped += "（可能缺少 geoip/geosite）"
+            }
+            return clipped.isEmpty ? "配置校验失败" : clipped
         }.value
     }
 

@@ -243,6 +243,15 @@ enum IosDirectDomains {
         "DOMAIN-SUFFIX,zijieapi.com,DIRECT",
         "DOMAIN-SUFFIX,ecombdapi.com,DIRECT",
         "DOMAIN-SUFFIX,amemv.com,DIRECT",
+        "DOMAIN,zjcdn.com,DIRECT",
+        "DOMAIN-SUFFIX,zjcdn.com,DIRECT",
+        "DOMAIN-SUFFIX,bytecdn.com,DIRECT",
+        "DOMAIN-SUFFIX,douyinstatic.com,DIRECT",
+        "DOMAIN-SUFFIX,idouyinvod.com,DIRECT",
+        "DOMAIN-SUFFIX,ixiguavideo.com,DIRECT",
+        "DOMAIN-SUFFIX,bytednsdoc.com,DIRECT",
+        "DOMAIN-SUFFIX,toutiaocloud.cn,DIRECT",
+        "DOMAIN-SUFFIX,bytedanceapi.com,DIRECT",
         "DOMAIN-SUFFIX,douyin.com,DIRECT",
         "DOMAIN-SUFFIX,douyincdn.com,DIRECT",
         "DOMAIN-SUFFIX,douyinpic.com,DIRECT",
@@ -270,7 +279,7 @@ enum IosDirectDomains {
         "DOMAIN-KEYWORD,amemv,DIRECT",
         "DOMAIN-KEYWORD,zijieapi,DIRECT",
         // 不用 DOMAIN-KEYWORD,snssdk — 会误伤 isnssdk / sgsnssdk（TikTok）
-    ]
+    ] + DomesticBypassRoutes.ipDirectRules
 
     /// Highest priority on iOS — WeChat image/voice upload uses CDN domains + bare IPs.
     /// Missing these → MATCH,PROXY → overseas node → 图片/文件发不出去.

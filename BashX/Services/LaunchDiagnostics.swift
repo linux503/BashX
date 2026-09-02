@@ -5,6 +5,8 @@ import Foundation
 enum LaunchDiagnostics {
     static var logURL: URL { Paths.supportDir.appendingPathComponent("launch.log") }
     private static let maxLogBytes = 512 * 1024
+    private static var lastErrorLine = ""
+    private static var lastErrorTime: TimeInterval = 0
 
     static func beginSession() {
         append("=== BashX \(AppVersion.display) · \(ISO8601DateFormatter().string(from: Date())) ===")
@@ -15,6 +17,10 @@ enum LaunchDiagnostics {
     }
 
     static func error(_ message: String) {
+        let now = Date().timeIntervalSince1970
+        if message == lastErrorLine, now - lastErrorTime < 12 { return }
+        lastErrorLine = message
+        lastErrorTime = now
         append("[ERROR] \(message)")
     }
 

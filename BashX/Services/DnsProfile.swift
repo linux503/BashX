@@ -351,10 +351,7 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
         ] {
             policy[suffix] = foreignNS
         }
-        for suffix in [
-            "+.snssdk.com", "+.douyin.com", "+.douyincdn.com", "+.bytedance.com",
-            "+.amemv.com", "+.zijieapi.com", "+.byteimg.com", "+.pstatp.com",
-        ] {
+        for suffix in DomesticBypassRoutes.douyinDomainSuffixes.map({ "+.\($0)" }) {
             policy[suffix] = cnNS
         }
         for suffix in googleDnsPolicy.keys {
@@ -390,6 +387,7 @@ enum DnsPreference: String, Codable, CaseIterable, Identifiable {
             "+.jd.com", "+.pinduoduo.com", "+.yangkeduo.com", "+.vip.com",
             "+.bilibili.com", "+.zhihu.com",
             "+.douyin.com", "+.douyincdn.com", "+.bytedance.com", "+.zijieapi.com", "+.amemv.com", "+.byteimg.com", "+.snssdk.com", "+.xiaohongshu.com", "+.xhscdn.com", "+.xhslink.com", "+.meituan.com", "+.ctrip.com",
+        ] + DomesticBypassRoutes.douyinDomainSuffixes.map({ "+.\($0)" }) + [
             "localhost.ptlogin2.qq.com",
             "+.stun.*.*", "lens.l.google.com",
             // TikTok intl stays on fake-ip (not listed). snssdk.com = 抖音 → real IP above.
