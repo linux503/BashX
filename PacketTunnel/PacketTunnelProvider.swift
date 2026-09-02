@@ -399,7 +399,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             settings.ipv6Settings = ipv6
 
             let dns = NEDNSSettings(servers: [AppConstants.tunDNS])
-            dns.matchDomains = [""]
+            // Split DNS: domestic apps (抖音/淘宝/微信) use system DNS → real CN IP → excludedRoutes bypass TUN.
+            // Full hijack (matchDomains=[""]) forced all DNS + video through gVisor → jetsam → idleTimeout flap.
+            dns.matchDomains = DomesticBypassRoutes.tunnelDNSMatchDomains
             settings.dnsSettings = dns
         } else {
             // HTTP 代理实验：不全量接管路由（≠ TUN）。
@@ -653,8 +655,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         keepaliveTimer?.cancel()
         coreDeadStreak = 0
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        // ~20s: stay under NE idle without waking the core too often (RSS).
-        timer.schedule(deadline: .now() + 10, repeating: 20)
+        // ~15s: NE idleTimeout during Douyin if gap > ~30s. Must pulse even under RSS pressure.
+        timer.schedule(deadline: .now() + 8, repeating: 15)
         timer.setEventHandler { [weak self] in
             guard let self, self.proxyStarted else { return }
             #if canImport(MihomoCore)
@@ -676,13 +678,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 Self.localAPISession().dataTask(with: req).resume()
             }
-            // 2) Always inject a tiny TUN DNS packet — skipping this under Douyin RSS
-            //    used to cause idleTimeout right when video paused / app backgrounded.
+            // 2) Inject bridge packet + real packetFlow pulse — NE idle only counts packetFlow traffic.
+            // Skipping pulse when RSS>30MB caused idleTimeout → 抖音「无网络」→ VPN auto-reconnect.
             self.packetBridge?.injectDNSKeepalive(to: AppConstants.tunDNS)
-            // Extra NWConnection pulse only when RSS is comfortable (avoids socket churn).
-            if Self.residentMemoryBytes() <= 30 * 1024 * 1024 {
-                self.pulseTunnelDNS()
-            }
+            self.pulseTunnelDNS()
         }
         timer.resume()
         keepaliveTimer = timer

@@ -3,7 +3,30 @@ import Foundation
 /// Domestic CDN CIDRs bypassed at the NE layer (`excludedRoutes`) and in mihomo (`route-exclude-address`).
 /// Video/image traffic never enters packetFlow → avoids jetsam on 抖音 / 淘宝 / WeChat.
 enum DomesticBypassRoutes {
-    static let ipv4CIDRs: [String] = [
+    /// Broad mainland ISP aggregates (/10) — Douyin CDN IPs often land outside /16 lists.
+    /// Avoid 103.x / 45.x / 47.x (common HK/SG proxy node ranges).
+    private static let mainlandAggregateCIDRs: [String] = [
+        "106.0.0.0/10", "110.0.0.0/10", "111.0.0.0/10", "112.0.0.0/10",
+        "113.0.0.0/10", "114.0.0.0/10", "115.0.0.0/10", "116.0.0.0/10",
+        "117.0.0.0/10", "118.0.0.0/10", "119.0.0.0/10", "120.0.0.0/10",
+        "121.0.0.0/10", "122.0.0.0/10", "123.0.0.0/10", "124.0.0.0/10",
+        "125.0.0.0/10",
+        "27.16.0.0/12", "36.0.0.0/11", "39.0.0.0/11", "42.0.0.0/11",
+        "49.0.0.0/11", "58.0.0.0/11", "59.0.0.0/11", "60.0.0.0/11",
+        "61.0.0.0/11", "101.0.0.0/11",
+        "171.16.0.0/12", "175.0.0.0/11",
+        "180.0.0.0/11", "182.0.0.0/11", "183.0.0.0/11",
+        "202.0.0.0/11", "203.0.0.0/11", "210.0.0.0/11",
+        "218.0.0.0/11", "219.0.0.0/11", "220.0.0.0/11",
+        "221.0.0.0/11", "222.0.0.0/11", "223.0.0.0/11",
+    ]
+
+    static let ipv4CIDRs: [String] = {
+        var seen = Set<String>()
+        return (granularCIDRs + mainlandAggregateCIDRs).filter { seen.insert($0).inserted }
+    }()
+
+    private static let granularCIDRs: [String] = [
         // Tencent / WeChat
         "1.12.0.0/14",
         "14.17.0.0/16", "14.18.0.0/16", "14.19.0.0/16", "14.116.0.0/16",
@@ -59,6 +82,43 @@ enum DomesticBypassRoutes {
         "ixigua.com", "toutiao.com", "toutiaovod.com", "toutiaostatic.com",
         "huoshan.com", "huoshanstatic.com", "volces.com", "volccdn.com",
         "ulikecam.com", "faceu.mobi", "bytedanceapi.com",
+    ]
+
+    /// NE split-DNS: only foreign/proxy domains use tunnel DNS. Domestic (抖音/淘宝/微信) → system DNS.
+    static let tunnelDNSMatchDomains: [String] = [
+        "google.com", "google.com.hk", "google.cn", "googleapis.com", "googleapis.cn",
+        "gstatic.com", "gstatic.cn", "googleusercontent.com", "googlesyndication.com",
+        "googlevideo.com", "youtube.com", "youtu.be", "ytimg.com", "ggpht.com",
+        "gmail.com", "android.com", "gvt1.com", "gvt2.com", "googleadservices.com",
+        "twitter.com", "x.com", "twimg.com", "t.co",
+        "facebook.com", "fbcdn.net", "instagram.com", "cdninstagram.com",
+        "whatsapp.com", "whatsapp.net", "whatsapp.biz",
+        "telegram.org", "telegram-cdn.org", "cdn-telegram.org", "telesco.pe", "t.me",
+        "graph.org", "tdesktop.com",
+        "discord.com", "discordapp.com",
+        "github.com", "githubusercontent.com", "githubassets.com",
+        "cursor.sh", "cursor.com", "cursorapi.com", "cursor-cdn.com", "cursorvm.com",
+        "anysphere.co", "anysphere.com", "anysphere.tech",
+        "openai.com", "chatgpt.com", "anthropic.com", "claude.ai", "copilot.microsoft.com",
+        "bing.com", "live.com", "microsoft.com", "microsoftonline.com", "office.com",
+        "office365.com", "outlook.com", "sharepoint.com", "azure.com", "windows.net",
+        "cloudflare.com", "cloudflare-dns.com",
+        "netflix.com", "nflxvideo.net", "nflximg.net", "nflxso.net",
+        "tiktok.com", "tiktok-row.net", "tiktokv.com", "tiktokv.us", "tiktokv.eu",
+        "tiktokcdn.com", "tiktokcdn-us.com", "tiktokcdn-eu.com", "byteoversea.com",
+        "byteoversea.net", "isnssdk.com", "sgsnssdk.com", "ibyteimg.com", "ibytedtos.com",
+        "binance.com", "binance.me", "binancezh.com", "bnbstatic.com", "binanceapi.com",
+        "htx.com", "huobi.com", "huobi.pro", "hbfile.net", "huobicdn.com",
+        "reddit.com", "redd.it", "redditmedia.com",
+        "spotify.com", "scdn.co",
+        "twitch.tv", "ttvnw.net", "jtvnw.net",
+        "steamcommunity.com", "steampowered.com", "steamstatic.com",
+        "cloudfront.net", "amazonaws.com", "awsstatic.com",
+        "wikipedia.org", "wikimedia.org",
+        "dropbox.com", "dropboxusercontent.com",
+        "medium.com", "substack.com",
+        "nytimes.com", "wsj.com", "bbc.com", "bbc.co.uk",
+        "cloudflareclient.com", "1dot1dot1dot1.cloudflare-dns.com",
     ]
 
     /// mihomo IP-CIDR rules for bare-IP dials (video CDN often skips SNI).
